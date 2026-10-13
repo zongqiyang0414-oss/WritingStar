@@ -17,7 +17,7 @@ function checked(event: Event) {
 <template>
   <view class="prototype-tools">
     <view class="prototype-tools-heading">
-      <text>原型展示 · v0.3.1</text>
+      <text>原型展示 · v0.4</text>
       <button class="text-button" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? '收起设置' : '展示设置' }} {{ expanded ? '−' : '＋' }}</button>
     </view>
     <view v-if="expanded" class="prototype-tools-body">

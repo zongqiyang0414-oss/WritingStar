@@ -1,7 +1,7 @@
 export type Role = 'teacher' | 'parent' | 'student';
 export type Category = 'handwriting' | 'composition';
 export type DimensionId = 'intuitive' | 'imaginal' | 'logical' | 'dialectical' | 'creative';
-export type Screen = 'home' | 'statistics' | 'assignment' | 'review' | 'submit' | 'feedback' | 'records' | 'profile' | 'create';
+export type Screen = 'home' | 'statistics' | 'statisticsStudents' | 'statisticsStudent' | 'assignment' | 'review' | 'submit' | 'feedback' | 'records' | 'profile' | 'create';
 export interface Dimension { id: DimensionId; name: string; max: number; description: string }
 export interface Evaluation { scores: Record<DimensionId, number | null>; comments: Record<DimensionId, string>; summary: string }
 export interface Review { handwriting: Evaluation; composition: Evaluation; nextSteps: string; rubricVersion: string }

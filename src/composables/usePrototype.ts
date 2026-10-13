@@ -5,7 +5,7 @@ import { presentReview } from '../services/presentation';
 import { createSeed, demoPhotos } from '../services/seed';
 import { emptyReview, rubric, total, validateReview } from '../services/rubric';
 import { activeCounts, assignmentCounts, classAssignments, latestSubmission, taskStatus, taskStatuses } from '../services/school';
-import type { Assignment, Category, DimensionId, Photo, Review, Role, Screen, Submission } from '../services/model';
+import type { Assignment, Category, DimensionId, Photo, Review, Role, Screen, Student, Submission } from '../services/model';
 
 export function usePrototype() {
   let service: ReturnType<typeof createPrototypeService> | null = null;
@@ -17,6 +17,9 @@ export function usePrototype() {
   const selectedClassId = ref('class-1');
   const newClassId = ref('class-1');
   const statisticsPanel = ref<'students' | 'assignments'>('students');
+  const analyticsSearch = ref('');
+  const rankingCategory = ref<Category>('handwriting');
+  const analyticsStudentId = ref('');
   const assignmentPeriod = ref<'ongoing' | 'closed'>('ongoing');
   const detailReturn = ref<Screen>('home');
   const feedbackReturn = ref<Screen>('assignment');
@@ -62,10 +65,10 @@ export function usePrototype() {
   const feedback = computed(() => selectedSubmission.value?.published ? presentReview(selectedSubmission.value.published) : null);
   const dirty = computed(() => screen.value === 'review' && selectedSubmission.value?.status === 'pending' && JSON.stringify(review.value) !== reviewBaseline.value);
   const canSubmit = computed(() => (!mine.value || mine.value.status === 'published') && !expired(selectedAssignment.value));
-  const title = computed(() => ({home: isTeacher.value ? '工作台' : '我的任务',statistics:'学情',assignment:'作业详情',review:'双写批阅',submit:mine.value ? '提交订正' : '提交作品',feedback:'老师的反馈',records:'作品记录',profile:'我的',create:'布置双写作业'}[screen.value]));
+  const title = computed(() => ({home: isTeacher.value ? '工作台' : '我的任务',statistics:'学情',statisticsStudents:'全班学生学情',statisticsStudent:'学生成长',assignment:'作业详情',review:'双写批阅',submit:mine.value ? '提交订正' : '提交作品',feedback:'老师的反馈',records:'作品记录',profile:'我的',create:'布置双写作业'}[screen.value]));
   const rootScreens: Screen[] = ['home', 'statistics', 'profile', 'records'];
   const isRoot = computed(() => rootScreens.includes(screen.value) && (screen.value !== 'records' || !isTeacher.value));
-  const activeTab = computed(() => screen.value === 'statistics' ? 'statistics' : screen.value === 'profile' ? 'profile' : screen.value === 'records' && !isTeacher.value ? 'records' : 'home');
+  const activeTab = computed(() => screen.value.startsWith('statistics') ? 'statistics' : screen.value === 'profile' ? 'profile' : screen.value === 'records' && !isTeacher.value ? 'records' : 'home');
   const studentsInAssignment = computed(() => state.value.students.filter(st => st.classId === selectedAssignment.value.classId).map(st => ({...st,submission:latest(assignmentId.value,st.id)})).filter(st => filter.value === '全部' || taskStatus(st.submission) === filter.value));
   function latest(a: string, student: string): Submission | null {return latestSubmission(state.value, a, student);}
   function counts(a: Assignment) {return assignmentCounts(state.value, a);}
@@ -80,8 +83,9 @@ export function usePrototype() {
   function navigate(next: Screen) {screen.value=next;error.value='';filter.value='全部';uni.pageScrollTo({scrollTop:0,duration:0});}
   function guard(action: () => void) {if(busy.value)return;if(dirty.value)modal.value={title:'还有未保存的修改',body:'离开后，未保存的评分和评语会丢失。你可以取消并先保存草稿。',confirm:'放弃修改',action};else action();}
   function go(next: Screen) {guard(() => {if(next==='create')newClassId.value=currentClass.value.id; navigate(next);});}
-  function back() {go(screen.value==='review' || screen.value==='submit' ? 'assignment' : screen.value==='feedback' ? feedbackReturn.value : screen.value==='records' && isTeacher.value ? 'feedback' : screen.value==='assignment' ? detailReturn.value : 'home');}
-  function switchClass(id: string) {if(!state.value.classes.some(c => c.id===id))return;guard(() => {selectedClassId.value=id;assignmentPeriod.value='ongoing';const a=classAssignments(state.value,id)[0];if(a)assignmentId.value=a.id;error.value='';uni.pageScrollTo({scrollTop:0,duration:0});});}
+  function back() {go(screen.value==='statisticsStudent' ? 'statisticsStudents' : screen.value==='statisticsStudents' ? 'statistics' : screen.value==='review' || screen.value==='submit' ? 'assignment' : screen.value==='feedback' ? feedbackReturn.value : screen.value==='records' && isTeacher.value ? 'feedback' : screen.value==='assignment' ? detailReturn.value : 'home');}
+  function switchClass(id: string) {if(!state.value.classes.some(c => c.id===id))return;guard(() => {selectedClassId.value=id;assignmentPeriod.value='ongoing';analyticsSearch.value='';analyticsStudentId.value='';const a=classAssignments(state.value,id)[0];if(a)assignmentId.value=a.id;error.value='';uni.pageScrollTo({scrollTop:0,duration:0});});}
+  function openStudentAnalytics(student: Student) {if(!isTeacher.value || student.classId!==currentClass.value.id)return;guard(() => {analyticsStudentId.value=student.id;navigate('statisticsStudent');});}
   function switchRole(next: Role) {if(next===role.value)return;guard(() => {role.value=next;navigate('home');});}
   function openAssignment(a: Assignment) {guard(() => {detailReturn.value=screen.value==='statistics' ? 'statistics' : 'home';assignmentId.value=a.id;navigate('assignment');});}
   function openReview(s: Submission) {guard(() => {submissionId.value=s.id;assignmentId.value=s.assignmentId;review.value=presentReview(s.draft);reviewBaseline.value=JSON.stringify(review.value);category.value='handwriting';panel.value='evaluation';photoIndex.value=0;openDimension.value=null;navigate('review');});}
@@ -115,8 +119,8 @@ export function usePrototype() {
   function retry(s: Submission) {void run(async () => {await service!.finishAnalysis(s.id);notify('处理已完成，请等待老师复核');});}
   async function manual(s: Submission) {await run(async () => {await service!.manualReview(s.id,role.value);});if(!error.value)openReview(state.value.submissions.find(item => item.id===s.id)!);}
   async function createAssignment() {await run(async () => {const due=new Date(`${newDue.value}T20:00:00`);if(!Number.isFinite(due.getTime()))throw new Error('请选择有效的截止日期。');const a=await service!.createAssignment({title:newTitle.value,requirements:newRequirements.value,dueAt:due.toISOString(),classId:newClassId.value},role.value);selectedClassId.value=a.classId;assignmentPeriod.value='ongoing';detailReturn.value='home';assignmentId.value=a.id;refresh();navigate('assignment');newTitle.value='';newRequirements.value='';notify('作业已发布到'+a.className);});}
-  function reset() {modal.value={title:'重置原型数据？',body:'这会清除当前浏览器中的作业、提交、评分和订正记录，恢复初始原型。此操作不能撤销。',confirm:'确认重置',action:() => {try{uni.removeStorageSync(STORAGE_KEY);service=createPrototypeService();startupError.value='';refresh();role.value='teacher';selectedClassId.value='class-1';newClassId.value='class-1';assignmentPeriod.value='ongoing';statisticsPanel.value='students';assignmentId.value='assignment-1';submissionId.value='submission-1';navigate('home');notify('已恢复初始原型');}catch(e){startupError.value=(e as Error).message;}}};}
+  function reset() {modal.value={title:'重置原型数据？',body:'这会清除当前浏览器中的作业、提交、评分和订正记录，恢复初始原型。此操作不能撤销。',confirm:'确认重置',action:() => {try{uni.removeStorageSync(STORAGE_KEY);service=createPrototypeService();startupError.value='';refresh();role.value='teacher';selectedClassId.value='class-1';newClassId.value='class-1';assignmentPeriod.value='ongoing';statisticsPanel.value='students';analyticsSearch.value='';analyticsStudentId.value='';rankingCategory.value='handwriting';assignmentId.value='assignment-1';submissionId.value='submission-1';navigate('home');notify('已恢复初始原型');}catch(e){startupError.value=(e as Error).message;}}};}
   function assignmentAction(a: Assignment) {const s=latest(a.id,'student-1');if(s?.status==='published')openFeedback(s);else openAssignment(a);}
   onUnmounted(() => {clearTimeout(toastTimer);clearInterval(clockTimer);});
-  return {state,role,screen,category,review,panel,photoIndex,openDimension,filter,busy,error,toast,photos,note,failSubmit,failAnalysis,newTitle,newRequirements,newDue,newClassId,modal,roles,startupError,selectedAssignment,selectedSubmission,mine,isTeacher,identity,myHistory,feedback,canSubmit,title,studentsInAssignment,rubric,total,latest,expired,assignmentFor,studentFor,statusLabel,statusClass,date,go,switchRole,openAssignment,openReview,openFeedback,openSubmit,editScore,saveDraft,publish,confirmModal,addSamples,movePhoto,choosePhotos,submit,retry,manual,createAssignment,reset,assignmentAction,currentClass,classStudents,scopedAssignments,visibleAssignments,ongoingAssignments,closedAssignments,workCounts,assignmentPeriod,switchClass,counts,taskStatuses,isRoot,activeTab,back,boundStudent,now,statisticsPanel,historyStudent};
+  return {state,role,screen,category,review,panel,photoIndex,openDimension,filter,busy,error,toast,photos,note,failSubmit,failAnalysis,newTitle,newRequirements,newDue,newClassId,modal,roles,startupError,selectedAssignment,selectedSubmission,mine,isTeacher,identity,myHistory,feedback,canSubmit,title,studentsInAssignment,rubric,total,latest,expired,assignmentFor,studentFor,statusLabel,statusClass,date,go,switchRole,openAssignment,openReview,openFeedback,openSubmit,editScore,saveDraft,publish,confirmModal,addSamples,movePhoto,choosePhotos,submit,retry,manual,createAssignment,reset,assignmentAction,currentClass,classStudents,scopedAssignments,visibleAssignments,ongoingAssignments,closedAssignments,workCounts,assignmentPeriod,switchClass,counts,taskStatuses,isRoot,activeTab,back,boundStudent,now,statisticsPanel,historyStudent,analyticsSearch,rankingCategory,analyticsStudentId,openStudentAnalytics};
 }

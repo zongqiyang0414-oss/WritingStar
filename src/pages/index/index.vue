@@ -3,8 +3,10 @@ import ReviewEditor from '../../components/ReviewEditor.vue';
 import PrototypeTools from '../../components/PrototypeTools.vue';
 import ClassSelector from '../../components/ClassSelector.vue';
 import ClassStatistics from '../../components/ClassStatistics.vue';
+import StudentRanking from '../../components/StudentRanking.vue';
+import StudentGrowth from '../../components/StudentGrowth.vue';
 import { usePrototype } from '../../composables/usePrototype';
-const {state,role,screen,category,review,panel,photoIndex,openDimension,filter,busy,error,toast,photos,note,failSubmit,failAnalysis,newTitle,newRequirements,newDue,newClassId,modal,roles,startupError,selectedAssignment,selectedSubmission,mine,isTeacher,identity,myHistory,feedback,canSubmit,title,studentsInAssignment,rubric,total,latest,expired,assignmentFor,studentFor,statusLabel,statusClass,date,go,switchRole,openAssignment,openReview,openFeedback,openSubmit,editScore,saveDraft,publish,confirmModal,addSamples,movePhoto,choosePhotos,submit,retry,manual,createAssignment,reset,assignmentAction,currentClass,classStudents,scopedAssignments,visibleAssignments,ongoingAssignments,closedAssignments,workCounts,assignmentPeriod,switchClass,counts,taskStatuses,isRoot,activeTab,back,boundStudent,now,statisticsPanel,historyStudent} = usePrototype();
+const {state,role,screen,category,review,panel,photoIndex,openDimension,filter,busy,error,toast,photos,note,failSubmit,failAnalysis,newTitle,newRequirements,newDue,newClassId,modal,roles,startupError,selectedAssignment,selectedSubmission,mine,isTeacher,identity,myHistory,feedback,canSubmit,title,studentsInAssignment,rubric,total,latest,expired,assignmentFor,studentFor,statusLabel,statusClass,date,go,switchRole,openAssignment,openReview,openFeedback,openSubmit,editScore,saveDraft,publish,confirmModal,addSamples,movePhoto,choosePhotos,submit,retry,manual,createAssignment,reset,assignmentAction,currentClass,classStudents,scopedAssignments,visibleAssignments,ongoingAssignments,closedAssignments,workCounts,assignmentPeriod,switchClass,counts,taskStatuses,isRoot,activeTab,back,boundStudent,now,statisticsPanel,historyStudent,analyticsSearch,rankingCategory,analyticsStudentId,openStudentAnalytics} = usePrototype();
 </script>
 
 <template>
@@ -12,7 +14,7 @@ const {state,role,screen,category,review,panel,photoIndex,openDimension,filter,b
     <view class="desktop-intro">
       <view class="intro-brand"><view class="brand-mark">星</view><view><view class="brand-name">写字星</view><view class="eyebrow">WRITINGSTAR</view></view></view>
       <view class="intro-body"><view class="intro-kicker">把每一次书写<br />变成成长的起点</view><view class="intro-copy">写好字，也写好故事。<br />让老师的每一句建议，<br />陪伴下一次进步。</view><image class="intro-art" src="/static/growth.svg" mode="aspectFit" /></view>
-      <view class="intro-foot"><text class="tiny-dot" />原型展示 · v0.3.1</view>
+      <view class="intro-foot"><text class="tiny-dot" />原型展示 · v0.4</view>
     </view>
     <!-- #ifdef H5 -->
     <view class="mobile-preview-tools"><PrototypeTools :screen="screen" :busy="busy" v-model:fail-submit="failSubmit" v-model:fail-analysis="failAnalysis" @samples="addSamples" @reset="reset" /></view>
@@ -63,7 +65,14 @@ const {state,role,screen,category,review,panel,photoIndex,openDimension,filter,b
 
         <view v-else-if="screen==='statistics' && isTeacher" class="statistics-view">
           <ClassSelector :classes="state.classes" :model-value="currentClass.id" :disabled="busy" @update:model-value="switchClass" />
-          <ClassStatistics :state="state" :class-id="currentClass.id" :now="now" v-model:panel="statisticsPanel" @assignment="openAssignment" />
+          <ClassStatistics :state="state" :class-id="currentClass.id" :now="now" v-model:panel="statisticsPanel" @assignment="openAssignment" @students="go('statisticsStudents')" />
+        </view>
+
+        <view v-else-if="screen==='statisticsStudents' && isTeacher" class="statistics-students-view">
+          <StudentRanking :state="state" :class-id="currentClass.id" v-model:category="rankingCategory" v-model:query="analyticsSearch" @student="openStudentAnalytics" />
+        </view>
+        <view v-else-if="screen==='statisticsStudent' && isTeacher" class="statistics-student-view">
+          <StudentGrowth :state="state" :class-id="currentClass.id" :student-id="analyticsStudentId" :category="rankingCategory" />
         </view>
 
         <view v-else-if="screen==='assignment'">

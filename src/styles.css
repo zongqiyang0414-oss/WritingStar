@@ -388,6 +388,244 @@ input:focus,textarea:focus {
 .task-counts .strong {
   color:var(--ink)
 }
+.trend-heading,.trend-selected-heading,.ranking-caption {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px
+}
+.trend-card {
+  margin-top:18px
+}
+.trend-subtitle {
+  margin-top:5px;
+  font-size:11px
+}
+.trend-legend {
+  display:flex;
+  gap:20px;
+  margin-top:16px;
+  font-size:11px
+}
+.trend-legend>text,.trend-legend>uni-text {
+  display:flex;
+  align-items:center;
+  gap:6px
+}
+.composition-dot {
+  background:#bf8e45
+}
+.trend-plot-wrap {
+  position:relative;
+  margin:8px -4px 0
+}
+.trend-scroll {
+  width:100%;
+  height:210px
+}
+.trend-canvas {
+  display:block
+}
+.trend-empty {
+  position:absolute;
+  inset:40px 10px 42px 30px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  background:#ffffffeb;
+  pointer-events:none;
+  text-align:center
+}
+.trend-point-scroll {
+  width:100%;
+  margin:8px 0 12px;
+  white-space:nowrap
+}
+.trend-point-buttons {
+  display:flex;
+  gap:7px;
+  width:max-content
+}
+.trend-point-button {
+  flex-shrink:0;
+  display:flex;
+  gap:7px;
+  align-items:center;
+  border:1px solid var(--line);
+  padding:6px 9px;
+  border-radius:7px;
+  font-size:10px;
+  color:var(--muted)
+}
+.trend-point-button text,.trend-point-button uni-text {
+  display:block;
+  max-width:108px;
+  overflow:hidden;
+  text-overflow:ellipsis
+}
+.trend-point-button.active {
+  background:var(--mint);
+  color:var(--green);
+  border-color:#bdd8c8
+}
+.trend-selected {
+  border-top:1px solid var(--line);
+  padding-top:13px
+}
+.trend-selected-heading {
+  align-items:flex-start;
+  flex-wrap:wrap;
+  gap:4px
+}
+.trend-selected-heading .strong {
+  font-size:12px
+}
+.trend-values {
+  display:flex;
+  gap:25px;
+  font-size:11px;
+  color:var(--muted);
+  margin-top:7px
+}
+.trend-values .strong {
+  font-size:20px;
+  font-family:Georgia,serif;
+  color:var(--ink);
+  margin-left:7px
+}
+.trend-hint {
+  margin-top:10px
+}
+.students-entry {
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  text-align:left;
+  background:#e8f2ec;
+  border-color:#d7e8dc
+}
+.students-entry .small {
+  margin-top:5px
+}
+.entry-arrow {
+  color:var(--green);
+  font-size:22px;
+  flex-shrink:0
+}
+.analytics-page-intro {
+  margin:6px 0 22px
+}
+.analytics-page-intro .detail-title {
+  font-size:22px;
+  margin-top:7px
+}
+.student-search {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  border:1px solid var(--line);
+  border-radius:11px;
+  background:#fff;
+  padding:12px 14px;
+  margin-bottom:18px
+}
+.search-symbol {
+  font-size:23px;
+  color:var(--muted);
+  line-height:1
+}
+.student-search input,.student-search uni-input {
+  flex:1;
+  min-width:0;
+  font-size:13px;
+  height:24px
+}
+.search-clear {
+  font-size:11px;
+  color:var(--green)
+}
+.ranking-caption {
+  margin:20px 0 12px
+}
+.ranking-row {
+  width:100%;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  text-align:left;
+  padding:16px 13px
+}
+.rank-number {
+  font-size:16px;
+  color:var(--muted);
+  width:22px;
+  flex-shrink:0;
+  text-align:center;
+  font-family:Georgia,serif
+}
+.rank-number.rank-leading {
+  color:#a78146
+}
+.ranking-row .avatar {
+  width:34px;
+  height:34px;
+  font-size:14px;
+  flex-shrink:0
+}
+.ranking-student .tiny {
+  margin-top:4px
+}
+.ranking-score {
+  text-align:right;
+  flex-shrink:0
+}
+.ranking-score .strong {
+  font:600 22px Georgia,serif
+}
+.student-growth-heading {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin:6px 0 20px
+}
+.student-growth-heading .detail-title {
+  font-size:22px
+}
+.growth-rank {
+  text-align:right
+}
+.growth-averages {
+  margin:0;
+  padding:17px 19px
+}
+.attempt-date {
+  margin-top:-4px
+}
+.attempt-score-pair {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+  padding-top:13px;
+  margin-top:13px;
+  border-top:1px solid var(--line)
+}
+.attempt-score-pair>view,.attempt-score-pair>uni-view {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:5px
+}
+.attempt-score-pair .strong {
+  font:600 20px Georgia,serif
+}
+.attempt-score-pair .tiny {
+  font-family:'Microsoft YaHei',sans-serif;
+  font-weight:400
+}
 .statistics-intro {
   margin:22px 0 18px
 }
