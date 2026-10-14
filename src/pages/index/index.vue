@@ -14,7 +14,7 @@ const {state,role,screen,category,review,panel,photoIndex,openDimension,filter,b
     <view class="desktop-intro">
       <view class="intro-brand"><view class="brand-mark">星</view><view><view class="brand-name">写字星</view><view class="eyebrow">WRITINGSTAR</view></view></view>
       <view class="intro-body"><view class="intro-kicker">把每一次书写<br />变成成长的起点</view><view class="intro-copy">写好字，也写好故事。<br />让老师的每一句建议，<br />陪伴下一次进步。</view><image class="intro-art" src="/static/growth.svg" mode="aspectFit" /></view>
-      <view class="intro-foot"><text class="tiny-dot" />原型展示 · v0.4</view>
+      <view class="intro-foot"><text class="tiny-dot" />原型展示 · v0.4.2</view>
     </view>
     <!-- #ifdef H5 -->
     <view class="mobile-preview-tools"><PrototypeTools :screen="screen" :busy="busy" v-model:fail-submit="failSubmit" v-model:fail-analysis="failAnalysis" @samples="addSamples" @reset="reset" /></view>

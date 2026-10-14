@@ -2,6 +2,7 @@ import type { Assignment, Photo, PrototypeState, Review, Role, StorageAdapter, S
 import { createSeed, sampleReview } from './seed';
 import { emptyReview, validateReview } from './rubric';
 import { upgradeState } from './migration';
+import { fillClassPractice } from './classPractice';
 export const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 export class MockService {
   private state: PrototypeState;
@@ -75,5 +76,6 @@ export class MockService {
     const next=this.read(); const assignment: Assignment={...input,title:input.title.trim(), requirements:input.requirements.trim(), id:`assignment-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,className:schoolClass.name,createdAt:this.clock().toISOString()};
     next.assignments.unshift(assignment); this.commit(next); return clone(assignment);
   }
-  reset() { const next=createSeed(this.clock()); this.commit(next); }
+  prepareClassPractice() { const next=fillClassPractice(this.state, this.clock()); if (next !== this.state) this.commit(next); }
+  reset() { const next=createSeed(this.clock()); this.commit(this.state.classPracticeVersion ? fillClassPractice(next, this.clock()) : next); }
 }

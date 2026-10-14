@@ -15,7 +15,7 @@ export interface Submission {
 export interface SchoolClass { id: string; name: string }
 export interface Assignment { id: string; title: string; classId: string; className: string; dueAt: string; requirements: string; createdAt: string }
 export interface Student { id: string; name: string; classId: string; className: string; initial: string }
-export interface PrototypeState { schemaVersion: 2; classes: SchoolClass[]; assignments: Assignment[]; students: Student[]; submissions: Submission[] }
+export interface PrototypeState { schemaVersion: 2; classPracticeVersion?: 1; classes: SchoolClass[]; assignments: Assignment[]; students: Student[]; submissions: Submission[] }
 export interface LegacyPrototypeState { schemaVersion: 1; assignments: Omit<Assignment, 'classId'>[]; students: Omit<Student, 'classId'>[]; submissions: Submission[] }
 export type PersistedState = PrototypeState | LegacyPrototypeState;
 export interface StorageAdapter { read(): PersistedState | null; write(state: PrototypeState): void }

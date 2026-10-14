@@ -14,12 +14,12 @@ const counts = (a: Assignment) => assignmentCounts(props.state, a);
 </script>
 
 <template>
+  <view class="statistics-overview card"><view><view class="stat-number">{{ reports.length }}<text class="stat-unit">人</text></view><view class="small subtle">班级学生</view></view><view><view class="stat-number">{{ ongoing }}<text class="stat-unit">项</text></view><view class="small subtle">进行中作业</view></view><view><view class="stat-number">{{ assignments.length - ongoing }}<text class="stat-unit">项</text></view><view class="small subtle">已截止作业</view></view></view>
   <view class="segmented"><button :class="{active:panel==='students'}" @click="emit('update:panel','students')">学生学情</button><button :class="{active:panel==='assignments'}" @click="emit('update:panel','assignments')">作业统计</button></view>
   <template v-if="panel==='students'">
     <ScoreTrend :points="trend" title="班级平均分趋势" subtitle="按作业顺序，查看全班书写与写作的变化" />
     <button class="students-entry card" @click="emit('students')"><view><view class="strong">查看全班学生学情</view><view class="small subtle">{{ reports.length }} 位学生 · 均分排名与个人成长</view></view><text class="entry-arrow">›</text></button>
     <view class="small subtle statistics-note">每份作业按每名学生最近一次已发布成绩计算班级均分。未提交和未发布的成绩不参与，点击图下作业可查看参与人数。</view>
-    <view class="statistics-overview card"><view><view class="stat-number">{{ reports.length }}<text class="stat-unit">人</text></view><view class="small subtle">班级学生</view></view><view><view class="stat-number">{{ ongoing }}<text class="stat-unit">项</text></view><view class="small subtle">进行中作业</view></view><view><view class="stat-number">{{ assignments.length - ongoing }}<text class="stat-unit">项</text></view><view class="small subtle">已截止作业</view></view></view>
   </template>
   <template v-else>
     <view class="small subtle statistics-note">每项作业按学生最新一次提交统计；重新提交的作品计入待批阅。</view>

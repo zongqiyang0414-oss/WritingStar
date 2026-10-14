@@ -7,12 +7,17 @@ export interface TrendPoint {
   label: string;
   shortLabel?: string;
   note: string;
+  detail?: string;
   handwriting: number | null;
   composition: number | null;
 }
 function average(values: (number | null)[]) {
   const scores = values.filter((n): n is number => n !== null);
   return scores.length ? Math.round(scores.reduce((sum, n) => sum + n, 0) / scores.length * 10) / 10 : null;
+}
+function date(value: string, withTime = false) {
+  const d = new Date(value);
+  return `${d.getMonth()+1}月${d.getDate()}日` + (withTime ? ` ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : '');
 }
 
 // A class trend compares assignments in teaching order. Revisions contribute once per student.
@@ -23,6 +28,7 @@ export function classTrend(state: PrototypeState, classId: string): TrendPoint[]
       s.studentId === student.id && s.published).sort((a, b) => b.version - a.version)[0]?.published)
       .filter(review => !!review);
     return {id: assignment.id, label: assignment.title, note: `已发布 ${reviews.length} / ${students.length} 人`,
+      detail: `布置：${date(assignment.createdAt)} · 截止：${date(assignment.dueAt)}`,
       handwriting: average(reviews.map(r => total(r.handwriting))),
       composition: average(reviews.map(r => total(r.composition)))};
   });
@@ -58,5 +64,6 @@ export function studentAttempts(state: PrototypeState, classId: string, studentI
 export function studentTrend(state: PrototypeState, classId: string, studentId: string): TrendPoint[] {
   return studentAttempts(state, classId, studentId).map(s => ({id: s.id, label: s.assignment.title, shortLabel: `第 ${s.version} 版`,
     note: `第 ${s.version} 版 · ${s.published ? '已发布成绩' : '待发布成绩'}`,
+    detail: `提交：${date(s.submittedAt, true)}`,
     handwriting: s.handwriting, composition: s.composition}));
 }
