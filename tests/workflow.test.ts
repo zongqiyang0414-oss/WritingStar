@@ -1,29 +1,285 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { MockService, clone } from '../src/services/mock';
-import { sampleReview, demoPhotos } from '../src/services/seed';
-import { rubric, total, validateReview } from '../src/services/rubric';
-import type { PrototypeState } from '../src/services/model';
-import { presentReview } from '../src/services/presentation';
-function setup() {let saved: PrototypeState|null=null;const storage={read:() => clone(saved),write:(s:PrototypeState) => {saved=clone(s);}};const clock=() => new Date('2026-10-12T10:00:00+08:00');return {service:new MockService(storage,clock),storage,clock};}
-test('量表保留两套五维和百分制',() => {assert.deepEqual(rubric.handwriting.map(d=>d.max),[10,60,10,10,10]);assert.deepEqual(rubric.composition.map(d=>d.max),[10,20,30,20,20]);assert.equal(total(sampleReview().handwriting),81);assert.equal(total(sampleReview().composition),81);});
-test('教师草稿刷新后保留，发布前对学生不可见',async () => {const {service,storage,clock}=setup();const r=sampleReview();r.handwriting.scores.intuitive=9;await service.saveDraft('submission-1',r,'teacher');assert.equal(service.feedback('submission-1','student'),null);const reloaded=new MockService(storage,clock);assert.equal(reloaded.read().submissions[0].draft.handwriting.scores.intuitive,9);await reloaded.publish('submission-1',r,'teacher');assert.equal(total(reloaded.feedback('submission-1','parent')!.handwriting),82);r.handwriting.scores.intuitive=0;assert.equal(total(reloaded.feedback('submission-1','student')!.handwriting),82);});
-test('越界、缺维、非数值和版本冲突禁止发布',async () => {const {service}=setup();for(const value of [11,-1,null,Number.NaN,Number.POSITIVE_INFINITY]){const r=sampleReview();r.handwriting.scores.intuitive=value;assert.ok(validateReview(r));await assert.rejects(service.publish('submission-1',r,'teacher'));}const r=sampleReview();delete (r.handwriting.scores as Partial<typeof r.handwriting.scores>).logical;assert.ok(validateReview(r));r.rubricVersion='wrong';assert.ok(validateReview(r));assert.equal(service.read().submissions[0].status,'pending');});
-test('演示服务拒绝家长改分和发布',async () => {const {service}=setup();await assert.rejects(service.saveDraft('submission-1',sampleReview(),'parent'));await assert.rejects(service.publish('submission-1',sampleReview(),'student'));});
-test('订正按用户页序保存，不覆盖旧作品，禁止重复提交',async () => {const {service}=setup();await service.publish('submission-1',sampleReview(),'teacher');const s=await service.submit('assignment-1',[demoPhotos[1],demoPhotos[0]],'已订正','parent');assert.equal(s.version,2);assert.deepEqual(s.photos.map(p=>p.id),['sample-2','sample-1']);assert.equal(service.read().submissions.length,2);assert.ok(service.read().submissions[0].published);await assert.rejects(service.submit('assignment-1',demoPhotos,'','student'));await service.finishAnalysis(s.id);assert.equal(service.latest('assignment-1','student-1')!.status,'pending');assert.equal(service.feedback(s.id,'student'),null);});
-test('真实选择图片不会得到伪造的 AI 分数',async () => {const {service}=setup();await service.publish('submission-1',sampleReview(),'teacher');const s=await service.submit('assignment-1',[{id:'local',url:'data:image/png;base64,example',name:'我的图片',sample:false}],'','student');await service.finishAnalysis(s.id);assert.equal(total(service.latest('assignment-1','student-1')!.draft.handwriting),null);await assert.rejects(service.publish(s.id,service.latest('assignment-1','student-1')!.draft,'teacher'));});
-test('模拟提交失败不写入假记录，分析失败可人工恢复',async () => {const {service}=setup();await service.publish('submission-1',sampleReview(),'teacher');await assert.rejects(service.submit('assignment-1',demoPhotos,'','parent',true));assert.equal(service.read().submissions.length,1);const s=await service.submit('assignment-1',demoPhotos,'','parent');await service.finishAnalysis(s.id,true);assert.equal(service.latest('assignment-1','student-1')!.status,'failed');await service.manualReview(s.id,'teacher');assert.equal(service.latest('assignment-1','student-1')!.status,'pending');assert.equal(total(service.latest('assignment-1','student-1')!.draft.composition),null);});
-test('保存失败不改变内存状态',async () => {let fail=false;let saved:PrototypeState|null=null;const service=new MockService({read:()=>saved,write:s=>{if(fail)throw new Error('存储满');saved=clone(s);}});fail=true;await assert.rejects(service.publish('submission-1',sampleReview(),'teacher'),/存储满/);assert.equal(service.read().submissions[0].status,'pending');assert.equal(service.feedback('submission-1','parent'),null);});
-test('新作业可以提交，截止、空图片和重复图片均阻止提交',async () => {const {service}=setup();const a=await service.createAssignment({title:'新的作业',requirements:'写一件小事',dueAt:'2026-10-13T20:00:00+08:00',classId:'class-1'},'teacher');await assert.rejects(service.submit(a.id,[],'','student'));await assert.rejects(service.submit(a.id,[demoPhotos[0],demoPhotos[0]],'','student'));const s=await service.submit(a.id,demoPhotos,'','student');assert.equal(s.version,1);await assert.rejects(service.createAssignment({title:'过期',requirements:'要求',dueAt:'2026-10-11T20:00:00+08:00',classId:'class-1'},'teacher'));});
-test('旧预置评语仅调整展示，保留已保存的分数、教师评语和反馈快照', () => {
-  const saved = sampleReview();
-  saved.handwriting.scores.intuitive = 9;
-  saved.handwriting.comments.logical = '示例提醒：左右结构注意左窄右宽，避免两部分互相挤压。';
-  saved.handwriting.comments.imaginal = '请把第三行的横画再写平一点。';
-  const before = clone(saved);
-  const displayed = presentReview(saved);
-  assert.equal(displayed.handwriting.comments.logical, '左右结构注意左窄右宽，避免两部分互相挤压。');
-  assert.equal(displayed.handwriting.comments.imaginal, before.handwriting.comments.imaginal);
-  assert.deepEqual(displayed.handwriting.scores, before.handwriting.scores);
-  assert.deepEqual(saved, before);
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { MockService } from "../src/services/mock.js";
+import {
+  createSeed,
+  sampleReview,
+  samplePhotos,
+} from "../src/services/seed.js";
+import { rubric, total } from "../src/services/rubric.js";
+const api = {
+  Service: MockService,
+  seed: createSeed,
+  review: sampleReview,
+  photos: samplePhotos,
+  total,
+  rubric,
+};
+const clone = (value) => JSON.parse(JSON.stringify(value));
+const clock = () => new Date("2026-10-15T10:00:00Z");
+function setup(initial = null) {
+  let saved = clone(initial),
+    writes = 0,
+    fail = false;
+  const storage = {
+    read: () => clone(saved),
+    write: (state) => {
+      if (fail) throw new Error("存储满");
+      saved = clone(state);
+      writes++;
+    },
+  };
+  const service = new api.Service(storage, clock);
+  return {
+    service,
+    storage,
+    writes: () => writes,
+    saved: () => clone(saved),
+    fail: (value) => {
+      fail = value;
+    },
+  };
+}
+async function bind(service, role, code) {
+  await service.signIn(role);
+  await service.bindInvitation(code, role);
+}
+function legacyState() {
+  const state = clone(api.seed(clock()));
+  state.schemaVersion = 5;
+  delete state.studentEntryVersion;
+  state.accounts = {
+    student: { signedIn: false, studentId: null },
+    parent: { signedIn: true, studentId: "student-1" },
+  };
+  state.teacherAccount = { signedIn: true, teacherId: "teacher-chen" };
+  return state;
+}
+
+test("新状态仅保留学生账户，教师任教范围与双写量表延续v0.9", async () => {
+  const { service } = setup();
+  assert.equal(service.read().schemaVersion, 6);
+  assert.deepEqual(Object.keys(service.read().accounts), ["student"]);
+  await bind(service, "teacher", "JS2026");
+  await bind(service, "student", "XS2026");
+  assert.equal(service.read().accounts.student.studentId, "student-1");
+  assert.equal(service.read().teacherAccount.teacherId, "teacher-chen");
+  assert.equal(service.read().organizations.length, 2);
+  assert.deepEqual(
+    clone(api.rubric.handwriting.map((d) => d.max)),
+    [10, 60, 10, 10, 10],
+  );
+  assert.deepEqual(
+    clone(api.rubric.composition.map((d) => d.max)),
+    [10, 20, 30, 20, 20],
+  );
+  assert.equal(api.total(api.review().handwriting), 81);
+});
+test("已移除的家长角色不能登录、绑定、读反馈或新提交", async () => {
+  const { service } = setup();
+  const before = service.read();
+  await assert.rejects(service.signIn("parent"), /教师或学生/);
+  assert.throws(() => service.previewBinding("JZ2026", "parent"), /教师或学生/);
+  await assert.rejects(
+    service.bindInvitation("JZ2026", "parent"),
+    /教师或学生/,
+  );
+  await assert.rejects(service.restartBinding("parent"), /教师或学生/);
+  assert.throws(() => service.feedback("submission-1", "parent"), /教师或学生/);
+  await assert.rejects(
+    service.submit("assignment-1", api.photos, "", "parent"),
+    /仅供学生/,
+  );
+  assert.deepEqual(clone(service.read()), clone(before));
+});
+test("仅旧家长已绑定时迁入学生端，原图、评分、反馈与订正刷新保留", async () => {
+  const previous = legacyState();
+  const review = clone(api.review());
+  review.handwriting.scores.intuitive = 9;
+  review.nextSteps = "保留原建议。";
+  Object.assign(previous.submissions[0], {
+    actor: "parent",
+    status: "published",
+    draft: clone(review),
+    published: clone(review),
+    publishedAt: clock().toISOString(),
+    note: "原说明",
+    photos: [
+      {
+        id: "original",
+        url: "data:image/png;base64,original",
+        name: "原作品.png",
+        sample: false,
+      },
+    ],
+  });
+  const snapshot = clone(previous);
+  const { service, storage, writes } = setup(previous);
+  assert.equal(writes(), 1);
+  assert.equal(service.read().accounts.student.studentId, "student-1");
+  assert.equal(service.read().accounts.parent, undefined);
+  assert.deepEqual(
+    clone(service.read().legacyParentAccount),
+    snapshot.accounts.parent,
+  );
+  assert.deepEqual(clone(service.read().submissions), snapshot.submissions);
+  assert.deepEqual(previous, snapshot);
+  assert.equal(
+    api.total(service.feedback("submission-1", "student").handwriting),
+    82,
+  );
+  const revision = await service.submit(
+    "assignment-1",
+    api.photos,
+    "学生订正",
+    "student",
+  );
+  assert.equal(revision.actor, "student");
+  assert.equal(revision.version, 2);
+  await service.finishAnalysis(revision.id);
+  await service.publish(revision.id, api.review(), "teacher");
+  const reload = new api.Service(storage, clock);
+  assert.deepEqual(
+    clone(reload.read().submissions[0]),
+    snapshot.submissions[0],
+  );
+  assert.equal(
+    api.total(reload.feedback("submission-1", "student").handwriting),
+    82,
+  );
+  assert.equal(
+    api.total(reload.feedback(revision.id, "student").handwriting),
+    81,
+  );
+});
+test("两种旧绑定指向不同学生时优先延续学生绑定并保留旧绑定资料", () => {
+  const previous = legacyState();
+  previous.accounts.student = { signedIn: true, studentId: "student-4" };
+  const snapshot = clone(previous);
+  const { service, storage, writes } = setup(previous);
+  assert.deepEqual(
+    clone(service.read().accounts.student),
+    snapshot.accounts.student,
+  );
+  assert.deepEqual(
+    clone(service.read().legacyParentAccount),
+    snapshot.accounts.parent,
+  );
+  assert.deepEqual(clone(service.read().submissions), snapshot.submissions);
+  new api.Service(storage, clock);
+  assert.equal(writes(), 1);
+});
+test("schema 4升级保留作品并合并旧家长绑定", () => {
+  const previous = legacyState();
+  previous.schemaVersion = 4;
+  delete previous.teachers;
+  delete previous.teacherAccount;
+  const snapshot = clone(previous);
+  const { service } = setup(previous);
+  assert.equal(service.read().schemaVersion, 6);
+  assert.equal(service.read().accounts.student.studentId, "student-1");
+  assert.deepEqual(clone(service.read().submissions), snapshot.submissions);
+  assert.deepEqual(previous, snapshot);
+});
+test("迁移保存失败不改写原数据，重试后只保存一次", () => {
+  const previous = legacyState(),
+    snapshot = clone(previous);
+  let saved = clone(previous),
+    fail = true,
+    writes = 0;
+  const storage = {
+    read: () => clone(saved),
+    write: (state) => {
+      if (fail) throw new Error("存储满");
+      saved = clone(state);
+      writes++;
+    },
+  };
+  assert.throws(() => new api.Service(storage, clock), /存储满/);
+  assert.deepEqual(saved, snapshot);
+  fail = false;
+  new api.Service(storage, clock);
+  new api.Service(storage, clock);
+  assert.equal(writes, 1);
+  assert.equal(saved.schemaVersion, 6);
+});
+test("任教与学生班级隔离保留，旧学习码可作为学生别名，自选图片不伪造评分", async () => {
+  const { service } = setup();
+  await bind(service, "teacher", "LS2026");
+  await bind(service, "student", "CJ2026");
+  assert.equal(service.read().accounts.student.studentId, "student-4");
+  await assert.rejects(
+    service.createAssignment(
+      {
+        title: "越班",
+        requirements: "要求",
+        classId: "class-1",
+        dueAt: "2026-10-22T10:00:00Z",
+      },
+      "teacher",
+    ),
+    /任教范围/,
+  );
+  await assert.rejects(
+    service.submit("assignment-1", api.photos, "", "student"),
+    /所在班级/,
+  );
+  const assignment = await service.createAssignment(
+    {
+      title: "本班作业",
+      requirements: "要求",
+      classId: "class-2",
+      dueAt: "2026-10-22T10:00:00Z",
+    },
+    "teacher",
+  );
+  const submission = await service.submit(
+    assignment.id,
+    [
+      {
+        id: "mine",
+        url: "data:image/png;base64,user",
+        name: "自己的作品.png",
+        sample: false,
+      },
+    ],
+    "",
+    "student",
+  );
+  await service.finishAnalysis(submission.id);
+  const pending = service.latest(assignment.id, "student-4");
+  assert.equal(api.total(pending.draft.handwriting), null);
+  assert.equal(service.feedback(submission.id, "student"), null);
+  await assert.rejects(
+    service.publish(submission.id, pending.draft, "teacher"),
+  );
+  await service.publish(submission.id, api.review(), "teacher");
+  assert.equal(
+    api.total(service.feedback(submission.id, "student").composition),
+    81,
+  );
+});
+test("未分配班级教师、过期码与错误身份不能建立错误关联", async () => {
+  const { service } = setup();
+  await bind(service, "teacher", "WK2026");
+  await assert.rejects(
+    service.createAssignment(
+      {
+        title: "无任教班",
+        requirements: "要求",
+        classId: "class-1",
+        dueAt: "2026-10-22T10:00:00Z",
+      },
+      "teacher",
+    ),
+    /任教范围/,
+  );
+  await service.signIn("student");
+  const before = clone(service.read());
+  assert.throws(() => service.previewBinding("EX2026", "student"), /过期/);
+  assert.throws(
+    () => service.previewBinding("JS2026", "student"),
+    /教师邀请码/,
+  );
+  assert.deepEqual(clone(service.read()), before);
 });

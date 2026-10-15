@@ -1,6 +1,6 @@
 {
   "name": "writingstar",
-  "version": "0.4.2",
+  "version": "0.9.1",
   "scripts": {
     "build:h5": "uni build",
     "test": "node --import tsx --test --test-isolation=none tests/*.test.ts",
@@ -8,10 +8,11 @@
     "dev:h5": "uni --host 127.0.0.1 --port 5173",
     "dev": "uni --host 127.0.0.1 --port 5173",
     "build:mp-weixin": "uni build -p mp-weixin",
-    "dev:preview": "node scripts/serve-preview.mjs",
+    "dev:preview": "npm run dev",
     "test:preview": "node --test --test-isolation=none scripts/preview-regression-v091.cjs",
     "verify:preview": "node scripts/verify-preview.mjs",
-    "build:preview": "node scripts/build-preview.mjs"
+    "build:preview": "npm run build:site",
+    "build:site": "npm run build:h5 && node scripts/prepare-site.mjs"
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-5020420260813003",

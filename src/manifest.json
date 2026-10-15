@@ -1,9 +1,9 @@
 {
   "name": "写字星交互原型",
   "appid": "",
-  "description": "本地示例数据驱动的小程序界面原型",
-  "versionName": "0.4.2",
-  "versionCode": 7,
+  "description": "写字星教师与学生作业学习前端原型",
+  "versionName": "0.9.1",
+  "versionCode": 91,
   "transformPx": false,
   "h5": {
     "title": "写字星",

@@ -2,5 +2,5 @@
 export default {};
 </script>
 <style>
-@import './styles.css';
+@import "./styles.css";
 </style>

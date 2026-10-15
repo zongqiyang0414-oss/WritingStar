@@ -14,8 +14,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  cloud-preview:
-    name: Current cloud preview v0.9.1
+  archived-preview:
+    name: Archived deployed v0.9.1 reference
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -29,17 +29,17 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run verify:preview
       - run: npm run test:preview
-      - run: npm run build:preview
-      - name: Save current cloud preview
+      - run: node scripts/build-preview.mjs
+      - name: Save archived deployment reference
         uses: actions/upload-artifact@v6
         with:
-          name: cloud-preview-${{ github.sha }}
+          name: archived-preview-${{ github.sha }}
           path: dist/build/preview
           if-no-files-found: error
           retention-days: 14
 
   verify:
-    name: Historical uni-app source checks
+    name: Current v0.9.1 source checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -53,19 +53,22 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run type-check
       - run: npm test
-      - run: npm run build:h5
+      - name: Build from source without archived preview files
+        run: |
+          rm -rf preview/dist
+          npm run build:site
       - run: npm run build:mp-weixin
-      - name: Save historical H5 build
+      - name: Save current H5 source build
         uses: actions/upload-artifact@v6
         with:
-          name: legacy-h5-${{ github.sha }}
-          path: dist/build/h5
+          name: h5-${{ github.sha }}
+          path: dist/client
           if-no-files-found: error
           retention-days: 14
-      - name: Save historical WeChat build
+      - name: Save current WeChat source build
         uses: actions/upload-artifact@v6
         with:
-          name: legacy-mp-weixin-${{ github.sha }}
+          name: mp-weixin-${{ github.sha }}
           path: dist/build/mp-weixin
           if-no-files-found: error
           retention-days: 14

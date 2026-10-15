@@ -1,46 +1,50 @@
-# 写字星 · WritingStar · 云端预览 v0.9.1
+# 写字星 · WritingStar v0.9.1
 
-[打开私有预览](https://writingstar.blitheguppy17.chatgpt.site) · [当前验收表](原型更新与验收表.md) · [交付状态](docs/云端交付状态.md)
+**完整前端开发工程已放在根目录 `src/`，电脑拉取后可直接修改、运行和构建。** 页面、组件、业务服务、样式、练习素材、测试、锁文件和启动配置均已同步。
 
-本仓库现已纳入当前云端v0.9.1的完整可运行预览、修正／回归脚本、验收表和验证截图。教师与学生共用同一应用入口，家长专属入口和主动角色已移除；旧绑定、原作品、评分与反馈保留。教师手机号关联仍待实现，当前使用模拟学校邀请码，不实现缴费等运营功能。
+[原私有预览](https://writingstar.blitheguppy17.chatgpt.site) · [验收表](原型更新与验收表.md) · [源码恢复说明](docs/源码恢复说明.md) · [交付状态](docs/云端交付状态.md)
 
-## 当前版本位置
+## 电脑下载与启动
 
-| 目录／文件 | 内容 |
-| --- | --- |
-| `preview/dist/` | 与已部署v0.9.1逐字节一致的12个运行文件，包括入口、应用模块、样式和虚构示例素材 |
-| `preview/.openai/hosting.json` | 原Site身份和静态托管配置 |
-| `preview/package.json` | 当前云端预览版本号0.9.1与运行命令 |
-| `preview/release.json` | 对应托管提交、保存版本、部署ID和13个发布文件的SHA-256 |
-| `scripts/preview-regression-v091.cjs` | 8项真实预览服务逻辑回归，可在任意仓库检出目录运行 |
-| `scripts/verify-preview.mjs` | 校验版本、文件清单与逐文件哈希 |
-| `scripts/repair-v09-student-entry.cjs` | 保留基于v0.9预览移除家长端的原始修正脚本，作为回溯依据 |
-| `src/`、根目录`package.json` | 原v0.4.2 uni-app开发工程，保留为历史源码参考 |
-
-当前云端预览的托管源码提交为`bdbc80ba0dbf71fd264a26f7b5d298177320c125`。v0.9原始Vue／TypeScript工程尚未恢复；本次将已有云端可运行版本完整入库，不将编译产物标称为已恢复的小程序开发源码。后续完整小程序开发需先找回对应源工程。
-
-## 本地运行当前预览
-
-Node版本见`.nvmrc`，在仓库根目录安装依赖，再使用当前预览入口：
+安装`.nvmrc`指定的Node版本，然后执行：
 
 ```sh
+git clone https://github.com/zongqiyang0414-oss/WritingStar.git
+cd WritingStar
 npm ci
-npm --prefix preview run verify
-npm --prefix preview run test
-npm --prefix preview run dev
+npm run dev
 ```
 
-打开 <http://127.0.0.1:5173/>。Windows可将上述`npm`替换为`npm.cmd`。服务使用仓库内的v0.9.1文件，本机浏览器数据仍按原存储键保留。需要其他端口时设置`WRITINGSTAR_PREVIEW_PORT`。
+已有仓库可在保留个人修改后使用`git pull --ff-only`更新，再执行`npm ci`和`npm run dev`。打开 <http://127.0.0.1:5173/>。Windows可使用`npm.cmd`，也可以双击根目录的[启动原型.cmd](启动原型.cmd)。私有仓库下载使用你已有的GitHub账号权限。
 
-仓库根目录也提供`npm run dev:preview`、`npm run verify:preview`、`npm run test:preview`和`npm run build:preview`；后者校验并复制当前预览至`dist/build/preview`，保持文件内容不变。根目录原有`dev`、`build:h5`、`build:mp-weixin`仍服务于历史uni-app工程。
+## 检查与构建
 
-## 检查与线上对应
+```sh
+npm run type-check
+npm test
+npm run build:h5
+npm run build:mp-weixin
+```
 
-GitHub Actions分别运行“Current cloud preview v0.9.1”和“Historical uni-app source checks”。当前预览保存为`cloud-preview-<提交SHA>`产物；历史工程的H5和微信产物分别使用`legacy-h5-`、`legacy-mp-weixin-`前缀。
+H5输出在`dist/build/h5/`，微信输出在`dist/build/mp-weixin/`。微信开发者工具导入后，正式调试需填写自己的AppID；仓库不包含AppSecret或上传私钥。微信目标已做编译与平台API模拟检查，尚未完成真机和后端联调。
 
-当前预览只包含前端与mock，微信登录、绑定和权限为模拟；微信真机、正式后端与跨设备同步尚未联调。部署成功、代码检查和历史版本检查均不替代[用户验收](原型更新与验收表.md)。
+Sites使用`npm run build:site`生成`dist/client/`，沿用原私有Site和网址。GitHub Actions检查当前源码、运行18项测试并保存H5和微信构建产物；归档预览单独验证。当前源码构建不依赖`preview/dist/`。
 
-手机继续使用原私有网址和原ChatGPT账号。GitHub上传与线上文件对应关系以[交付状态](docs/云端交付状态.md)记录为准；用户数据不随本次仓库同步上传，也不会被自动重置。
+## 目录
+
+| 目录 | 内容 |
+| --- | --- |
+| `src/pages/`、`src/components/` | 主页面与10个可编辑Vue组件，包含绑定、任教班级、作业、批阅、学情与成长 |
+| `src/composables/` | 页面状态、导航及业务交互 |
+| `src/services/` | mock服务、身份与任教范围、量表、数据迁移、统计、示例数据及类型 |
+| `src/platform/` | H5与微信选图、大小校验和本地保存 |
+| `src/styles.css`、`src/static/` | 完整样式和虚构练习素材 |
+| `tests/` | 当前源码业务、平台分支和恢复一致性回归 |
+| `preview/` | 恢复前已部署v0.9.1的历史基准；不作为当前开发入口 |
+
+当前版本仅保留教师与学生，家长可协助使用学生端。教师手机号关联尚待实现，现用模拟学校邀请码；缴费等运营功能不实现。草稿对学生不可见，发布反馈和订正保留原作品及历史记录；真实微信登录、后端、AI及跨设备同步仍待联调。
+
+原始v0.9源文件及开发历史未保存到可找到的仓库；本工程已依据实际部署的v0.9.1恢复Vue模板与业务模块，并与原发布版本比较验证，详见[恢复说明](docs/源码恢复说明.md)。旧v0.4.2源码保留在Git历史，下方仅保留历史说明。
 
 <details>
 <summary>v0.4.2历史uni-app工程说明（保留原记录）</summary>
