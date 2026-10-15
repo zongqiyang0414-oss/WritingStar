@@ -1,3 +1,50 @@
+# 写字星 · WritingStar · 云端预览 v0.9.1
+
+[打开私有预览](https://writingstar.blitheguppy17.chatgpt.site) · [当前验收表](原型更新与验收表.md) · [交付状态](docs/云端交付状态.md)
+
+本仓库现已纳入当前云端v0.9.1的完整可运行预览、修正／回归脚本、验收表和验证截图。教师与学生共用同一应用入口，家长专属入口和主动角色已移除；旧绑定、原作品、评分与反馈保留。教师手机号关联仍待实现，当前使用模拟学校邀请码，不实现缴费等运营功能。
+
+## 当前版本位置
+
+| 目录／文件 | 内容 |
+| --- | --- |
+| `preview/dist/` | 与已部署v0.9.1逐字节一致的12个运行文件，包括入口、应用模块、样式和虚构示例素材 |
+| `preview/.openai/hosting.json` | 原Site身份和静态托管配置 |
+| `preview/package.json` | 当前云端预览版本号0.9.1与运行命令 |
+| `preview/release.json` | 对应托管提交、保存版本、部署ID和13个发布文件的SHA-256 |
+| `scripts/preview-regression-v091.cjs` | 8项真实预览服务逻辑回归，可在任意仓库检出目录运行 |
+| `scripts/verify-preview.mjs` | 校验版本、文件清单与逐文件哈希 |
+| `scripts/repair-v09-student-entry.cjs` | 保留基于v0.9预览移除家长端的原始修正脚本，作为回溯依据 |
+| `src/`、根目录`package.json` | 原v0.4.2 uni-app开发工程，保留为历史源码参考 |
+
+当前云端预览的托管源码提交为`bdbc80ba0dbf71fd264a26f7b5d298177320c125`。v0.9原始Vue／TypeScript工程尚未恢复；本次将已有云端可运行版本完整入库，不将编译产物标称为已恢复的小程序开发源码。后续完整小程序开发需先找回对应源工程。
+
+## 本地运行当前预览
+
+Node版本见`.nvmrc`，在仓库根目录安装依赖，再使用当前预览入口：
+
+```sh
+npm ci
+npm --prefix preview run verify
+npm --prefix preview run test
+npm --prefix preview run dev
+```
+
+打开 <http://127.0.0.1:5173/>。Windows可将上述`npm`替换为`npm.cmd`。服务使用仓库内的v0.9.1文件，本机浏览器数据仍按原存储键保留。需要其他端口时设置`WRITINGSTAR_PREVIEW_PORT`。
+
+仓库根目录也提供`npm run dev:preview`、`npm run verify:preview`、`npm run test:preview`和`npm run build:preview`；后者校验并复制当前预览至`dist/build/preview`，保持文件内容不变。根目录原有`dev`、`build:h5`、`build:mp-weixin`仍服务于历史uni-app工程。
+
+## 检查与线上对应
+
+GitHub Actions分别运行“Current cloud preview v0.9.1”和“Historical uni-app source checks”。当前预览保存为`cloud-preview-<提交SHA>`产物；历史工程的H5和微信产物分别使用`legacy-h5-`、`legacy-mp-weixin-`前缀。
+
+当前预览只包含前端与mock，微信登录、绑定和权限为模拟；微信真机、正式后端与跨设备同步尚未联调。部署成功、代码检查和历史版本检查均不替代[用户验收](原型更新与验收表.md)。
+
+手机继续使用原私有网址和原ChatGPT账号。GitHub上传与线上文件对应关系以[交付状态](docs/云端交付状态.md)记录为准；用户数据不随本次仓库同步上传，也不会被自动重置。
+
+<details>
+<summary>v0.4.2历史uni-app工程说明（保留原记录）</summary>
+
 # 写字星 · WritingStar 交互原型 v0.4.2
 
 2026-10-14。项目名称已确定为“写字星 · WritingStar”。独立新建的 uni-app + Vue 3 + TypeScript 工程，小程序界面优先，通过 H5 本地预览。没有移植旧版业务代码。
@@ -118,3 +165,5 @@ H5 输出：`dist/build/h5`。微信输出：`dist/build/mp-weixin`，AppID 保�
 v0.4.2本机已通过类型检查、27项测试及H5、微信目标构建。图表比例、全量成绩、圆圈序号与概览位置已做浏览器检查；最终缩小后的曲线开关因浏览器自动审批超时，未完成点击和截图检查。详细过程见[验证记录](outputs/验证记录.md)，用户验收仍按[验收表](原型更新与验收表.md)逐项反馈。此前远端v0.4的部署记录单独保留。
 
 没有设置性能跑分或压力测试门槛。采用官方 uni-app Vue 3 模板的依赖版本并锁定安装结果；少量上游依赖安装时有维护状态提醒，后续正式工程阶段再按框架兼容矩阵处理。
+
+</details>

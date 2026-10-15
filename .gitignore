@@ -10,6 +10,8 @@ lerna-debug.log*
 node_modules
 .DS_Store
 dist
+!preview/dist/
+!preview/dist/**
 *.local
 
 # Local configuration and credentials

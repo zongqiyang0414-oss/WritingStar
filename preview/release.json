@@ -1,0 +1,77 @@
+{
+  "version": "0.9.1",
+  "project_id": "appgprj_6ace5dfae30c8191976ecd1706cbbdf5",
+  "live_url": "https://writingstar.blitheguppy17.chatgpt.site",
+  "source_commit": "bdbc80ba0dbf71fd264a26f7b5d298177320c125",
+  "saved_version_id": "appgprj_6ace5dfae30c8191976ecd1706cbbdf5~appgver_c75ee907be248191ba08e853e99678ec",
+  "deployment_id": "appgdep_6ad0473486d88191bbb4e0234e5305a5",
+  "archive_sha256": "67391f44fceb1fa5c515762598b98c25441edb4a230c38bc67a6354b335cbae4",
+  "development_source_status": "original-v0.9-vue-typescript-source-unavailable",
+  "files": [
+    {
+      "path": ".openai/hosting.json",
+      "sha256": "4765dbed9f740a024e71528d70f371e512391ef37fc9889980c4eff99d5cec76",
+      "size_bytes": 100
+    },
+    {
+      "path": "dist/assets/index-BWXhXgU0.css",
+      "sha256": "428a3edc06ed231c82a35cd437500f39982ffa81ee366f821bc1947a80d32294",
+      "size_bytes": 33400
+    },
+    {
+      "path": "dist/assets/index.v091-8d14608fea.js",
+      "sha256": "62599475b43eeed94be5eb94f2ddc5385b33b505e5f2a3049937e4062f40abb3",
+      "size_bytes": 211852
+    },
+    {
+      "path": "dist/assets/pages-index-index.v091-8d14608fea.js",
+      "sha256": "9d8921fe62122362ebe25bf218988bf05c99323405315f99ccf44f89f971c308",
+      "size_bytes": 127683
+    },
+    {
+      "path": "dist/assets/uni.5c4e91c3.css",
+      "sha256": "5c4e91c34d04ab8675a9c63bf16dc3d8b851f80c9725e5a70f81a4a70c993a9d",
+      "size_bytes": 15330
+    },
+    {
+      "path": "dist/index.html",
+      "sha256": "db0bca2753da0d9de336261736d7058566e73e42eff7d8f0d71887a5d8d3c346",
+      "size_bytes": 855
+    },
+    {
+      "path": "dist/static/essay-1.png",
+      "sha256": "74475f2c4df9c08a15da84bdcb84fe41be3ff110f2e94d81c3916e49103c525e",
+      "size_bytes": 79154
+    },
+    {
+      "path": "dist/static/essay-1.svg",
+      "sha256": "510face49a89de4aac2c74e65a7ca87b96b19808c6bb4a08b8eeca193e44f8b6",
+      "size_bytes": 9689
+    },
+    {
+      "path": "dist/static/essay-2.png",
+      "sha256": "e9305ebefd609fa6ef5db677e037d0f4997758a5fa7b56a1202db2ff31b6f330",
+      "size_bytes": 87162
+    },
+    {
+      "path": "dist/static/essay-2.svg",
+      "sha256": "a79c1cbed2bb124d845c6e37c4f5dbcb1949804da7d0ee840643e17d23ce19bc",
+      "size_bytes": 10905
+    },
+    {
+      "path": "dist/static/growth.png",
+      "sha256": "ca2a268f46c56713e34a1ea6a9941b838a9bc77909ac3cfbe7009589596b76ff",
+      "size_bytes": 16422
+    },
+    {
+      "path": "dist/static/growth.svg",
+      "sha256": "71611edac17f11c7c5ece28d2457ca887a75158ed8e5ac05b240b8439a41e95e",
+      "size_bytes": 1404
+    },
+    {
+      "path": "dist/static/logo.png",
+      "sha256": "46719607502ebe256abff3ee000121c761708258187fb2bd6dac8443845ef32e",
+      "size_bytes": 4023
+    }
+  ]
+}

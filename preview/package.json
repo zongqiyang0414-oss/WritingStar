@@ -1,0 +1,10 @@
+{
+  "name": "writingstar-cloud-preview",
+  "version": "0.9.1",
+  "private": true,
+  "scripts": {
+    "dev": "node ../scripts/serve-preview.mjs",
+    "test": "node --test --test-isolation=none ../scripts/preview-regression-v091.cjs",
+    "verify": "node ../scripts/verify-preview.mjs"
+  }
+}
