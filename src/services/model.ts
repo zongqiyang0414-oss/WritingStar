@@ -1,5 +1,5 @@
 /** Frontend prototype state. These types do not define an agreed backend API. */
-export type Role = "teacher" | "student";
+export type Role = "teacher" | "student" | "admin";
 export type Category = "handwriting" | "composition";
 export type DimensionId =
   | "intuitive"
@@ -21,7 +21,32 @@ export type Screen =
   | "create"
   | "classes"
   | "classMembers"
+  | "adminClasses"
+  | "adminStudents"
+  | "aiReview"
+  | "aiBatch"
   | "growth";
+// Administration uses separate navigation and does not grant teaching or feedback access.
+export type AdminScreen = "home" | "adminClasses" | "adminStudents" | "profile";
+
+export interface Administrator {
+  id: string;
+  name: string;
+  initial: string;
+  organizationIds: string[];
+}
+export interface AdministratorAccount {
+  signedIn: boolean;
+  administratorId: string | null;
+}
+export interface AdministrationEvent {
+  id: string;
+  organizationId: string;
+  description: string;
+  administratorId: string;
+  administratorName: string;
+  createdAt: string;
+}
 
 export interface Dimension {
   id: DimensionId;
@@ -102,16 +127,37 @@ export interface Submission {
   note: string;
   submittedAt: string;
   /** Parent may occur only as the source of an unchanged historical submission. */
-  actor: Role | "parent";
+  actor: Exclude<Role, "admin"> | "parent";
   status: "processing" | "failed" | "pending" | "published";
   draft: Review;
   published: Review | null;
   publishedAt: string | null;
   publishedBy?: TeacherSummary;
+  draftRevision?: number;
+  aiReview?: AiReviewTask;
+}
+export interface AiReviewTask {
+  id: string;
+  attempt: number;
+  state: "queued" | "reading" | "reviewing" | "completed" | "failed" | "unavailable" | "cancelled";
+  source: "student" | "teacher" | "teacher-batch";
+  queuedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  result: Review | null;
+  resultSource: "sample" | "backend" | null;
+  error: string;
+  /** Local-only simulation flags, not an agreed backend contract. */
+  simulateFailure?: boolean;
+  initializeDraft?: boolean;
 }
 export interface PrototypeState {
   schemaVersion: 6;
   studentEntryVersion: 1;
+  administrationVersion: 1;
+  adminAccount: AdministratorAccount;
+  administrators: Administrator[];
+  administrationEvents: AdministrationEvent[];
   classPracticeVersion?: number;
   accounts: { student: StudentAccount };
   teacherAccount: TeacherAccount;
@@ -144,4 +190,5 @@ export interface TeacherBindingCandidate {
 }
 export type BindingCandidate =
   | StudentBindingCandidate
-  | TeacherBindingCandidate;
+  | TeacherBindingCandidate
+  | { role: "admin"; code: string; administrator: Administrator; organizations: Organization[] };

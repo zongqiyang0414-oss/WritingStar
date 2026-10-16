@@ -167,8 +167,8 @@ textarea:focus {
 }
 .role-button {
   font-size: 12px;
-  min-width: 63px;
-  padding: 6px 15px;
+  min-width: 53px;
+  padding: 6px 10px;
   border-radius: 7px;
   color: #758279;
 }

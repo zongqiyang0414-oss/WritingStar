@@ -21,7 +21,7 @@ const emit = defineEmits([
   "confirm",
   "help",
 ]);
-const roleLabel = computed(() => ("teacher" === props.role ? "教师" : "学生"));
+const roleLabel = computed(() => ({ teacher: "教师", student: "学生", admin: "管理员" })[props.role]);
 function updateCode(e) {
   emit("update:code", e.detail.value);
 }
@@ -38,7 +38,14 @@ function updateCode(e) {
         >
           ‹ 返回修改邀请码
         </button>
-        <template v-if="'teacher' === candidate.role">
+        <template v-if="candidate.role === 'admin'">
+          <view class="binding-intro"><view class="eyebrow">确认管理身份 / 02</view><view class="detail-title">请确认你的管理范围</view><view class="paragraph small subtle">绑定后，可维护授权学校／机构的班级、学生档案和任教分配。</view></view>
+          <view class="card binding-confirm-card">
+            <view class="binding-person"><view class="avatar pale">{{ candidate.administrator.initial }}</view><view class="grow"><view class="section-title">{{ candidate.administrator.name }}</view><view class="small subtle">学校／机构管理员</view></view><text class="badge green">管理员</text></view>
+            <view v-for="organization in candidate.organizations" :key="organization.id" class="profile-information-row"><text class="subtle">授权管理</text><text>{{ organization.name }}</text></view>
+          </view>
+        </template>
+        <template v-else-if="'teacher' === candidate.role">
           <view class="binding-intro">
             <view class="eyebrow"> 确认任教身份 / 02 </view>
             <view class="detail-title"> 请确认你的任教信息 </view>
@@ -154,6 +161,8 @@ function updateCode(e) {
           {{
             busy
               ? "绑定中…"
+              : role === 'admin'
+                ? '确认绑定，进入管理工作台'
               : "teacher" === role
                 ? "确认绑定，进入教师工作台"
                 : "确认绑定，进入我的任务"
@@ -170,14 +179,16 @@ function updateCode(e) {
       <template v-else>
         <view class="binding-intro">
           <view class="eyebrow">
-            {{ "teacher" === role ? "连接任教身份" : "连接学习档案" }} / 01
+            {{ role === 'admin' ? '连接管理身份' : "teacher" === role ? "连接任教身份" : "连接学习档案" }} / 01
           </view>
           <view class="detail-title">
-            {{ "teacher" === role ? "绑定你的教师身份" : "绑定你的学习档案" }}
+            {{ role === 'admin' ? '绑定你的管理员身份' : "teacher" === role ? "绑定你的教师身份" : "绑定你的学习档案" }}
           </view>
           <view class="paragraph small subtle">
             输入学校提供的{{ roleLabel }}邀请码，{{
-              "teacher" === role
+              role === 'admin'
+                ? '确认管理范围后即可维护班级和学生。'
+                : "teacher" === role
                 ? "确认身份和任教范围后即可开始工作。"
                 : "确认信息后即可查看作业和反馈。"
             }}
@@ -198,7 +209,9 @@ function updateCode(e) {
           />
           <view class="small subtle spaced-small">
             {{
-              "teacher" === role
+              role === 'admin'
+                ? '管理员身份由学校负责人预先授权。'
+                : "teacher" === role
                 ? "任教学校和班级由学校管理员预先分配。"
                 : "学校已准备好学生档案，无需重复填写姓名和班级。"
             }}
@@ -232,7 +245,9 @@ function updateCode(e) {
         <image class="binding-art" :src="growthIllustration" mode="aspectFit" />
         <view class="binding-caption">
           {{
-            "teacher" === role
+            role === 'admin'
+              ? '连接学校管理身份，让班级与学生管理井然有序。'
+              : "teacher" === role
               ? "连接任教学校与班级，开始每天的双写课堂。"
               : "连接自己的学习档案，让老师看见你的进步。"
           }}

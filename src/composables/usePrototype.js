@@ -11,6 +11,7 @@ import {
   activeStudents,
   assignmentCounts,
   classAssignments,
+  formerAssignmentStudents,
   latestSubmission,
   taskStatus,
   taskStatuses,
@@ -27,6 +28,8 @@ import {
 import { onHide, onShow } from "@dcloudio/uni-app";
 import { presentReview } from "../services/presentation.js";
 import { studentSummary } from "../services/analytics.js";
+import { getBoundAdministrator } from "../services/administration.js";
+import { AI_LABELS, aiAssignmentRows, aiAssignmentSummary } from "../services/aiReview.js";
 
 export function usePrototype() {
   let service = null;
@@ -38,6 +41,7 @@ export function usePrototype() {
   }
   const state = ref(service?.read() || createSeed()),
     role = ref("teacher"),
+    adminDirty = ref(false),
     screen = ref("home"),
     selectedClassId = ref("class-1"),
     newClassId = ref("class-1"),
@@ -54,8 +58,10 @@ export function usePrototype() {
     assignmentPeriod = ref("ongoing"),
     detailReturn = ref("home"),
     feedbackReturn = ref("assignment"),
+    aiReviewReturn = ref("assignment"),
+    reviewReturn = ref("assignment"),
     now = ref(Date.now());
-  let clockTimer;
+  let clockTimer, aiTimer;
   onShow(() => {
     now.value = Date.now();
     try {
@@ -67,10 +73,14 @@ export function usePrototype() {
       (clockTimer = setInterval(() => {
         now.value = Date.now();
       }, 6e4));
+    advanceAiQueue();
+    aiTimer || (aiTimer = setInterval(advanceAiQueue, 600));
   });
   onHide(() => {
     clearInterval(clockTimer);
     clockTimer = undefined;
+    clearInterval(aiTimer);
+    aiTimer = undefined;
   });
   const assignmentId = ref("assignment-1"),
     submissionId = ref("submission-1"),
@@ -100,13 +110,17 @@ export function usePrototype() {
     bindingCandidate = ref(null),
     boundStudent = computed(() => getBoundStudent(state.value, role.value)),
     teacherIdentity = computed(() => getBoundTeacher(state.value)),
+    adminIdentity = computed(() => getBoundAdministrator(state.value)),
+    isAdmin = computed(() => role.value === "admin"),
     accountSignedIn = computed(() =>
-      "teacher" === role.value
+      isAdmin.value
+        ? !!state.value.adminAccount?.signedIn
+        : "teacher" === role.value
         ? state.value.teacherAccount.signedIn
         : state.value.accounts[role.value].signedIn,
     ),
     growthSummary = computed(() =>
-      "teacher" === role.value
+      role.value !== "student"
         ? null
         : (function (e, a) {
             const t = getBoundStudent(e, a);
@@ -114,10 +128,12 @@ export function usePrototype() {
           })(state.value, role.value),
     ),
     needsBinding = computed(() =>
-      isTeacher.value ? !teacherIdentity.value : !boundStudent.value,
+      isAdmin.value ? !adminIdentity.value : isTeacher.value ? !teacherIdentity.value : !boundStudent.value,
     ),
     organizationOptions = computed(() =>
-      isTeacher.value
+      isAdmin.value
+        ? state.value.organizations.filter((item) => adminIdentity.value?.organizationIds.includes(item.id))
+        : isTeacher.value
         ? (function (e) {
             const a = getBoundTeacher(e);
             return e.organizations.filter((e) =>
@@ -137,7 +153,7 @@ export function usePrototype() {
     ),
     currentOrganization = computed(
       () =>
-        (isTeacher.value &&
+        ((isTeacher.value || isAdmin.value) &&
           organizationOptions.value.find(
             (e) => e.id === organizationId.value,
           )) ||
@@ -215,12 +231,22 @@ export function usePrototype() {
     ),
     selectedAssignment = computed(
       () =>
+        (["feedback", "aiReview"].includes(screen.value) && role.value === "student" &&
+          selectedSubmission.value?.studentId === boundStudent.value?.id &&
+          state.value.assignments.find((item) => item.id === selectedSubmission.value.assignmentId)) ||
         scopedAssignments.value.find((e) => e.id === assignmentId.value) ||
         scopedAssignments.value[0],
     ),
     selectedSubmission = computed(() =>
       state.value.submissions.find((e) => e.id === submissionId.value),
     ),
+    aiTask = computed(() => {
+      if (!service || !selectedSubmission.value || role.value === "admin") return null;
+      try { return service.aiResult(selectedSubmission.value.id, role.value); }
+      catch { return null; }
+    }),
+    aiRows = computed(() => isTeacher.value ? aiAssignmentRows(state.value, selectedAssignment.value?.id || "") : []),
+    aiSummary = computed(() => aiAssignmentSummary(aiRows.value)),
     mine = computed(() => {
       var e;
       return boundStudent.value
@@ -230,7 +256,9 @@ export function usePrototype() {
     isTeacher = computed(() => "teacher" === role.value),
     identity = computed(() => {
       var e;
-      return isTeacher.value
+      return isAdmin.value
+        ? adminIdentity.value?.name || "管理员"
+        : isTeacher.value
         ? teacherIdentity.value?.name || "老师"
         : boundStudent.value
           ? boundStudent.value.name + "同学"
@@ -260,9 +288,9 @@ export function usePrototype() {
     dirty = computed(() => {
       var e;
       return (
-        "review" === screen.value &&
+        adminDirty.value || ("review" === screen.value &&
         "pending" === selectedSubmission.value?.status &&
-        JSON.stringify(review.value) !== reviewBaseline.value
+        JSON.stringify(review.value) !== reviewBaseline.value)
       );
     }),
     canSubmit = computed(
@@ -278,12 +306,16 @@ export function usePrototype() {
     title = computed(
       () =>
         ({
-          home: isTeacher.value ? "工作台" : "我的任务",
+          home: isAdmin.value ? "管理工作台" : isTeacher.value ? "工作台" : "我的任务",
+          adminClasses: "班级管理",
+          adminStudents: "学生管理",
           statistics: "学情",
           statisticsStudents: "全班学生学情",
           statisticsStudent: "学生成长",
           assignment: "作业详情",
           review: "双写批阅",
+          aiReview: "AI双写批阅",
+          aiBatch: "全班AI批阅",
           submit: mine.value ? "提交订正" : "提交作品",
           feedback: "老师的反馈",
           records: "作品记录",
@@ -311,6 +343,10 @@ export function usePrototype() {
             : "records" !== screen.value || isTeacher.value
               ? "home"
               : "records",
+    ),
+    formerStudentsInAssignment = computed(() =>
+      formerAssignmentStudents(state.value, selectedAssignment.value?.id || "")
+        .filter((student) => filter.value === "全部" || taskStatus(student.submission) === filter.value),
     ),
     studentsInAssignment = computed(() => {
       var e;
@@ -340,6 +376,10 @@ export function usePrototype() {
   function refresh() {
     service && (state.value = service.read());
   }
+  function advanceAiQueue() {
+    try { if (service?.advanceAiReviews()) refresh(); }
+    catch (failure) { error.value = failure.message; }
+  }
   function notify(e) {
     toast.value = e;
     clearTimeout(toastTimer);
@@ -361,13 +401,20 @@ export function usePrototype() {
       (dirty.value
         ? (modal.value = {
             title: "还有未保存的修改",
-            body: "离开后，未保存的评分和评语会丢失。你可以取消并先保存草稿。",
+            body: adminDirty.value ? "离开后，未保存的管理信息会丢失。你可以取消并先保存。" : "离开后，未保存的评分和评语会丢失。你可以取消并先保存草稿。",
             confirm: "放弃修改",
             action: e,
           })
         : e());
   }
   function go(e) {
+    if (isAdmin.value) {
+      if (["home", "adminClasses", "adminStudents", "profile"].includes(e) && screen.value !== e)
+        guard(() => { adminDirty.value = false; navigate(e); });
+      return;
+    }
+    if (e.startsWith("admin")) return;
+    if (e === "aiBatch" && !isTeacher.value) return;
     (isTeacher.value && "growth" === e) ||
       (!isTeacher.value && rosterScreens.includes(e)) ||
       (("create" !== e || teachingClassOptions.value.length) &&
@@ -404,6 +451,7 @@ export function usePrototype() {
   }
   function openReview(e) {
     guard(() => {
+      reviewReturn.value = screen.value === "aiReview" ? "aiReview" : "assignment";
       submissionId.value = e.id;
       assignmentId.value = e.assignmentId;
       review.value = presentReview(e.draft);
@@ -420,7 +468,7 @@ export function usePrototype() {
     (isTeacher.value || e.studentId === boundStudent.value?.id) &&
       guard(() => {
         feedbackReturn.value =
-          "growth" === screen.value
+          ["aiReview", "aiBatch"].includes(screen.value) ? screen.value : "growth" === screen.value
             ? "growth"
             : "records" === screen.value
               ? "records"
@@ -456,9 +504,29 @@ export function usePrototype() {
     bindingCandidate.value = null;
     error.value = "";
   }
+  function openAiReview(submission) {
+    if (!service || !submission || role.value === "admin") return;
+    try { service.aiResult(submission.id, role.value); }
+    catch (failure) { error.value = failure.message; return; }
+    guard(() => {
+      aiReviewReturn.value = screen.value === "aiBatch" ? "aiBatch" : screen.value === "records" ? "records" : "assignment";
+      submissionId.value = submission.id;
+      assignmentId.value = submission.assignmentId;
+      navigate("aiReview");
+    });
+  }
+  async function beginAiBatch(retryOnly = false) {
+    if (!isTeacher.value || !selectedAssignment.value) return;
+    await runAction(async () => {
+      const result = await service.startAiBatch(selectedAssignment.value.id, role.value, retryOnly, failAnalysis.value);
+      navigate("aiBatch");
+      if (!result.queued.length) notify("已有结果和正在批阅的作品已保留");
+    });
+  }
   onUnmounted(() => {
     clearTimeout(toastTimer);
     clearInterval(clockTimer);
+    clearInterval(aiTimer);
   });
   return {
     state,
@@ -491,18 +559,76 @@ export function usePrototype() {
         id: "student",
         label: "学生",
       },
+      { id: "admin", label: "管理员" },
     ],
     startupError,
     selectedAssignment,
     selectedSubmission,
+    aiTask,
+    aiRows,
+    aiSummary,
+    aiStateLabel: (submission) => AI_LABELS[submission?.aiReview?.state || "notStarted"],
+    openAiReview,
+    beginAiBatch,
+    openAiBatch: () => {
+      if (isTeacher.value && selectedAssignment.value) guard(() => navigate("aiBatch"));
+    },
+    startSingleAi: async () => {
+      if (!selectedSubmission.value) return;
+      await runAction(async () => {
+        await service.startAiReview(submissionId.value, role.value, failAnalysis.value);
+      });
+    },
+    refreshAi: advanceAiQueue,
+    applyAiSuggestions: () => {
+      if (!isTeacher.value || !selectedSubmission.value) return;
+      modal.value = {
+        title: "用AI建议作为本轮草稿？",
+        body: "当前教师草稿将替换为这份AI建议。AI原始结果保留，确认后请逐项复核，再发布老师的正式反馈。",
+        confirm: "应用并复核",
+        action: async () => {
+          await runAction(async () => { await service.applyAiReview(submissionId.value, role.value); });
+          if (!error.value) openReview(state.value.submissions.find(item => item.id === submissionId.value));
+        },
+      };
+    },
+    reviewAiSubmission: async () => {
+      const item = selectedSubmission.value;
+      if (!isTeacher.value || !item) return;
+      if (["failed", "processing"].includes(item.status)) {
+        await runAction(async () => { await service.manualReview(item.id, role.value); });
+      }
+      if (!error.value) openReview(state.value.submissions.find(row => row.id === item.id));
+    },
     mine,
     isTeacher,
+    isAdmin,
+    adminIdentity,
+    adminDirty,
+    adminAction: async function ({ kind, data, success, message }) {
+      const handlers = {
+        saveClass: service?.saveClass,
+        setClassTeachers: service?.setClassTeachers,
+        saveStudent: service?.saveStudent,
+        transferStudents: service?.transferStudents,
+        setStudentArchived: service?.setStudentArchived,
+      };
+      await runAction(async () => {
+        if (!Object.prototype.hasOwnProperty.call(handlers, kind) || !handlers[kind]) throw new Error("管理操作暂不可用。");
+        const result = await handlers[kind].call(service, data, role.value);
+        refresh();
+        adminDirty.value = false;
+        success?.(result);
+        notify(message || "管理信息已保存");
+      });
+    },
     identity,
     myHistory,
     feedback,
     canSubmit,
     title,
     studentsInAssignment,
+    formerStudentsInAssignment,
     rubric,
     total,
     latest,
@@ -538,11 +664,12 @@ export function usePrototype() {
     },
     go,
     switchRole: function (e) {
-      if (e !== "teacher" && e !== "student") return;
+      if (e !== "teacher" && e !== "student" && e !== "admin") return;
       e !== role.value &&
         guard(() => {
           var a;
           role.value = e;
+          adminDirty.value = false;
           clearBindingDraft();
           photos.value = [];
           note.value = "";
@@ -594,7 +721,7 @@ export function usePrototype() {
                 );
                 reviewBaseline.value = JSON.stringify(review.value);
                 notify("反馈已发布");
-                navigate("assignment");
+                navigate(reviewReturn.value);
               });
             },
           });
@@ -643,29 +770,20 @@ export function usePrototype() {
                   note.value,
                   role.value,
                   failSubmit.value,
+                  failAnalysis.value,
                 ));
                 refresh();
-                navigate("assignment");
-                notify("作品已提交，正在处理");
-                (async function (a, t = false) {
-                  await new Promise((e) => setTimeout(e, 1200));
-                  try {
-                    await service?.finishAnalysis(a, t);
-                    refresh();
-                  } catch (ra) {
-                    error.value = ra.message;
-                  }
-                })(a.id, failAnalysis.value);
+                submissionId.value = a.id;
+                aiReviewReturn.value = "assignment";
+                navigate("aiReview");
               });
             },
           })
         : (error.value = "请先选择作品照片。");
     },
-    retry: function (a) {
-      runAction(async () => {
-        await service.finishAnalysis(a.id);
-        notify("处理已完成，请等待老师复核");
-      });
+    retry: async function (a) {
+      await runAction(async () => { await service.startAiReview(a.id, role.value); });
+      if (!error.value) openAiReview(a);
     },
     manual: async function (a) {
       await runAction(async () => {
@@ -754,7 +872,10 @@ export function usePrototype() {
     activeTab,
     back: function () {
       go(
-        "classMembers" === screen.value
+        screen.value === "aiReview" ? aiReviewReturn.value
+          : screen.value === "aiBatch" ? "assignment"
+          : screen.value === "review" ? reviewReturn.value
+          : "classMembers" === screen.value
           ? "classes"
           : "classes" === screen.value
             ? "profile"
@@ -820,10 +941,16 @@ export function usePrototype() {
     },
     switchOrganization: function (e) {
       var a;
-      isTeacher.value &&
+      (isTeacher.value || isAdmin.value) &&
         e !== currentOrganization.value?.id &&
         organizationOptions.value.some((a) => a.id === e) &&
         guard(() => {
+          if (isAdmin.value) {
+            organizationId.value = e;
+            adminDirty.value = false;
+            navigate("home");
+            return;
+          }
           var a;
           const s = screen.value.startsWith("statistics")
             ? "statistics"
@@ -863,7 +990,9 @@ export function usePrototype() {
         (modal.value = {
           title: "微信登录写字星",
           body:
-            "teacher" === role.value
+            isAdmin.value
+              ? "登录后，使用学校负责人提供的管理员邀请码确认管理范围，维护班级和学生信息。"
+              : "teacher" === role.value
               ? "登录后，使用学校提供的教师邀请码确认任教学校与班级，开始布置作业和批阅。"
               : "登录后，使用学校提供的邀请码关联学习档案，查看作业和老师的反馈。",
           confirm: "继续",
@@ -899,6 +1028,7 @@ export function usePrototype() {
           await service.bindInvitation(a.code, role.value);
           refresh();
           clearBindingDraft();
+          if (isAdmin.value) organizationId.value = organizationOptions.value[0]?.id || "";
           "teacher" === role.value &&
             ((organizationId.value = organizationOptions.value[0]?.id || ""),
             (selectedClassId.value = teachingClassOptions.value[0]?.id || ""),
@@ -913,7 +1043,9 @@ export function usePrototype() {
           note.value = "";
           navigate("home");
           notify(
-            "teacher" === role.value
+            isAdmin.value
+              ? "管理员身份与管理范围已绑定"
+              : "teacher" === role.value
               ? "教师身份与任教范围已绑定"
               : "学习档案已绑定",
           );
@@ -924,7 +1056,7 @@ export function usePrototype() {
         guard(() => {
           modal.value = {
             title: "重新体验当前身份的绑定？",
-            body: "只清除当前模拟身份的登录和关联信息。教师与学生档案、作业、照片、反馈和其他身份的绑定都会保留。",
+            body: "只清除当前模拟身份的登录和关联信息。管理分配、学生档案、作业、照片、反馈和其他身份的绑定都会保留。",
             confirm: "重新体验",
             action: async () => {
               await runAction(async () => {
@@ -945,7 +1077,9 @@ export function usePrototype() {
       modal.value = {
         title: "联系学校管理员",
         body:
-          "teacher" === role.value
+          isAdmin.value
+            ? "管理员权限由学校负责人授权。请联系负责人核对管理员姓名及学校／机构，不能通过普通教师或学生邀请码获取管理权限。"
+            : "teacher" === role.value
             ? "请向学校管理员核对教师姓名、所属学校和任教班级。任教分配由管理员维护，小程序仅展示已分配的范围。"
             : "请向学校管理员核对学生姓名、学校和班级。邀请码由学校提供；信息有误时请由管理员处理。",
         confirm: "知道了",

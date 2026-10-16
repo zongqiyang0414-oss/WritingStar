@@ -1,0 +1,99 @@
+.ai-work-context, .ai-entry-heading, .ai-review-shortcut { display: flex; align-items: center; gap: 11px; }
+.ai-work-context { margin-bottom: 20px; }
+.ai-work-context .tiny { overflow-wrap: anywhere; }
+.ai-type-tag { color: #536c80; background: #e5edf4; border: 1px solid #d6e1ea; border-radius: 7px; padding: 4px 8px; font-size: 10px; white-space: nowrap; letter-spacing: .5px; }
+.ai-result-hero { position: relative; overflow: hidden; background: #e7eef3; border: 1px solid #dce6ec; padding: 23px 21px; border-radius: 18px; margin-bottom: 18px; color: #4e6379; }
+.ai-result-hero .eyebrow { position: relative; z-index: 1; color: #6d8191; font-size: 9px; }
+.ai-result-headline { position: relative; z-index: 1; font-size: 24px; font-family: STSong, SimSun, serif; line-height: 1.5; max-width: 260px; margin: 12px 0; color: #344f64; }
+.ai-result-hero > .small { position: relative; z-index: 1; font-size: 11px; max-width: 280px; }
+.ai-orb { position: absolute; right: -4px; top: 18px; font-family: Georgia, serif; font-size: 110px; color: #9cafc0; opacity: .25; line-height: 1; }
+.ai-result-ready { background: #e7efdf; border-color: #dce6d1; color: #627555; }
+.ai-result-ready .ai-result-headline { color: #385e43; }
+.ai-result-ready .eyebrow { color: #75896a; }
+.ai-result-status { display: inline-flex; align-items: center; gap: 7px; margin-top: 17px; font-size: 10px; background: #ffffff90; border: 1px solid #ffffffb0; padding: 5px 10px; border-radius: 20px; }
+.ai-status-dot { display: inline-block; flex-shrink: 0; width: 6px; height: 6px; background: #6e93a9; border-radius: 50%; }
+.ai-status-dot.pulsing { animation: ai-pulse 1.6s ease-in-out infinite; }
+@keyframes ai-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+.ai-progress-card { padding: 20px; }
+.ai-progress-track { height: 5px; overflow: hidden; border-radius: 6px; background: #dce6e6; margin: 15px 0; }
+.ai-progress-fill { height: 100%; border-radius: 6px; background: #6f9d9a; transition: width .5s ease; }
+.ai-progress-step { display: flex; align-items: center; gap: 10px; padding: 12px 0; color: #9ca9a7; font-size: 12px; }
+.ai-step-mark { width: 25px; height: 25px; border-radius: 50%; border: 1px solid #dce4e1; text-align: center; line-height: 23px; font-size: 11px; }
+.ai-progress-step.current { color: #3e7180; font-weight: 600; }
+.ai-progress-step.current .ai-step-mark { background: #e6eff3; border-color: #b9cfd9; }
+.ai-progress-step.done { color: #3e7958; }
+.ai-progress-step.done .ai-step-mark { background: #e9f2e4; border-color: #cddfc4; }
+.ai-result-source { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; justify-content: space-between; margin: 17px 0 11px; }
+.ai-example-tag { padding: 3px 7px; background: #f4eddd; color: #8c7546; border-radius: 5px; font-size: 9px; }
+.ai-score-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+.ai-score-card { background: #edf3e6; border: 1px solid #dee7d3; border-radius: 13px; padding: 18px 15px; }
+.ai-score-card.ai-score-writing { background: #f7f0df; border-color: #ede2c4; }
+.ai-score-value { font-family: Georgia, serif; color: #486642; font-size: 38px; line-height: 1.4; margin: 5px 0; }
+.ai-score-writing .ai-score-value { color: #8c7445; }
+.ai-score-value text { font-size: 11px; color: #88907d; }
+.ai-next-steps { padding: 19px 20px; background: #f1f5ed; border-color: #e1e9d7; }
+.ai-next-steps .section-title { margin-top: 7px; }
+.ai-preserve-lines { white-space: pre-wrap; }
+.ai-dimensions { padding: 6px 18px 0; }
+.ai-dimensions > .paragraph { margin-bottom: 18px; }
+.ai-dimension { border-top: 1px solid var(--line); }
+.ai-dimension-toggle { display: flex; align-items: center; gap: 10px; width: 100%; padding: 15px 0; font-size: 12px; text-align: left; }
+.ai-dimension-arrow { width: 16px; text-align: right; color: #8b9a86; }
+.ai-dimension-comment { padding-bottom: 17px; }
+.ai-learning-note { margin: 15px 0; padding: 0 3px; font-size: 11px; color: #829081; }
+.ai-original-work { padding: 17px; margin-top: 18px; }
+.ai-original-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; text-align: left; gap: 10px; font-size: 11px; color: #738875; }
+.ai-original-toggle .strong { color: var(--ink); font-size: 13px; }
+.ai-work-photo { width: 100%; height: 290px; margin-top: 16px; background: #e9eee7; border-radius: 8px; }
+.ai-photo-pages { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+.ai-photo-pages button { padding: 5px 10px; border: 1px solid #dce5d6; border-radius: 6px; font-size: 10px; }
+.ai-photo-pages button.active { background: #e7efdf; color: #467451; }
+.ai-empty-result { padding: 21px; }
+.ai-teacher-actions { margin-top: 20px; }
+.ai-entry-symbol { display: flex; justify-content: center; align-items: center; flex-shrink: 0; width: 37px; height: 37px; border-radius: 11px; font-size: 30px; line-height: 1; color: #768eaa; background: #eaf0f5; }
+.ai-assignment-entry { padding: 19px; border-color: #dce5e5; }
+.ai-entry-counts { display: flex; justify-content: space-between; gap: 5px; margin: 18px 0; font-size: 10px; color: #7b8c8c; }
+.ai-student-entry { padding: 17px; background: #edf3f4; border-color: #dbe5e6; }
+.ai-student-entry .text-button { flex-shrink: 0; font-size: 11px; }
+.ai-review-shortcut { justify-content: space-between; background: #eaf0f3; border: 1px solid #dce5e9; padding: 14px 16px; border-radius: 12px; margin: 16px 0; }
+.ai-review-shortcut .strong { font-size: 12px; }
+.ai-review-shortcut .text-button { flex-shrink: 0; font-size: 11px; }
+.ai-submit-preview { display: flex; align-items: flex-start; gap: 12px; padding: 17px; background: #ecf2f3; border: 1px solid #dce7e8; border-radius: 13px; margin: 20px 0; }
+.ai-submit-preview .strong { font-size: 12px; }
+.ai-batch-title { font-family: STSong, SimSun, serif; font-size: 24px; line-height: 1.5; margin-top: 6px; }
+.ai-batch-subtitle { margin: 10px 0 21px; }
+.ai-batch-overview { background: #edf2f2; border: 1px solid #dce5e4; padding: 20px; border-radius: 17px; }
+.ai-batch-percent { font-family: Georgia, serif; font-size: 31px; color: #567e80; }
+.ai-batch-percent text { font-size: 12px; }
+.ai-batch-overview .section-title { font-size: 15px; margin-top: 3px; }
+.ai-batch-counts { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; margin: 20px 0; }
+.ai-batch-counts > view + view { border-left: 1px solid #d9e2dd; }
+.ai-batch-counts text { font-family: Georgia, serif; font-size: 24px; color: #45696c; }
+.ai-batch-counts view view { font-size: 10px; color: #85938b; }
+.ai-batch-start { font-size: 13px; }
+.ai-batch-scope { margin: 15px 2px 25px; line-height: 1.85; }
+.ai-batch-filters { display: flex; gap: 4px; flex-wrap: wrap; margin: 15px 0; }
+.ai-batch-filters button { font-size: 11px; padding: 6px 11px; border-radius: 18px; color: #829187; }
+.ai-batch-filters button.active { background: #e0ebdf; color: #3e6a48; font-weight: 600; }
+.ai-batch-row { padding: 15px 16px 0; margin-bottom: 11px; }
+.ai-batch-row-top { display: flex; align-items: center; gap: 10px; }
+.ai-row-status { flex-shrink: 0; border-radius: 5px; font-size: 9px; background: #f0f2ee; color: #879389; padding: 3px 7px; }
+.ai-row-status.completed { background: #e9f2e1; color: #5c7e4b; }
+.ai-row-status.working { background: #e5edf4; color: #6886a0; }
+.ai-row-status.failed { background: #faeae2; color: #b67b63; }
+.ai-batch-row-bottom { display: flex; align-items: center; gap: 10px; justify-content: space-between; border-top: 1px solid var(--line); padding: 10px 0; margin-top: 12px; }
+.ai-batch-row-bottom .text-button { flex-shrink: 0; font-size: 11px; }
+.ai-batch-row-bottom .tiny { font-size: 9px; }
+@media (max-width: 360px) {
+  .ai-batch-filters button { padding: 5px 8px; font-size: 10px; }
+  .ai-work-context { gap: 8px; }
+  .ai-result-headline { font-size: 22px; }
+  .ai-row-status { font-size: 8px; padding: 3px 5px; }
+  .ai-batch-row { padding-left: 12px; padding-right: 12px; }
+  .ai-review-shortcut { gap: 8px; }
+  .ai-review-shortcut .tiny { font-size: 9px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-status-dot.pulsing { animation: none; }
+  .ai-progress-fill { transition: none; }
+}

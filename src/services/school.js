@@ -28,6 +28,15 @@ export function classAssignments(state, classId) {
         e.createdAt.localeCompare(a.createdAt) || e.id.localeCompare(a.id),
     );
 }
+/** Former members remain reviewable under the original assignment's class. */
+export function formerAssignmentStudents(state, assignmentId) {
+  const assignment = state.assignments.find((item) => item.id === assignmentId);
+  if (!assignment) return [];
+  return state.students
+    .filter((item) => item.archived || item.classId !== assignment.classId)
+    .map((student) => ({ ...student, submission: latestSubmission(state, assignmentId, student.id) }))
+    .filter((item) => item.submission);
+}
 export function assignmentCounts(state, assignment) {
   const t = activeStudents(state, assignment.classId),
     s = {

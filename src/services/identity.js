@@ -1,3 +1,5 @@
+import { ADMIN_INVITATIONS } from "./administration.js";
+
 export function createTeachers(classes, classIds) {
   return [
     {
@@ -175,6 +177,7 @@ export const TEACHER_INVITATIONS = [
 export const DEMO_INVITATIONS = [
   ...STUDENT_INVITATIONS.filter((invitation) => !invitation.legacy),
   ...TEACHER_INVITATIONS,
+  ...ADMIN_INVITATIONS,
 ];
 export function getBoundStudent(state, role) {
   if (role !== "student") return;
@@ -185,6 +188,7 @@ export function getBoundStudent(state, role) {
 }
 export function previewStudentBinding(state, code, role) {
   assertActiveRole(role);
+  if (role !== "student") throw new Error("此绑定入口仅供学生使用。");
   const s = (function (e) {
       if ("teacher" === e) throw new Error("教师身份暂不使用此绑定入口。");
       return e;
@@ -223,7 +227,7 @@ export function previewStudentBinding(state, code, role) {
   };
 }
 export function assertActiveRole(role) {
-  if (role !== "teacher" && role !== "student")
-    throw new Error("请选择教师或学生身份。");
+  if (role !== "teacher" && role !== "student" && role !== "admin")
+    throw new Error("请选择教师或学生身份，也可选择已获授权的管理员。");
   return role;
 }

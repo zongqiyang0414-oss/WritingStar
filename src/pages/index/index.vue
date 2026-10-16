@@ -8,6 +8,9 @@ import ReviewEditor from "../../components/ReviewEditor.vue";
 import StudentGrowth from "../../components/StudentGrowth.vue";
 import StudentRanking from "../../components/StudentRanking.vue";
 import TeachingClasses from "../../components/TeachingClasses.vue";
+import AdminWorkspace from "../../components/AdminWorkspace.vue";
+import AiReviewPanel from "../../components/AiReviewPanel.vue";
+import AiBatchReview from "../../components/AiBatchReview.vue";
 import { displayPhoto } from "../../services/presentation.js";
 import { growthIllustration } from "../../services/assets.js";
 import { ref } from "vue";
@@ -43,14 +46,30 @@ const { bottomInset: bottomInset } = {
     startupError: startupError,
     selectedAssignment: selectedAssignment,
     selectedSubmission: selectedSubmission,
+    aiTask,
+    aiRows,
+    aiSummary,
+    aiStateLabel,
+    openAiReview,
+    openAiBatch,
+    beginAiBatch,
+    startSingleAi,
+    refreshAi,
+    applyAiSuggestions,
+    reviewAiSubmission,
     mine: mine,
     isTeacher: isTeacher,
+    isAdmin,
+    adminIdentity,
+    adminDirty,
+    adminAction,
     identity: identity,
     myHistory: myHistory,
     feedback: feedback,
     canSubmit: canSubmit,
     title: title,
     studentsInAssignment: studentsInAssignment,
+    formerStudentsInAssignment,
     rubric: rubric,
     total: total,
     latest: latest,
@@ -155,7 +174,7 @@ const { bottomInset: bottomInset } = {
       </view>
       <view class="intro-foot">
         <text class="tiny-dot" />
-        原型展示 · v0.9.1
+        原型展示 · v0.11.0
       </view>
     </view>
     <view class="mobile-preview-tools">
@@ -190,7 +209,7 @@ const { bottomInset: bottomInset } = {
           </view>
           <view class="header-avatar">
             {{
-              isTeacher
+              isAdmin ? adminIdentity?.initial || "人" : isTeacher
                 ? teacherIdentity?.initial || "人"
                 : boundStudent?.initial || "人"
             }}
@@ -216,7 +235,7 @@ const { bottomInset: bottomInset } = {
             :key="0"
             :organizations="organizationOptions"
             :model-value="currentOrganization?.id || ''"
-            :allow-switch="isTeacher"
+            :allow-switch="isTeacher || isAdmin"
             :disabled="busy"
             @update:modelValue="switchOrganization"
           />
@@ -228,6 +247,37 @@ const { bottomInset: bottomInset } = {
           <view class="paragraph">
             {{ startupError }}
           </view>
+        </view>
+      </template>
+      <template v-else-if="isAdmin">
+        <view key="admin-content" class="page-body admin-page-body">
+          <InvitationBinding
+            v-if="needsBinding"
+            :role="role"
+            :signed-in="accountSignedIn"
+            :candidate="bindingCandidate"
+            :busy="busy"
+            v-model:code="inviteCode"
+            @login="loginForBinding"
+            @preview="previewBinding"
+            @edit="editBindingCode"
+            @confirm="confirmBinding"
+            @help="bindingHelp"
+          />
+          <view v-if="error" class="error-message" role="alert">{{ error }}</view>
+          <AdminWorkspace
+            v-if="!needsBinding"
+            :key="currentOrganization?.id"
+            :state="state"
+            :organization="currentOrganization"
+            :administrator="adminIdentity"
+            :section="screen"
+            :busy="busy"
+            @navigate="go"
+            @action="adminAction"
+            @confirm="modal = $event"
+            @dirty="adminDirty = $event"
+          />
         </view>
       </template>
       <template v-else>
@@ -281,6 +331,36 @@ const { bottomInset: bottomInset } = {
                 @confirm="confirmBinding"
                 @help="bindingHelp"
                 v-model:code="inviteCode"
+              />
+            </template>
+            <template v-else-if="screen === 'aiReview' && selectedSubmission">
+              <AiReviewPanel
+                key="single-ai-review"
+                :submission="selectedSubmission"
+                :assignment="assignmentFor(selectedSubmission)"
+                :student="studentFor(selectedSubmission)"
+                :task="aiTask"
+                :teacher="isTeacher"
+                :busy="busy"
+                @start="startSingleAi"
+                @refresh="refreshAi"
+                @review="reviewAiSubmission"
+                @apply="applyAiSuggestions"
+                @feedback="openFeedback(selectedSubmission)"
+                @back="back"
+              />
+            </template>
+            <template v-else-if="screen === 'aiBatch' && isTeacher && selectedAssignment">
+              <AiBatchReview
+                :key="'ai-batch-' + selectedAssignment.id"
+                :assignment="selectedAssignment"
+                :rows="aiRows"
+                :summary="aiSummary"
+                :busy="busy"
+                @start="beginAiBatch(false)"
+                @retry="beginAiBatch(true)"
+                @view="openAiReview"
+                @feedback="openFeedback"
               />
             </template>
             <template v-else>
@@ -639,6 +719,12 @@ const { bottomInset: bottomInset } = {
                               </view>
                             </view>
                             <template v-if="isTeacher">
+                              <view class="card ai-assignment-entry">
+                                <view class="ai-entry-heading"><view class="ai-entry-symbol">✧</view><view class="grow"><view class="section-title">全班AI批阅</view><view class="tiny subtle">已提交作品统一批阅，逐份查看双写建议</view></view></view>
+                                <view class="ai-entry-counts"><text>待AI批阅 {{ aiSummary.eligible }}</text><text>处理中 {{ aiSummary.running }}</text><text>AI已完成 {{ aiSummary.completed }}</text></view>
+                                <button class="primary full-width" :disabled="busy || !aiSummary.eligible" @click="beginAiBatch(false)">{{ aiSummary.eligible ? '一键AI批阅 · ' + aiSummary.eligible + ' 份' : aiSummary.running ? '全班批阅进行中' : '暂无待AI批阅作品' }}</button>
+                                <button class="text-button full-width spaced-small" :disabled="busy" @click="openAiBatch">查看全班进度与结果 ›</button>
+                              </view>
                               <view class="section-heading">
                                 <view class="section-title"> 提交名单 </view>
                                 <text class="small subtle">
@@ -737,7 +823,13 @@ const { bottomInset: bottomInset } = {
                                   </view>
                                 </view>
                               </template>
-                              <template v-if="studentsInAssignment.length" />
+                              <view v-if="formerStudentsInAssignment.length" class="section-heading"><view class="section-title">已离班学生的提交</view><text class="tiny subtle">保留原班批阅</text></view>
+                              <view v-for="former in formerStudentsInAssignment" :key="former.id" class="student-row card former-student-row">
+                                <view class="avatar pale">{{ former.initial }}</view>
+                                <view class="grow"><view class="strong">{{ former.name }}</view><view class="tiny subtle">{{ former.archived ? '已归档' : '已调班' }} · 第 {{ former.submission.version }} 版</view></view>
+                                <view class="row-actions"><text :class="['badge', statusClass(former.submission)]">{{ statusLabel(former.submission) }}</text><button class="text-button" :disabled="busy" @click="former.submission.status === 'published' ? openFeedback(former.submission) : openReview(former.submission)">{{ former.submission.status === 'published' ? '查看反馈' : '进入批阅' }} ›</button></view>
+                              </view>
+                              <template v-if="studentsInAssignment.length || formerStudentsInAssignment.length" />
                               <template v-else>
                                 <view :key="0" class="empty-state">
                                   这个状态下还没有作品。
@@ -745,6 +837,7 @@ const { bottomInset: bottomInset } = {
                               </template>
                             </template>
                             <template v-else>
+                              <view v-if="mine" class="card ai-student-entry"><view class="ai-entry-heading"><view class="ai-entry-symbol">✧</view><view class="grow"><view class="section-title">我的AI批阅</view><view class="tiny subtle">{{ aiStateLabel(mine) }} · 第 {{ mine.version }} 版</view></view><button class="text-button" :disabled="busy" @click="openAiReview(mine)">{{ mine.aiReview?.result ? '查看建议' : '查看进度' }} ›</button></view><view class="small subtle spaced-small">AI学习建议可以先看，老师正式反馈单独发布。</view></view>
                               <view class="section-heading">
                                 <view class="section-title"> 我的提交 </view>
                                 <text class="small subtle">
@@ -778,7 +871,7 @@ const { bottomInset: bottomInset } = {
                                           ? "处理失败，作品已保留。请重试，或联系老师进行人工批阅。"
                                           : "processing" === mine.status
                                             ? "作品已接收，正在处理。你可以稍后回来查看。"
-                                            : "作品已提交，等待老师复核。老师发布后，你才能看到评分和建议。"
+                                            : "作品已提交，可以先查看AI学习建议。老师正式反馈将在复核后单独发布。"
                                     }}
                                   </view>
                                   <template v-if="'published' === mine.status">
@@ -880,6 +973,7 @@ const { bottomInset: bottomInset } = {
                                   {{ statusLabel(selectedSubmission) }}
                                 </text>
                               </view>
+                              <view class="ai-review-shortcut"><view><view class="strong">AI双写建议</view><view class="tiny subtle">{{ aiStateLabel(selectedSubmission) }} · 与教师草稿分别保留</view></view><button class="text-button" :disabled="busy" @click="openAiReview(selectedSubmission)">查看AI批阅 ›</button></view>
                               <template
                                 v-if="
                                   'processing' === selectedSubmission.status ||
@@ -1045,13 +1139,14 @@ const { bottomInset: bottomInset } = {
                                     {{
                                       mine
                                         ? "下一次，写得更好"
-                                        : "让老师看见你的作品"
+                                        : "提交作品，看看AI的建议"
                                     }}
                                   </view>
                                   <view class="paragraph small subtle">
                                     整页拍清楚，按阅读顺序排列。提交前检查是否有缺页或模糊的照片。
                                   </view>
                                 </view>
+                                <view class="ai-submit-preview"><view class="ai-entry-symbol">✧</view><view class="grow"><view class="strong">提交后，开始AI双写批阅</view><view class="tiny subtle">识别作品 → 分析书写与写作 → 生成学习建议</view><view class="tiny subtle spaced-small">你可以先看AI建议，老师正式反馈单独发布。</view></view></view>
                                 <view class="upload-area">
                                   <view class="upload-icon"> ＋ </view>
                                   <view class="strong"> 添加作品照片 </view>
@@ -1152,8 +1247,7 @@ const { bottomInset: bottomInset } = {
                                   {{
                                     busy
                                       ? "提交中…"
-                                      : "确认页序并提交" +
-                                        (mine ? "订正" : "作品")
+                                      : mine ? "提交订正并开始AI批阅" : "提交并开始AI批阅"
                                   }}
                                 </button>
                               </view>
@@ -1454,9 +1548,10 @@ const { bottomInset: bottomInset } = {
                                             :key="2"
                                             class="small subtle spaced-small"
                                           >
-                                            反馈尚未发布，本轮暂不显示评分。
+                                            {{ item7.aiReview ? '老师反馈尚未发布，AI建议单独查看。' : '反馈尚未发布，本轮暂不显示评分。' }}
                                           </view>
                                         </template>
+                                        <button v-if="item7.aiReview" class="text-button spaced-small ai-history-entry" :disabled="busy" @click="openAiReview(item7)">{{ item7.aiReview.result ? '查看这一版AI建议' : '查看这一版AI批阅进度' }} ›</button>
                                       </view>
                                     </template>
                                     <template v-if="myHistory.length" />
@@ -1782,10 +1877,16 @@ const { bottomInset: bottomInset } = {
           </view>
         </template>
       </template>
-      <template v-if="needsBinding" />
+      <view v-if="isAdmin && !needsBinding" key="admin-navigation" class="bottom-nav admin-bottom-nav">
+        <button :class="{ active: screen === 'home' }" :disabled="busy" @click="go('home')"><text class="nav-glyph">⌂</text><text>管理台</text></button>
+        <button :class="{ active: screen === 'adminClasses' }" :disabled="busy" @click="go('adminClasses')"><text class="nav-glyph">▦</text><text>班级</text></button>
+        <button :class="{ active: screen === 'adminStudents' }" :disabled="busy" @click="go('adminStudents')"><text class="nav-glyph">♙</text><text>学生</text></button>
+        <button :class="{ active: screen === 'profile' }" :disabled="busy" @click="go('profile')"><text class="nav-glyph">○</text><text>我的</text></button>
+      </view>
+      <template v-else-if="needsBinding" />
       <template v-else>
         <view
-          :key="3"
+          key="learning-navigation"
           :class="['bottom-nav', { 'learner-bottom-nav': !isTeacher }]"
         >
           <button

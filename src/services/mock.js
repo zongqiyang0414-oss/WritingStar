@@ -17,10 +17,13 @@ import {
 import { emptyReview, validateReview } from "./rubric.js";
 import { migrateStudentEntry } from "./migration.js";
 import { withClassPractice } from "./classPractice.js";
+import { prepareAdministration, previewAdminBinding } from "./administration.js";
+import { AiReviewService, AI_RUNNING, createAiTask, settleAiTask } from "./aiReview.js";
 
 export const clone = (e) => JSON.parse(JSON.stringify(e));
-export class MockService {
+export class MockService extends AiReviewService {
   constructor(storage, clock = () => new Date()) {
+    super();
     this["state"] = undefined;
     this.storage = storage;
     this.clock = clock;
@@ -119,7 +122,8 @@ export class MockService {
           })(s, clock())
         : createSeed(clock()),
     );
-    (s && 6 === s.schemaVersion) || storage.write(this.state);
+    this.state = prepareAdministration(this.state);
+    (s && 6 === s.schemaVersion && s.administrationVersion === 1) || storage.write(this.state);
   }
   read() {
     return clone(this.state);
@@ -131,13 +135,16 @@ export class MockService {
   async signIn(role) {
     assertActiveRole(role);
     const a = this.read();
-    "teacher" === role
+    "admin" === role
+      ? (a.adminAccount.signedIn = true)
+      : "teacher" === role
       ? (a.teacherAccount.signedIn = true)
       : (a.accounts[role].signedIn = true);
     this.commit(a);
   }
   previewBinding(code, role) {
     assertActiveRole(role);
+    if (role === "admin") return clone(previewAdminBinding(this.state, code));
     return clone(
       "teacher" === role
         ? (function (e, a) {
@@ -181,7 +188,9 @@ export class MockService {
     assertActiveRole(role);
     const t = this.previewBinding(code, role),
       s = this.read();
-    "teacher" === t.role
+    "admin" === t.role
+      ? (s.adminAccount = { signedIn: true, administratorId: t.administrator.id })
+      : "teacher" === t.role
       ? ((s.teacherAccount = {
           signedIn: true,
           teacherId: t.teacher.id,
@@ -197,7 +206,9 @@ export class MockService {
   async restartBinding(role) {
     assertActiveRole(role);
     const a = this.read();
-    "teacher" === role
+    "admin" === role
+      ? (a.adminAccount = { signedIn: false, administratorId: null })
+      : "teacher" === role
       ? (a.teacherAccount = {
           signedIn: false,
           teacherId: null,
@@ -250,6 +261,7 @@ export class MockService {
   }
   feedback(submissionId, role) {
     assertActiveRole(role);
+    if (role === "admin") throw new Error("查看作品反馈需要教师或学生身份。");
     const t = this.get(this.state, submissionId);
     if (
       ("teacher" === role && this.teachingSubmission(submissionId, role),
@@ -264,6 +276,7 @@ export class MockService {
       l = this.get(s, submissionId);
     if ("pending" !== l.status) throw new Error("这份作品当前不能修改草稿。");
     l.draft = clone(review);
+    if (l.aiReview) l.draftRevision = (l.draftRevision || 0) + 1;
     this.commit(s);
   }
   async publish(submissionId, review, role) {
@@ -279,9 +292,10 @@ export class MockService {
     n.status = "published";
     n.publishedAt = this.clock().toISOString();
     n.publishedBy = teacherSummary(this.teacher(role));
+    if (n.aiReview && AI_RUNNING.includes(n.aiReview.state)) n.aiReview.state = "cancelled";
     this.commit(l);
   }
-  async submit(assignmentId, photos, note, role, fail = false) {
+  async submit(assignmentId, photos, note, role, fail = false, failAnalysis = false) {
     if (role !== "student") throw new Error("此入口仅供学生提交。");
     const n = this.state.assignments.find((a) => a.id === assignmentId);
     if (!n) throw new Error("作业不存在。");
@@ -315,7 +329,9 @@ export class MockService {
         draft: emptyReview(),
         published: null,
         publishedAt: null,
+        draftRevision: 0,
       };
+    c.aiReview = createAiTask(c, "student", this.clock(), failAnalysis);
     d.submissions.push(c);
     this.commit(d);
     return clone(c);
@@ -323,6 +339,14 @@ export class MockService {
   async finishAnalysis(submissionId, fail = false) {
     const t = this.read(),
       s = this.get(t, submissionId);
+    if (s.status === "published") return;
+    if (s.aiReview) {
+      if (!AI_RUNNING.includes(s.aiReview.state) && s.aiReview.state !== "failed") return;
+      if (s.aiReview.state === "failed") s.aiReview = createAiTask(s, s.aiReview.source, this.clock());
+      settleAiTask(s, this.clock(), fail);
+      this.commit(t);
+      return;
+    }
     ("processing" !== s.status && "failed" !== s.status) ||
       ((s.status = fail ? "failed" : "pending"),
       fail ||
@@ -339,6 +363,8 @@ export class MockService {
       throw new Error("当前作品无需转入人工批阅。");
     s.status = "pending";
     s.draft = emptyReview();
+    s.draftRevision = (s.draftRevision || 0) + 1;
+    if (s.aiReview && AI_RUNNING.includes(s.aiReview.state)) s.aiReview.state = "cancelled";
     this.commit(t);
   }
   async createAssignment(input, role) {
@@ -371,7 +397,7 @@ export class MockService {
   reset() {
     const e = createSeed(this.clock());
     this.commit(
-      this.state.classPracticeVersion ? withClassPractice(e, this.clock()) : e,
+      prepareAdministration(this.state.classPracticeVersion ? withClassPractice(e, this.clock()) : e),
     );
   }
 }
