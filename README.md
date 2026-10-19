@@ -34,7 +34,7 @@ npm run build:h5
 npm run build:mp-weixin
 ```
 
-H5输出在`dist/build/h5/`，微信输出在`dist/build/mp-weixin/`。微信开发者工具导入后，正式调试需填写自己的AppID；仓库不包含AppSecret或上传私钥。微信目标已做编译与平台API模拟检查，尚未完成真机和后端联调。
+H5输出在`dist/build/h5/`，微信输出在`dist/build/mp-weixin/`。微信AppID已按用户提供的`wxe3fefef9eaab17c3`写入`src/manifest.json`的`mp-weixin.appid`，构建后导入微信开发者工具会自动带上；仓库不包含AppSecret或上传私钥。微信目标已做编译与平台API模拟检查，尚未完成真机和后端联调。
 
 Sites使用`npm run build:site`生成`dist/client/`，沿用原私有Site和网址。GitHub Actions检查当前源码、运行业务测试并保存H5和微信构建产物；归档预览单独验证。当前源码构建不依赖`preview/dist/`。
 
