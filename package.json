@@ -7,7 +7,7 @@
     "type-check": "vue-tsc --noEmit",
     "dev:h5": "uni --host 127.0.0.1 --port 5173",
     "dev": "uni --host 127.0.0.1 --port 5173",
-    "build:mp-weixin": "uni build -p mp-weixin",
+    "build:mp-weixin": "uni build -p mp-weixin && node scripts/verify-weixin-styles.mjs",
     "dev:preview": "npm run dev",
     "test:preview": "node --test --test-isolation=none scripts/preview-regression-v091.cjs",
     "verify:preview": "node scripts/verify-preview.mjs",
@@ -35,7 +35,9 @@
     "@babel/parser": "7.25.6",
     "@babel/generator": "7.29.8",
     "@babel/traverse": "7.29.10",
-    "@babel/types": "7.25.6"
+    "@babel/types": "7.25.6",
+    "postcss": "8.5.29",
+    "postcss-selector-parser": "6.1.2"
   },
   "private": true
 }
