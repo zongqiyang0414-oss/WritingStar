@@ -1,29 +1,15 @@
 <script setup>
-import { activeStudents } from "../services/school.js";
 import { computed } from "vue";
-import { organizationForClass } from "../services/identity.js";
-import { rankedStudents } from "../services/analytics.js";
 
 const props = defineProps({
-  state: {},
-  classId: {},
+  model: {},
   category: {},
   query: {},
 });
 const emit = defineEmits(["student", "update:category", "update:query"]);
-const ranks = computed(() =>
-    rankedStudents(props.state, props.classId, props.category, props.query),
-  ),
-  studentCount = computed(
-    () => activeStudents(props.state, props.classId).length,
-  ),
-  className = computed(() => {
-    var e;
-    return props.state.classes.find((e) => e.id === props.classId)?.name;
-  }),
-  categoryLabel = computed(() =>
-    "handwriting" === props.category ? "书写" : "写作",
-  );
+const categoryLabel = computed(() =>
+  "handwriting" === props.category ? "书写" : "写作",
+);
 function updateQuery(e) {
   emit("update:query", e.detail.value);
 }
@@ -32,8 +18,8 @@ function updateQuery(e) {
 <template>
   <view class="analytics-page-intro">
     <view class="eyebrow">
-      {{ organizationForClass(state, classId)?.name }} · {{ className }} ·
-      {{ studentCount }} 位学生
+      {{ model.organizationName }} · {{ model.className }} ·
+      {{ model.studentCount }} 位学生
     </view>
     <view class="detail-title"> 每个孩子，都在成长 </view>
   </view>
@@ -73,13 +59,13 @@ function updateQuery(e) {
     <text class="small subtle">
       {{
         query.trim()
-          ? "找到 " + ranks.length + " 位学生 · 保留全班名次"
+          ? "找到 " + model.ranks.length + " 位学生 · 保留全班名次"
           : "全班学生 · 按平均分从高到低"
       }}
     </text>
     <text class="tiny subtle"> {{ categoryLabel }} / 100 </text>
   </view>
-  <template v-for="item1 in ranks" :key="item1.id">
+  <template v-for="item1 in model.ranks" :key="item1.id">
     <button class="ranking-row card" @click="(e) => emit('student', item1)">
       <text
         :class="[
@@ -113,7 +99,7 @@ function updateQuery(e) {
       <text class="entry-arrow"> › </text>
     </button>
   </template>
-  <template v-if="ranks.length" />
+  <template v-if="model.ranks.length" />
   <template v-else>
     <view :key="0" class="empty-state card">
       {{

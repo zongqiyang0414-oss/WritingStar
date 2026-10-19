@@ -20,7 +20,14 @@ import { withClassPractice } from "./classPractice.js";
 import { prepareAdministration, previewAdminBinding } from "./administration.js";
 import { AiReviewService, AI_RUNNING, createAiTask, settleAiTask } from "./aiReview.js";
 
+import { latestSubmission } from "./school.js";
+
 export const clone = (e) => JSON.parse(JSON.stringify(e));
+function freezeSnapshot(value) {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) freezeSnapshot(child);
+  return Object.freeze(value);
+}
 export class MockService extends AiReviewService {
   constructor(storage, clock = () => new Date()) {
     super();
@@ -128,19 +135,37 @@ export class MockService extends AiReviewService {
   read() {
     return clone(this.state);
   }
+  snapshot() {
+    return freezeSnapshot(this.state);
+  }
   commit(state) {
     this.storage.write(state);
     this.state = state;
   }
+  updateSubmission(submissionId, changes) {
+    const current = this.get(this.state, submissionId),
+      submissions = [...this.state.submissions];
+    submissions[submissions.indexOf(current)] = { ...current, ...changes };
+    this.commit({ ...this.state, submissions });
+  }
   async signIn(role) {
     assertActiveRole(role);
-    const a = this.read();
-    "admin" === role
-      ? (a.adminAccount.signedIn = true)
-      : "teacher" === role
-      ? (a.teacherAccount.signedIn = true)
-      : (a.accounts[role].signedIn = true);
-    this.commit(a);
+    this.commit(
+      role === "admin"
+        ? { ...this.state, adminAccount: { ...this.state.adminAccount, signedIn: true } }
+        : role === "teacher"
+        ? {
+            ...this.state,
+            teacherAccount: { ...this.state.teacherAccount, signedIn: true },
+          }
+        : {
+            ...this.state,
+            accounts: {
+              ...this.state.accounts,
+              [role]: { ...this.state.accounts[role], signedIn: true },
+            },
+          },
+    );
   }
   previewBinding(code, role) {
     assertActiveRole(role);
@@ -187,7 +212,7 @@ export class MockService extends AiReviewService {
   async bindInvitation(code, role) {
     assertActiveRole(role);
     const t = this.previewBinding(code, role),
-      s = this.read();
+      s = { ...this.state };
     "admin" === t.role
       ? (s.adminAccount = { signedIn: true, administratorId: t.administrator.id })
       : "teacher" === t.role
@@ -196,16 +221,16 @@ export class MockService extends AiReviewService {
           teacherId: t.teacher.id,
         }),
         (s.teacherClassIds = t.classes.map((e) => e.id)))
-      : (s.accounts[t.role] = {
-          signedIn: true,
-          studentId: t.student.id,
+      : (s.accounts = {
+          ...this.state.accounts,
+          [t.role]: { signedIn: true, studentId: t.student.id },
         });
     this.commit(s);
     return clone(t);
   }
   async restartBinding(role) {
     assertActiveRole(role);
-    const a = this.read();
+    const a = { ...this.state };
     "admin" === role
       ? (a.adminAccount = { signedIn: false, administratorId: null })
       : "teacher" === role
@@ -213,9 +238,9 @@ export class MockService extends AiReviewService {
           signedIn: false,
           teacherId: null,
         })
-      : (a.accounts[role] = {
-          signedIn: false,
-          studentId: null,
+      : (a.accounts = {
+          ...this.state.accounts,
+          [role]: { signedIn: false, studentId: null },
         });
     this.commit(a);
   }
@@ -251,13 +276,7 @@ export class MockService extends AiReviewService {
     return t;
   }
   latest(assignmentId, studentId) {
-    return clone(
-      this.state.submissions
-        .filter(
-          (t) => t.assignmentId === assignmentId && t.studentId === studentId,
-        )
-        .sort((e, a) => a.version - e.version)[0] || null,
-    );
+    return clone(latestSubmission(this.state, assignmentId, studentId));
   }
   feedback(submissionId, role) {
     assertActiveRole(role);
@@ -272,28 +291,25 @@ export class MockService extends AiReviewService {
   }
   async saveDraft(submissionId, review, role) {
     this.teachingSubmission(submissionId, role);
-    const s = this.read(),
-      l = this.get(s, submissionId);
+    const l = this.get(this.state, submissionId);
     if ("pending" !== l.status) throw new Error("这份作品当前不能修改草稿。");
-    l.draft = clone(review);
-    if (l.aiReview) l.draftRevision = (l.draftRevision || 0) + 1;
-    this.commit(s);
+    this.updateSubmission(submissionId, { draft: clone(review), ...(l.aiReview && { draftRevision: (l.draftRevision || 0) + 1 }) });
   }
   async publish(submissionId, review, role) {
     this.teachingSubmission(submissionId, role);
     const s = validateReview(review);
     if (s) throw new Error(s);
-    const l = this.read(),
-      n = this.get(l, submissionId);
+    const n = this.get(this.state, submissionId);
     if ("pending" !== n.status)
       throw new Error("反馈已经发布或作品仍在处理中，请刷新查看。");
-    n.draft = clone(review);
-    n.published = clone(review);
-    n.status = "published";
-    n.publishedAt = this.clock().toISOString();
-    n.publishedBy = teacherSummary(this.teacher(role));
-    if (n.aiReview && AI_RUNNING.includes(n.aiReview.state)) n.aiReview.state = "cancelled";
-    this.commit(l);
+    this.updateSubmission(submissionId, {
+      draft: clone(review),
+      published: clone(review),
+      status: "published",
+      publishedAt: this.clock().toISOString(),
+      publishedBy: teacherSummary(this.teacher(role)),
+      ...(n.aiReview && AI_RUNNING.includes(n.aiReview.state) && { aiReview: { ...n.aiReview, state: "cancelled" } }),
+    });
   }
   async submit(assignmentId, photos, note, role, fail = false, failAnalysis = false) {
     if (role !== "student") throw new Error("此入口仅供学生提交。");
@@ -310,12 +326,11 @@ export class MockService extends AiReviewService {
       throw new Error("请添加 1–6 张作品图片。");
     if (new Set(photos.map((e) => e.id)).size !== photos.length)
       throw new Error("图片重复，请重新选择。");
-    const u = this.latest(assignmentId, i.id);
+    const u = latestSubmission(this.state, assignmentId, i.id);
     if (u && "published" !== u.status)
       throw new Error("本轮作品已提交，请等待老师发布反馈后再订正。");
     if (fail) throw new Error("提交失败，图片已保留，请重试。");
-    const d = this.read(),
-      o = this.clock().toISOString(),
+    const o = this.clock().toISOString(),
       c = {
         id: `submission-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         assignmentId,
@@ -332,40 +347,37 @@ export class MockService extends AiReviewService {
         draftRevision: 0,
       };
     c.aiReview = createAiTask(c, "student", this.clock(), failAnalysis);
-    d.submissions.push(c);
-    this.commit(d);
+    this.commit({ ...this.state, submissions: [...this.state.submissions, c] });
     return clone(c);
   }
   async finishAnalysis(submissionId, fail = false) {
-    const t = this.read(),
-      s = this.get(t, submissionId);
-    if (s.status === "published") return;
-    if (s.aiReview) {
-      if (!AI_RUNNING.includes(s.aiReview.state) && s.aiReview.state !== "failed") return;
-      if (s.aiReview.state === "failed") s.aiReview = createAiTask(s, s.aiReview.source, this.clock());
-      settleAiTask(s, this.clock(), fail);
-      this.commit(t);
+    const current = this.get(this.state, submissionId);
+    if (current.status === "published") return;
+    if (current.aiReview) {
+      if (!AI_RUNNING.includes(current.aiReview.state) && current.aiReview.state !== "failed") return;
+      const submission = clone(current);
+      if (submission.aiReview.state === "failed") submission.aiReview = createAiTask(submission, submission.aiReview.source, this.clock());
+      settleAiTask(submission, this.clock(), fail);
+      this.updateSubmission(submissionId, submission);
       return;
     }
-    ("processing" !== s.status && "failed" !== s.status) ||
-      ((s.status = fail ? "failed" : "pending"),
-      fail ||
-        (s.draft = s.photos.every((e) => e.sample)
-          ? sampleReview()
-          : emptyReview()),
-      this.commit(t));
+    if (current.status !== "processing" && current.status !== "failed") return;
+    this.updateSubmission(submissionId, {
+      status: fail ? "failed" : "pending",
+      ...(!fail && { draft: current.photos.every((photo) => photo.sample) ? sampleReview() : emptyReview() }),
+    });
   }
   async manualReview(submissionId, role) {
     this.teachingSubmission(submissionId, role);
-    const t = this.read(),
-      s = this.get(t, submissionId);
+    const s = this.get(this.state, submissionId);
     if ("failed" !== s.status && "processing" !== s.status)
       throw new Error("当前作品无需转入人工批阅。");
-    s.status = "pending";
-    s.draft = emptyReview();
-    s.draftRevision = (s.draftRevision || 0) + 1;
-    if (s.aiReview && AI_RUNNING.includes(s.aiReview.state)) s.aiReview.state = "cancelled";
-    this.commit(t);
+    this.updateSubmission(submissionId, {
+      status: "pending",
+      draft: emptyReview(),
+      draftRevision: (s.draftRevision || 0) + 1,
+      ...(s.aiReview && AI_RUNNING.includes(s.aiReview.state) && { aiReview: { ...s.aiReview, state: "cancelled" } }),
+    });
   }
   async createAssignment(input, role) {
     const t = this.teachingClass(input.classId, role);
@@ -376,18 +388,16 @@ export class MockService extends AiReviewService {
       Date.parse(input.dueAt) <= this.clock().getTime()
     )
       throw new Error("截止时间需要晚于现在。");
-    const s = this.read(),
-      l = {
-        ...input,
-        title: input.title.trim(),
-        requirements: input.requirements.trim(),
-        id: `assignment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        className: t.name,
-        createdAt: this.clock().toISOString(),
-        teacher: teacherSummary(this.teacher(role)),
-      };
-    s.assignments.unshift(l);
-    this.commit(s);
+    const l = {
+      ...input,
+      title: input.title.trim(),
+      requirements: input.requirements.trim(),
+      id: `assignment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      className: t.name,
+      createdAt: this.clock().toISOString(),
+      teacher: teacherSummary(this.teacher(role)),
+    };
+    this.commit({ ...this.state, assignments: [l, ...this.state.assignments] });
     return clone(l);
   }
   prepareClassPractice() {

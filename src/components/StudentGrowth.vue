@@ -1,88 +1,40 @@
 <script setup>
 import ScoreTrend from "./ScoreTrend.vue";
 import { computed } from "vue";
-import {
-  formatDate,
-  rankedStudents,
-  studentHistory,
-  studentSummary,
-} from "../services/analytics.js";
-import { organizationForClass } from "../services/identity.js";
 import { taskStatus } from "../services/school.js";
 
 const props = defineProps({
-  state: {},
-  classId: {},
-  studentId: {},
-  category: {
-    default: "handwriting",
-  },
-  audience: {
-    default: "teacher",
-  },
+  model: {},
+  category: { default: "handwriting" },
+  audience: { default: "teacher" },
 });
 const emit = defineEmits(["feedback"]);
-const student = computed(() =>
-    props.state.students.find(
-      (e) => e.id === props.studentId && e.classId === props.classId,
-    ),
-  ),
-  rankEntry = computed(() =>
-    "teacher" === props.audience
-      ? rankedStudents(props.state, props.classId, props.category).find(
-          (e) => e.id === props.studentId,
-        )
-      : undefined,
-  ),
-  summary = computed(() =>
-    studentSummary(props.state, props.classId, props.studentId),
-  ),
-  history = computed(() =>
-    studentHistory(props.state, props.classId, props.studentId),
-  ),
-  trend = computed(() => {
-    return (
-      (e = props.state),
-      (a = props.classId),
-      (s = props.studentId),
-      studentHistory(e, a, s).map((e) => ({
-        id: e.id,
-        label: e.assignment.title,
-        shortLabel: `第 ${e.version} 版`,
-        note: `第 ${e.version} 版 · ${e.published ? "已发布成绩" : "待发布成绩"}`,
-        detail: `提交：${formatDate(e.submittedAt, true)}`,
-        handwriting: e.handwriting,
-        composition: e.composition,
-      }))
-    );
-    var e, a, s;
-  }),
-  recentHistory = computed(() => [...history.value].reverse());
+const recentHistory = computed(() => [...props.model.history].reverse());
 function formatSubmittedAt(e) {
-  const a = new Date(e);
-  return `${a.getMonth() + 1}月${a.getDate()}日 ${String(a.getHours()).padStart(2, "0")}:${String(a.getMinutes()).padStart(2, "0")}`;
+  const date = new Date(e);
+  return `${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 </script>
 
 <template>
-  <template v-if="student && summary">
+  <template v-if="model.student && model.summary">
     <view class="student-growth-heading">
       <view class="avatar">
-        {{ student.initial }}
+        {{ model.student.initial }}
       </view>
       <view class="grow">
         <view class="detail-title">
-          {{ student.name }}
+          {{ model.student.name }}
         </view>
         <view class="small subtle">
-          {{ organizationForClass(state, classId)?.name }} ·
-          {{ student.className }} · {{ history.length }} 次提交
+          {{ model.organizationName }} ·
+          {{ model.student.className }} · {{ model.history.length }} 次提交
         </view>
       </view>
-      <template v-if="'teacher' === audience && rankEntry">
+      <template v-if="'teacher' === audience && model.rankEntry">
         <view :key="0" class="growth-rank">
           <view class="strong">
-            {{ null === rankEntry.rank ? "—" : "第 " + rankEntry.rank + " 名" }}
+            {{ null === model.rankEntry.rank ? "—" : "第 " + model.rankEntry.rank + " 名" }}
           </view>
           <view class="tiny subtle">
             {{ "handwriting" === category ? "书写" : "写作" }}均分排名
@@ -94,14 +46,14 @@ function formatSubmittedAt(e) {
       <view :key="0" class="personal-growth-summary card">
         <view>
           <view class="strong">
-            {{ summary.feedbackCount }}
+            {{ model.summary.feedbackCount }}
             <text class="small subtle"> 份 </text>
           </view>
           <view class="tiny subtle"> 已收到反馈的作业 </view>
         </view>
         <view>
           <view class="strong">
-            {{ summary.revisionCount }}
+            {{ model.summary.revisionCount }}
             <text class="small subtle"> 次 </text>
           </view>
           <view class="tiny subtle"> 认真完成的订正 </view>
@@ -109,7 +61,7 @@ function formatSubmittedAt(e) {
       </view>
     </template>
     <ScoreTrend
-      :points="trend"
+      :points="model.trend"
       title="个人成长趋势"
       subtitle="按提交时间，查看每一轮作品的成绩变化"
     />
@@ -117,21 +69,21 @@ function formatSubmittedAt(e) {
       <view>
         <text class="small subtle"> 书写平均分 </text>
         <view class="strong">
-          {{ summary.handwriting ?? "—" }}
+          {{ model.summary.handwriting ?? "—" }}
           <text class="small subtle"> / 100 </text>
         </view>
       </view>
       <view>
         <text class="small subtle"> 写作平均分 </text>
         <view class="strong">
-          {{ summary.composition ?? "—" }}
+          {{ model.summary.composition ?? "—" }}
           <text class="small subtle"> / 100 </text>
         </view>
       </view>
     </view>
     <view class="section-heading">
       <view class="section-title"> 历次提交成绩 </view>
-      <text class="small subtle"> {{ history.length }} 次提交 </text>
+      <text class="small subtle"> {{ model.history.length }} 次提交 </text>
     </view>
     <template v-for="item1 in recentHistory" :key="item1.id">
       <view class="attempt-score card">
@@ -181,7 +133,7 @@ function formatSubmittedAt(e) {
         </template>
       </view>
     </template>
-    <template v-if="history.length" />
+    <template v-if="model.history.length" />
     <template v-else>
       <view :key="1" class="empty-state card"> 这位学生还没有提交作品。 </view>
     </template>

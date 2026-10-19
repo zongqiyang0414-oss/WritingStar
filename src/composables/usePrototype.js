@@ -17,7 +17,7 @@ import {
   taskStatuses,
 } from "../services/school.js";
 import { clone } from "../services/mock.js";
-import { computed, onUnmounted, ref } from "vue";
+import { computed, onUnmounted, ref, shallowRef } from "vue";
 import { createSeed, samplePhotos } from "../services/seed.js";
 import {
   emptyReview,
@@ -31,6 +31,13 @@ import { studentSummary } from "../services/analytics.js";
 import { getBoundAdministrator } from "../services/administration.js";
 import { AI_LABELS, aiAssignmentRows, aiAssignmentSummary } from "../services/aiReview.js";
 
+import {
+  classStatisticsModel,
+  studentRankingModel,
+  studentGrowthModel,
+  teachingClassesModel,
+} from "../services/pageModels.js";
+
 export function usePrototype() {
   let service = null;
   const startupError = ref("");
@@ -39,7 +46,9 @@ export function usePrototype() {
   } catch (ra) {
     startupError.value = ra.message;
   }
-  const state = ref(service?.read() || createSeed()),
+  // Service snapshots are immutable. Keep the large submission history outside
+  // Vue's deep proxy tree and replace it only after a successful commit.
+  const state = shallowRef(service?.snapshot() || createSeed()),
     role = ref("teacher"),
     adminDirty = ref(false),
     screen = ref("home"),
@@ -190,6 +199,12 @@ export function usePrototype() {
     scopedAssignments = computed(() =>
       classAssignments(state.value, currentClass.value.id),
     ),
+    assignmentCountsById = computed(() =>
+      new Map(scopedAssignments.value.map((assignment) => [
+        assignment.id,
+        assignmentCounts(state.value, assignment),
+      ])),
+    ),
     classStudents = computed(() =>
       activeStudents(state.value, currentClass.value.id),
     ),
@@ -207,27 +222,12 @@ export function usePrototype() {
         : [...ongoingAssignments.value, ...closedAssignments.value],
     ),
     workCounts = computed(() =>
-      (function (e, a, t = Date.now()) {
-        return classAssignments(e, a)
-          .filter((e) => Date.parse(e.dueAt) > t)
-          .reduce(
-            (a, t) => {
-              const s = assignmentCounts(e, t);
-              return {
-                missing: a.missing + s.missing,
-                pending: a.pending + s.pending,
-                completed: a.completed + s.completed,
-                total: a.total + s.total,
-              };
-            },
-            {
-              missing: 0,
-              pending: 0,
-              completed: 0,
-              total: 0,
-            },
-          );
-      })(state.value, currentClass.value.id, now.value),
+      ongoingAssignments.value.reduce((counts, assignment) => {
+        const current = assignmentCountsById.value.get(assignment.id);
+        for (const key of ["missing", "pending", "completed", "total"])
+          counts[key] += current[key];
+        return counts;
+      }, { missing: 0, pending: 0, completed: 0, total: 0 }),
     ),
     selectedAssignment = computed(
       () =>
@@ -364,6 +364,23 @@ export function usePrototype() {
             taskStatus(e.submission) === filter.value,
         );
     });
+  // These computed models survive screen changes. Components receive display
+  // fields only; original records stay in the service.
+  const statisticsModel = computed(() =>
+    classStatisticsModel(state.value, currentClass.value.id, now.value),
+  );
+  const rankingModel = computed(() =>
+    studentRankingModel(state.value, currentClass.value.id, rankingCategory.value, analyticsSearch.value),
+  );
+  const teacherGrowthModel = computed(() =>
+    studentGrowthModel(state.value, currentClass.value.id, analyticsStudentId.value, rankingCategory.value),
+  );
+  const learnerGrowthModel = computed(() =>
+    studentGrowthModel(state.value, boundStudent.value?.classId || "", boundStudent.value?.id || "", "handwriting", "learner"),
+  );
+  const teachingModel = computed(() =>
+    teachingClassesModel(state.value, teachingClassOptions.value, rosterClassId.value, memberSearch.value),
+  );
   function latest(e, a) {
     return latestSubmission(state.value, e, a);
   }
@@ -374,7 +391,7 @@ export function usePrototype() {
     return state.value.students.find((a) => a.id === e.studentId);
   }
   function refresh() {
-    service && (state.value = service.read());
+    service && (state.value = service.snapshot());
   }
   function advanceAiQueue() {
     try { if (service?.advanceAiReviews()) refresh(); }
@@ -464,7 +481,10 @@ export function usePrototype() {
     });
   }
   function openFeedback(e) {
-    var a;
+    // Growth components emit a small display row; resolve the original record
+    // here so no image, draft or full review needs to cross component props.
+    e = state.value.submissions.find((submission) => submission.id === e?.id);
+    if (!e) return;
     (isTeacher.value || e.studentId === boundStudent.value?.id) &&
       guard(() => {
         feedbackReturn.value =
@@ -530,6 +550,11 @@ export function usePrototype() {
   });
   return {
     state,
+    statisticsModel,
+    rankingModel,
+    teacherGrowthModel,
+    learnerGrowthModel,
+    teachingModel,
     role,
     screen,
     category,
@@ -865,7 +890,7 @@ export function usePrototype() {
     assignmentPeriod,
     switchClass,
     counts: function (e) {
-      return assignmentCounts(state.value, e);
+      return assignmentCountsById.value.get(e.id) || assignmentCounts(state.value, e);
     },
     taskStatuses,
     isRoot,
@@ -902,7 +927,9 @@ export function usePrototype() {
     rankingCategory,
     analyticsStudentId,
     openStudentAnalytics: function (e) {
+      e = state.value.students.find((student) => student.id === e?.id);
       isTeacher.value &&
+        e &&
         !e.archived &&
         e.classId === currentClass.value.id &&
         guard(() => {

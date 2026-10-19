@@ -1,41 +1,12 @@
 <script setup>
-import { activeStudents, classAssignments } from "../services/school.js";
-import { computed } from "vue";
-
 const props = defineProps({
-  state: {},
-  classes: {},
+  model: {},
   organization: {},
   mode: {},
-  classId: {},
   query: {},
-  busy: {
-    type: Boolean,
-  },
+  busy: { type: Boolean },
 });
 const emit = defineEmits(["open", "visit", "update:query"]);
-const currentClass = computed(() =>
-    props.classes.find((e) => e.id === props.classId),
-  ),
-  members = computed(() => activeStudents(props.state, props.classId)),
-  filteredMembers = computed(() => {
-    const e = props.query.trim().toLowerCase();
-    return members.value.filter((a) => {
-      var t;
-      return (
-        a.name.toLowerCase().includes(e) ||
-        a.studentNumber?.toLowerCase().includes(e)
-      );
-    });
-  }),
-  totalStudents = computed(() =>
-    props.classes.reduce(
-      (e, a) => e + activeStudents(props.state, a.id).length,
-      0,
-    ),
-  ),
-  submissionCount = (e) =>
-    props.state.submissions.filter((a) => a.studentId === e).length;
 function updateQuery(e) {
   emit("update:query", e.detail.value);
 }
@@ -49,10 +20,10 @@ function updateQuery(e) {
       </view>
       <view class="detail-title"> 我的任教班级 </view>
       <view class="small subtle">
-        {{ classes.length }} 个班级 · {{ totalStudents }} 位在班学生
+        {{ model.classes.length }} 个班级 · {{ model.totalStudents }} 位在班学生
       </view>
     </view>
-    <template v-for="(item1, index1) in classes" :key="item1.id">
+    <template v-for="(item1, index1) in model.classes" :key="item1.id">
       <button
         class="teaching-class card"
         :disabled="busy"
@@ -75,20 +46,20 @@ function updateQuery(e) {
         <view class="teaching-class-counts">
           <view>
             <text class="strong">
-              {{ activeStudents(state, item1.id).length }}
+              {{ item1.studentCount }}
             </text>
             <text class="small subtle"> 在班学生 </text>
           </view>
           <view>
             <text class="strong">
-              {{ classAssignments(state, item1.id).length }}
+              {{ item1.assignmentCount }}
             </text>
             <text class="small subtle"> 已布置作业 </text>
           </view>
         </view>
       </button>
     </template>
-    <template v-if="classes.length" />
+    <template v-if="model.classes.length" />
     <template v-else>
       <view :key="0" class="empty-state card">
         暂未分配任教班级，请联系学校管理员。
@@ -96,17 +67,17 @@ function updateQuery(e) {
     </template>
   </template>
   <template v-else>
-    <template v-if="currentClass">
+    <template v-if="model.currentClass">
       <view class="card teaching-summary">
         <view class="eyebrow">
           {{ organization?.name }}
         </view>
         <view class="detail-title">
-          {{ currentClass.name }}
+          {{ model.currentClass.name }}
         </view>
         <view class="small subtle">
-          {{ members.length }} 位在班学生 ·
-          {{ classAssignments(state, classId).length }} 项作业
+          {{ model.members.length }} 位在班学生 ·
+          {{ model.currentClass.assignmentCount }} 项作业
         </view>
         <view class="teaching-shortcuts">
           <button
@@ -127,7 +98,7 @@ function updateQuery(e) {
       </view>
       <view class="section-heading">
         <view class="section-title"> 学生名单 </view>
-        <text class="small subtle"> {{ members.length }} 人 </text>
+        <text class="small subtle"> {{ model.members.length }} 人 </text>
       </view>
       <view class="student-search">
         <text class="search-symbol"> ⌕ </text>
@@ -152,11 +123,11 @@ function updateQuery(e) {
       <view class="small subtle teaching-result">
         {{
           query.trim()
-            ? "找到 " + filteredMembers.length + " 位学生"
+            ? "找到 " + model.filteredMembers.length + " 位学生"
             : "当前班级的在班学生"
         }}
       </view>
-      <template v-for="item2 in filteredMembers" :key="item2.id">
+      <template v-for="item2 in model.filteredMembers" :key="item2.id">
         <view class="card teaching-student">
           <view class="avatar pale">
             {{ item2.initial }}
@@ -172,8 +143,8 @@ function updateQuery(e) {
             </template>
             <view class="tiny subtle">
               {{
-                submissionCount(item2.id)
-                  ? submissionCount(item2.id) + " 次作品记录"
+                item2.submissionCount
+                  ? item2.submissionCount + " 次作品记录"
                   : "暂无作品记录"
               }}
             </view>
@@ -181,7 +152,7 @@ function updateQuery(e) {
           <text class="badge green"> 在班 </text>
         </view>
       </template>
-      <template v-if="filteredMembers.length" />
+      <template v-if="model.filteredMembers.length" />
       <template v-else>
         <view :key="0" class="empty-state card">
           {{

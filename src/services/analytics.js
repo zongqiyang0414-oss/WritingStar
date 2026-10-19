@@ -1,4 +1,4 @@
-import { classAssignments, studentReports } from "./school.js";
+import { classAssignments, studentReports, studentSubmissions } from "./school.js";
 import { total } from "./rubric.js";
 
 export function mean(values) {
@@ -17,6 +17,7 @@ export function formatDate(value, includeTime = false) {
   );
 }
 export function rankedStudents(state, classId, category, query = "") {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
   const l = studentReports(state, classId).sort((e, a) => {
     const s = e[category],
       l = a[category];
@@ -41,18 +42,17 @@ export function rankedStudents(state, classId, category, query = "") {
       };
     })
     .filter((e) =>
-      e.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
+      e.name.toLocaleLowerCase().includes(normalizedQuery),
     );
 }
 export function studentHistory(state, classId, studentId) {
   if (!state.students.some((e) => e.id === studentId && e.classId === classId))
     return [];
-  const s = classAssignments(state, classId);
-  return state.submissions
-    .filter(
-      (e) =>
-        e.studentId === studentId && s.some((a) => a.id === e.assignmentId),
-    )
+  const assignments = new Map(
+    classAssignments(state, classId).map((assignment) => [assignment.id, assignment]),
+  );
+  return studentSubmissions(state, studentId)
+    .filter((e) => assignments.has(e.assignmentId))
     .sort(
       (e, a) =>
         e.submittedAt.localeCompare(a.submittedAt) ||
@@ -61,7 +61,7 @@ export function studentHistory(state, classId, studentId) {
     )
     .map((e) => ({
       ...e,
-      assignment: s.find((a) => a.id === e.assignmentId),
+      assignment: assignments.get(e.assignmentId),
       handwriting: e.published ? total(e.published.handwriting) : null,
       composition: e.published ? total(e.published.composition) : null,
     }));

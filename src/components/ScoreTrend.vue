@@ -4,8 +4,8 @@ import {
   computed,
   getCurrentInstance,
   nextTick,
+  onBeforeUnmount,
   onMounted,
-  onUnmounted,
   ref,
   watch,
 } from "vue";
@@ -64,7 +64,49 @@ const instance = getCurrentInstance(),
   canvasHeight = computed(() =>
     Math.max(232, 18 * scale.value.ticks.length + 32),
   );
-let drawRequest = 0;
+let mounted = false,
+  drawRequest = 0,
+  measureRequest = 0,
+  drawQueued = false,
+  resizeTimer = null;
+// #ifdef H5
+let drawFrame = 0;
+// #endif
+
+// All watchers share one pending draw, using the latest data after DOM updates.
+function queueDraw() {
+  if (!mounted || drawQueued) return;
+  drawQueued = true;
+  const request = drawRequest;
+  nextTick(() => {
+    if (!mounted || request !== drawRequest) return;
+    // Canvas dimensions need two browser frames to settle on H5.
+    // #ifdef H5
+    drawFrame = requestAnimationFrame(() => {
+      drawFrame = requestAnimationFrame(() => {
+        drawFrame = 0;
+        flushDraw(request);
+      });
+    });
+    // #endif
+    // #ifndef H5
+    flushDraw(request);
+    // #endif
+  });
+}
+function flushDraw(request) {
+  if (!mounted || request !== drawRequest) return;
+  drawQueued = false;
+  draw();
+}
+function queueMeasure() {
+  if (!mounted) return;
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    resizeTimer = null;
+    measure();
+  }, 80);
+}
 const { left: left, right: right, top: top, bottom: bottom } = TREND_PADDING,
   xFor = (e) => {
     return (
@@ -86,15 +128,8 @@ const { left: left, right: right, top: top, bottom: bottom } = TREND_PADDING,
           (t - TREND_PADDING.top - TREND_PADDING.bottom)
       );
     })(e, scale.value, canvasHeight.value);
-async function draw() {
-  const e = ++drawRequest;
-  await nextTick();
-  // #ifdef H5
-  await new Promise((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(resolve)),
-  );
-  // #endif
-  if (e !== drawRequest || !instance?.proxy) return;
+function draw() {
+  if (!mounted || !instance?.proxy) return;
   const s = uni.createCanvasContext(canvasId, instance.proxy);
   s.clearRect(0, 0, canvasWidth.value, canvasHeight.value);
   s.setFontSize(10);
@@ -148,17 +183,18 @@ async function draw() {
   s.draw();
 }
 function measure() {
-  instance?.proxy &&
-    uni
-      .createSelectorQuery()
-      .in(instance.proxy)
-      .select(".trend-plot")
-      .boundingClientRect((e) => {
-        const a = e;
-        a?.width && (plotWidth.value = a.width);
-        draw();
-      })
-      .exec();
+  if (!mounted || !instance?.proxy) return;
+  const request = ++measureRequest;
+  uni
+    .createSelectorQuery()
+    .in(instance.proxy)
+    .select(".trend-plot")
+    .boundingClientRect((rect) => {
+      if (!mounted || request !== measureRequest) return;
+      if (rect?.width) plotWidth.value = rect.width;
+      queueDraw();
+    })
+    .exec();
 }
 function choosePoint(e) {
   if (!props.points.length) return;
@@ -179,48 +215,53 @@ function choosePoint(e) {
   selectedId.value = props.points[t].id;
 }
 watch(
-  () => props.points,
-  (e) => {
-    var a, t;
-    e.some((e) => e.id === selectedId.value) ||
-      (selectedId.value =
-        [...e]
-          .reverse()
-          .find((e) => null !== e.handwriting || null !== e.composition)?.id ||
-        e[0]?.id ||
-        "");
-    nextTick(measure);
-  },
-  {
-    immediate: true,
-    deep: true,
-  },
-);
-watch(selectedId, () => {
-  draw();
-});
-watch(canvasWidth, () => {
-  draw();
-});
-watch(canvasHeight, () => {
-  draw();
-});
-watch(
-  visibleSeries,
+  // Labels and detail text update reactively without redrawing the canvas.
+  () => props.points.map(({ id, handwriting, composition }) => [
+    id,
+    handwriting,
+    composition,
+  ]),
   () => {
-    draw();
+    const points = props.points;
+    if (!points.some((point) => point.id === selectedId.value)) {
+      let latestPublished;
+      for (let i = points.length - 1; i >= 0; i--) {
+        if (points[i].handwriting !== null || points[i].composition !== null) {
+          latestPublished = points[i];
+          break;
+        }
+      }
+      selectedId.value = latestPublished?.id || points[0]?.id || "";
+    }
+    queueDraw();
   },
-  {
-    deep: true,
-  },
+  { immediate: true, flush: "post" },
+);
+watch(
+  [
+    selectedId,
+    canvasWidth,
+    canvasHeight,
+    () => visibleSeries.value.handwriting,
+    () => visibleSeries.value.composition,
+  ],
+  queueDraw,
+  { flush: "post" },
 );
 onMounted(() => {
-  measure();
-  uni.onWindowResize(measure);
+  mounted = true;
+  nextTick(measure);
+  uni.onWindowResize(queueMeasure);
 });
-onUnmounted(() => {
+onBeforeUnmount(() => {
+  mounted = false;
   drawRequest++;
-  uni.offWindowResize(measure);
+  measureRequest++;
+  clearTimeout(resizeTimer);
+  // #ifdef H5
+  cancelAnimationFrame(drawFrame);
+  // #endif
+  uni.offWindowResize(queueMeasure);
 });
 </script>
 

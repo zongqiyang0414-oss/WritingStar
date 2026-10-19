@@ -22,6 +22,11 @@ const { bottomInset: bottomInset } = {
   },
   {
     state: state,
+    statisticsModel,
+    rankingModel,
+    teacherGrowthModel,
+    learnerGrowthModel,
+    teachingModel,
     role: role,
     screen: screen,
     category: category,
@@ -149,6 +154,7 @@ const { bottomInset: bottomInset } = {
 
 <template>
   <view class="stage" :style="{ '--wechat-bottom-inset': bottomInset + 'px' }">
+    <!-- #ifdef H5 -->
     <view class="desktop-intro">
       <view class="intro-brand">
         <view class="brand-mark"> 星 </view>
@@ -177,6 +183,7 @@ const { bottomInset: bottomInset } = {
         原型展示 · v0.11.0
       </view>
     </view>
+    <!-- #endif -->
     <view class="mobile-preview-tools">
       <PrototypeTools
         :screen="screen"
@@ -641,9 +648,7 @@ const { bottomInset: bottomInset } = {
                       @update:modelValue="switchClass"
                     />
                     <ClassStatistics
-                      :state="state"
-                      :class-id="currentClass.id"
-                      :now="now"
+                      :model="statisticsModel"
                       @assignment="openAssignment"
                       @students="(e) => go('statisticsStudents')"
                       v-model:panel="statisticsPanel"
@@ -654,8 +659,7 @@ const { bottomInset: bottomInset } = {
                   <template v-if="'statisticsStudents' === screen && isTeacher">
                     <view :key="4" class="statistics-students-view">
                       <StudentRanking
-                        :state="state"
-                        :class-id="currentClass.id"
+                        :model="rankingModel"
                         @student="openStudentAnalytics"
                         v-model:category="rankingCategory"
                         v-model:query="analyticsSearch"
@@ -668,9 +672,7 @@ const { bottomInset: bottomInset } = {
                     >
                       <view :key="5" class="statistics-student-view">
                         <StudentGrowth
-                          :state="state"
-                          :class-id="currentClass.id"
-                          :student-id="analyticsStudentId"
+                          :model="teacherGrowthModel"
                           :category="rankingCategory"
                         />
                       </view>
@@ -681,9 +683,7 @@ const { bottomInset: bottomInset } = {
                       >
                         <view :key="6" class="learner-growth-view">
                           <StudentGrowth
-                            :state="state"
-                            :class-id="boundStudent.classId"
-                            :student-id="boundStudent.id"
+                            :model="learnerGrowthModel"
                             audience="learner"
                             @feedback="openFeedback"
                           />
@@ -1513,6 +1513,7 @@ const { bottomInset: bottomInset } = {
                                             <image
                                               :src="displayPhoto(item8.url)"
                                               mode="aspectFill"
+                                              lazy-load
                                             />
                                           </template>
                                         </view>
@@ -1831,15 +1832,13 @@ const { bottomInset: bottomInset } = {
                                     <template v-else>
                                       <view :key="13">
                                         <TeachingClasses
-                                          :state="state"
-                                          :classes="teachingClassOptions"
+                                          :model="teachingModel"
                                           :organization="currentOrganization"
                                           :mode="
                                             'classes' === screen
                                               ? 'classes'
                                               : 'members'
                                           "
-                                          :class-id="rosterClassId"
                                           :busy="busy"
                                           @open="openClassMembers"
                                           @visit="visitRosterClass"
@@ -1934,6 +1933,7 @@ const { bottomInset: bottomInset } = {
         </view>
       </template>
     </view>
+    <!-- #ifdef H5 -->
     <view class="desktop-guide">
       <view class="eyebrow"> 体验路径 </view>
       <view class="guide-title">
@@ -1993,6 +1993,7 @@ const { bottomInset: bottomInset } = {
         v-model:failAnalysis="failAnalysis"
       />
     </view>
+    <!-- #endif -->
     <template v-if="toast">
       <view :key="0" class="toast" role="status">
         {{ toast }}
