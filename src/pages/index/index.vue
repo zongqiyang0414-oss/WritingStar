@@ -1879,6 +1879,7 @@ const { bottomInset: bottomInset } = {
       <view v-if="isAdmin && !needsBinding" key="admin-navigation" class="bottom-nav admin-bottom-nav">
         <button :class="{ active: screen === 'home' }" :disabled="busy" @click="go('home')"><text class="nav-glyph">⌂</text><text>管理台</text></button>
         <button :class="{ active: screen === 'adminClasses' }" :disabled="busy" @click="go('adminClasses')"><text class="nav-glyph">▦</text><text>班级</text></button>
+        <button :class="{ active: screen === 'adminTeachers' }" :disabled="busy" @click="go('adminTeachers')"><text class="nav-glyph">♧</text><text>教师</text></button>
         <button :class="{ active: screen === 'adminStudents' }" :disabled="busy" @click="go('adminStudents')"><text class="nav-glyph">♙</text><text>学生</text></button>
         <button :class="{ active: screen === 'profile' }" :disabled="busy" @click="go('profile')"><text class="nav-glyph">○</text><text>我的</text></button>
       </view>

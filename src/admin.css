@@ -31,6 +31,11 @@
 .admin-summary-actions, .admin-inline-actions { display: flex; align-items: center; gap: 16px; }
 .admin-summary-actions { justify-content: space-between; margin: 15px 0 12px; }
 .admin-teacher-line { border-top: 1px solid var(--line); padding-top: 12px; color: #617760; }
+.admin-teacher-card { padding: 16px; }
+.admin-teacher-card .grow { min-width: 0; overflow-wrap: anywhere; }
+.admin-teacher-card .badge { flex-shrink: 0; }
+.admin-teacher-classes { border-top: 1px solid var(--line); margin-top: 13px; padding-top: 12px; overflow-wrap: anywhere; }
+.admin-teacher-form-choice { margin-top: 10px; border: 1px solid var(--line); border-radius: 12px; }
 .admin-class-filter { margin-bottom: 12px; }
 .admin-selection-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 12px 0; }
 .admin-status-filters { display: flex; gap: 6px; }
@@ -46,7 +51,7 @@
 .admin-check { width: 21px; height: 21px; flex-shrink: 0; border: 1px solid #b9cdb5; border-radius: 6px; text-align: center; color: #fff; line-height: 20px; }
 .selected .admin-check { background: var(--green); border-color: var(--green); }
 .admin-transfer-footer { position: sticky; bottom: calc(75px + env(safe-area-inset-bottom)); background: #f7faf6; border: 1px solid #dce6d6; border-radius: 13px; padding: 13px 16px; margin-top: 15px; box-shadow: 0 -4px 18px #264a3510; z-index: 5; }
-.admin-bottom-nav button { width: 25%; }
+.admin-bottom-nav button { width: 20%; }
 @media (max-width: 360px) {
   .admin-hero-title { font-size: 25px; }
   .admin-inline-actions { gap: 10px; }

@@ -308,6 +308,7 @@ export function usePrototype() {
         ({
           home: isAdmin.value ? "管理工作台" : isTeacher.value ? "工作台" : "我的任务",
           adminClasses: "班级管理",
+          adminTeachers: "教师管理",
           adminStudents: "学生管理",
           statistics: "学情",
           statisticsStudents: "全班学生学情",
@@ -426,7 +427,7 @@ export function usePrototype() {
   }
   function go(e) {
     if (isAdmin.value) {
-      if (["home", "adminClasses", "adminStudents", "profile"].includes(e) && screen.value !== e)
+      if (["home", "adminClasses", "adminTeachers", "adminStudents", "profile"].includes(e) && screen.value !== e)
         guard(() => { adminDirty.value = false; navigate(e); });
       return;
     }
@@ -633,6 +634,7 @@ export function usePrototype() {
     adminAction: async function ({ kind, data, success, message }) {
       const handlers = {
         saveClass: service?.saveClass,
+        createTeacher: service?.createTeacher,
         setClassTeachers: service?.setClassTeachers,
         saveStudent: service?.saveStudent,
         transferStudents: service?.transferStudents,
@@ -644,6 +646,7 @@ export function usePrototype() {
         refresh();
         adminDirty.value = false;
         success?.(result);
+        if (kind === "createTeacher") navigate("adminTeachers");
         notify(message || "管理信息已保存");
       });
     },

@@ -11,6 +11,8 @@ const classes = computed(() => props.state.classes.filter((item) => item.organiz
 const classIds = computed(() => classes.value.map((item) => item.id));
 const students = computed(() => props.state.students.filter((item) => classIds.value.includes(item.classId)));
 const teachers = computed(() => props.state.teachers.filter((item) => item.organizationIds.includes(props.organization?.id)));
+const listedTeachers = computed(() => teachers.value.filter((item) => !query.value.trim() || `${item.name} ${item.subject} ${item.phone || ""}`.toLowerCase().includes(query.value.trim().toLowerCase())));
+const teachingClasses = (teacher) => classes.value.filter((item) => teacher.classIds.includes(item.id));
 const currentClass = computed(() => classes.value.find((item) => item.id === classId.value));
 const classTeachers = (id) => teachers.value.filter((item) => item.classIds.includes(id));
 const waitingClasses = computed(() => classes.value.filter((item) => !classTeachers(item.id).length));
@@ -24,7 +26,7 @@ const sourceClass = computed(() => classes.value.find((item) => item.id === sour
 const targetClass = computed(() => targetClasses.value.find((item) => item.id === targetId.value));
 const events = computed(() => props.state.administrationEvents.filter((item) => item.organizationId === props.organization?.id).slice(0, 6));
 const dirty = computed(() => {
-  if (mode.value === "classForm" || mode.value === "studentForm") return JSON.stringify(form.value) !== baseline.value;
+  if (["classForm", "studentForm", "teacherForm"].includes(mode.value)) return JSON.stringify(form.value) !== baseline.value;
   if (mode.value === "teachers") return JSON.stringify([...selectedTeachers.value].sort()) !== baseline.value;
   return mode.value === "transfer" && (!!selectedIds.value.length || !!targetId.value);
 });
@@ -32,7 +34,7 @@ watch(dirty, (value) => emit("dirty", value), { immediate: true, flush: "sync" }
 onUnmounted(() => emit("dirty", false));
 watch(() => props.section, () => { mode.value = "list"; classId.value = ""; query.value = ""; status.value = "active"; });
 
-const subTitle = computed(() => ({ classForm: form.value.id ? "修改班级" : "新建班级", studentForm: form.value.id ? "编辑学生档案" : "新增学生", teachers: "分配任教老师", members: "班级详情", transfer: "学生调班" })[mode.value]);
+const subTitle = computed(() => ({ classForm: form.value.id ? "修改班级" : "新建班级", studentForm: form.value.id ? "编辑学生档案" : "新增学生", teacherForm: "添加教师", teachers: "分配任教老师", members: "班级详情", transfer: "学生调班" })[mode.value]);
 function confirmLeave(action) {
   if (props.busy) return;
   if (dirty.value) emit("confirm", { title: "放弃未保存的修改？", body: "已填写的信息和调班选择尚未保存。", confirm: "放弃修改", action });
@@ -56,6 +58,18 @@ function editStudent(item) {
 function editTeachers() {
   selectedTeachers.value = classTeachers(classId.value).map((item) => item.id);
   baseline.value = JSON.stringify([...selectedTeachers.value].sort()); mode.value = "teachers";
+}
+function addTeacher() {
+  form.value = { name: "", subject: "语文", phone: "", organizationId: props.organization.id, classIds: [] };
+  baseline.value = JSON.stringify(form.value); mode.value = "teacherForm";
+}
+function toggleTeachingClass(id) {
+  form.value.classIds = form.value.classIds.includes(id) ? form.value.classIds.filter((value) => value !== id) : [...form.value.classIds, id];
+}
+function saveTeacher() {
+  save("createTeacher", { ...form.value, classIds: [...form.value.classIds] }, "教师已添加", () => {
+    mode.value = "list"; query.value = "";
+  });
 }
 function save(kind, data, message, success = () => { mode.value = props.section === "adminClasses" && classId.value ? "members" : "list"; }) {
   emit("action", { kind, data, message, success });
@@ -148,14 +162,35 @@ function time(value) { const date = new Date(value); return `${date.getMonth() +
       <button class="primary full-width spaced" :disabled="busy || !form.name.trim() || !form.studentNumber.trim() || !form.classId" @click="save('saveStudent', { ...form }, '学生档案已保存')">{{ busy ? '保存中…' : '保存学生档案' }}</button>
     </template>
 
+    <template v-else-if="mode === 'teacherForm'">
+      <view class="card form-card">
+        <view class="field-label">教师姓名</view>
+        <input v-model="form.name" class="form-input" maxlength="30" :disabled="busy" placeholder="请输入教师姓名" />
+        <view class="field-label">任教学科</view>
+        <input v-model="form.subject" class="form-input" maxlength="30" :disabled="busy" placeholder="例如：语文" />
+        <view class="field-label">手机号（选填）</view>
+        <input v-model="form.phone" class="form-input" type="number" maxlength="11" :disabled="busy" placeholder="请输入11位手机号" />
+        <view class="small subtle spaced">所属学校／机构：{{ organization.name }}</view>
+      </view>
+      <view class="card form-card">
+        <view class="section-title">任教班级（选填）</view>
+        <view class="small subtle spaced-small">可选择多个班级，也可添加后再到班级管理中分配。</view>
+        <button v-for="schoolClass in classes" :key="schoolClass.id" class="admin-choice admin-teacher-form-choice" :class="{ selected: form.classIds.includes(schoolClass.id) }" :disabled="busy" :aria-pressed="form.classIds.includes(schoolClass.id)" @click="toggleTeachingClass(schoolClass.id)">
+          <view class="grow strong">{{ schoolClass.name }}</view><view class="admin-check">{{ form.classIds.includes(schoolClass.id) ? '✓' : '' }}</view>
+        </button>
+        <view v-if="!classes.length" class="small subtle spaced">本校暂无班级，可先添加教师，再新建班级并分配任教。</view>
+      </view>
+      <button class="primary full-width spaced" :disabled="busy || !form.name.trim() || !form.subject.trim()" @click="saveTeacher">{{ busy ? '保存中…' : '保存教师' }}</button>
+    </template>
+
     <template v-else-if="mode === 'teachers'">
-      <view class="admin-context-card"><view class="section-title">{{ currentClass?.name }}</view><view class="small subtle">可选择多位本校老师共同任教。</view></view>
+      <view class="admin-context-card"><view class="section-heading"><view class="section-title">{{ currentClass?.name }}</view><button class="text-button" :disabled="busy" @click="emit('navigate', 'adminTeachers')">教师管理 ›</button></view><view class="small subtle">可选择多位本校老师共同任教；需要添加教师时，请进入教师管理。</view></view>
       <button v-for="teacher in teachers" :key="teacher.id" class="card admin-choice" :class="{ selected: selectedTeachers.includes(teacher.id) }" :disabled="busy" :aria-pressed="selectedTeachers.includes(teacher.id)" @click="toggleTeacher(teacher.id)">
         <view class="avatar pale">{{ teacher.initial }}</view>
-        <view class="grow"><view class="strong">{{ teacher.name }}</view><view class="small subtle">{{ teacher.subject }} · 本校任教 {{ teacher.classIds.filter(id => classIds.includes(id)).length }} 个班级</view></view>
+        <view class="grow"><view class="strong">{{ teacher.name }}</view><view class="small subtle">{{ teacher.subject }} · 本校任教 {{ teacher.classIds.filter(id => classIds.includes(id)).length }} 个班级</view><view v-if="teacher.phone" class="tiny subtle">{{ teacher.phone }}</view></view>
         <view class="admin-check">{{ selectedTeachers.includes(teacher.id) ? '✓' : '' }}</view>
       </button>
-      <view v-if="!teachers.length" class="card empty-state">暂无已关联本校的老师，请先由学校负责人确认教师身份。</view>
+      <view v-if="!teachers.length" class="card empty-state">本校暂无教师，请先到教师管理中添加。</view>
       <button class="primary full-width spaced" :disabled="busy || !dirty" @click="saveTeachers">{{ busy ? '保存中…' : '保存任教分配' }}</button>
     </template>
 
@@ -183,23 +218,34 @@ function time(value) { const date = new Date(value); return `${date.getMonth() +
 
     <template v-else-if="mode === 'list' && section === 'home'">
       <view class="greeting-row"><view><view class="eyebrow">学校管理 / ADMINISTRATION</view><view class="greeting">{{ administrator.name }}，你好<text class="greeting-dot">。</text></view></view><view class="admin-seal">管</view></view>
-      <view class="admin-hero"><view class="tiny">{{ organization.name }}</view><view class="admin-hero-title">让每个孩子<br />找到自己的班级</view><view class="small">维护班级与学生档案，让日常教学有序开展。</view><view class="admin-hero-orbit">✧</view></view>
-      <view class="admin-stats"><view><view class="admin-stat-number">{{ classes.length }}</view><view class="tiny subtle">班级</view></view><view><view class="admin-stat-number">{{ students.filter(item => !item.archived).length }}</view><view class="tiny subtle">在班学生</view></view><view><view class="admin-stat-number">{{ teachers.length }}</view><view class="tiny subtle">已关联老师</view></view></view>
+      <view class="admin-hero"><view class="tiny">{{ organization.name }}</view><view class="admin-hero-title">让每个孩子<br />找到自己的班级</view><view class="small">维护班级与师生档案，让日常教学有序开展。</view><view class="admin-hero-orbit">✧</view></view>
+      <view class="admin-stats"><view><view class="admin-stat-number">{{ classes.length }}</view><view class="tiny subtle">班级</view></view><view><view class="admin-stat-number">{{ students.filter(item => !item.archived).length }}</view><view class="tiny subtle">在班学生</view></view><view><view class="admin-stat-number">{{ teachers.length }}</view><view class="tiny subtle">本校教师</view></view></view>
       <view class="section-heading"><view class="section-title">日常管理</view><text class="tiny subtle">{{ organization.kind === 'school' ? '本校管理范围' : '本机构管理范围' }}</text></view>
       <view class="admin-shortcuts">
         <button class="card admin-shortcut" :disabled="busy" @click="emit('navigate', 'adminClasses')"><view class="admin-shortcut-icon">▦</view><view class="strong">班级管理</view><view class="tiny subtle">建班 · 名单 · 任教分配</view><text class="entry-arrow">↗</text></button>
         <button class="card admin-shortcut" :disabled="busy" @click="emit('navigate', 'adminStudents')"><view class="admin-shortcut-icon warm">♙</view><view class="strong">学生管理</view><view class="tiny subtle">档案 · 搜索 · 归档恢复</view><text class="entry-arrow">↗</text></button>
       </view>
+      <button class="admin-transfer-entry" :disabled="busy" @click="addTeacher"><view><view class="strong">添加教师</view><view class="tiny subtle">完善教师资料，安排任教班级</view></view><text>＋</text></button>
       <button class="admin-transfer-entry" :disabled="busy || classes.length < 2" @click="startTransfer()"><view><view class="strong">学生调班</view><view class="tiny subtle">单人或批量调整，保留学习记录</view></view><text>⇄</text></button>
       <view v-if="waitingClasses.length" class="notice">{{ waitingClasses.length }} 个班级尚未分配任教老师，请在班级管理中完善。</view>
       <view class="section-heading"><view class="section-title">最近管理记录</view><text class="tiny subtle">本校动态</text></view>
-      <view class="card admin-events"><view v-for="event in events" :key="event.id" class="admin-event"><view class="tiny-dot" /><view class="grow"><view class="small">{{ event.description }}</view><view class="tiny subtle">{{ event.administratorName }} · {{ time(event.createdAt) }}</view></view></view><view v-if="!events.length" class="small subtle">还没有管理记录。建班、分配和调班操作会记录在这里。</view></view>
+      <view class="card admin-events"><view v-for="event in events" :key="event.id" class="admin-event"><view class="tiny-dot" /><view class="grow"><view class="small">{{ event.description }}</view><view class="tiny subtle">{{ event.administratorName }} · {{ time(event.createdAt) }}</view></view></view><view v-if="!events.length" class="small subtle">还没有管理记录。添加教师、建班、分配和调班操作会记录在这里。</view></view>
     </template>
 
     <template v-else-if="mode === 'list' && section === 'profile'">
       <view class="card profile-card"><view class="avatar">{{ administrator.initial }}</view><view class="detail-title">{{ administrator.name }}</view><view class="small subtle">学校／机构管理员</view></view>
-      <view class="card"><view class="section-title">管理范围</view><view class="profile-information-row"><text class="subtle">学校／机构</text><text>{{ organization.name }}</text></view><view class="small subtle spaced">负责本校班级、学生档案和任教分配。需要变更授权范围时，请联系学校负责人。</view></view>
-      <view class="card"><view class="section-title">日常工作</view><view class="paragraph small">新增班级后分配任教老师，将学生加入对应班级。学生离班时可归档档案，重新入班时可恢复。</view><button class="secondary full-width spaced" :disabled="busy" @click="emit('navigate', 'home')">返回管理工作台 ↗</button></view>
+      <view class="card"><view class="section-title">管理范围</view><view class="profile-information-row"><text class="subtle">学校／机构</text><text>{{ organization.name }}</text></view><view class="small subtle spaced">负责本校班级、教师和学生档案及任教分配。需要变更授权范围时，请联系学校负责人。</view></view>
+      <view class="card"><view class="section-title">日常工作</view><view class="paragraph small">添加教师并分配任教班级，将学生加入对应班级。学生离班时可归档档案，重新入班时可恢复。</view><button class="secondary full-width spaced" :disabled="busy" @click="emit('navigate', 'home')">返回管理工作台 ↗</button></view>
+    </template>
+
+    <template v-else-if="mode === 'list' && section === 'adminTeachers'">
+      <view class="section-heading"><view><view class="eyebrow">{{ organization.name }}</view><view class="detail-title">教师管理</view><view class="small subtle">{{ teachers.length }} 位教师 · {{ teachers.filter(item => !teachingClasses(item).length).length }} 位待分配班级</view></view><button class="text-button" :disabled="busy" @click="addTeacher">＋ 添加教师</button></view>
+      <view class="student-search"><text class="search-symbol">⌕</text><input v-model="query" maxlength="40" :disabled="busy" placeholder="搜索姓名、学科或手机号" /><button v-if="query" class="search-clear" :disabled="busy" @click="query = ''">清除</button></view>
+      <view v-for="teacher in listedTeachers" :key="teacher.id" class="card admin-teacher-card">
+        <view class="admin-student-heading"><view class="avatar pale">{{ teacher.initial }}</view><view class="grow"><view class="strong">{{ teacher.name }}</view><view class="tiny subtle">{{ teacher.subject }}<text v-if="teacher.phone"> · {{ teacher.phone }}</text></view></view><text :class="['badge', teachingClasses(teacher).length ? 'green' : 'amber']">{{ teachingClasses(teacher).length ? '任教 ' + teachingClasses(teacher).length + ' 班' : '待分配' }}</text></view>
+        <view class="admin-teacher-classes small subtle">任教班级：{{ teachingClasses(teacher).map(item => item.name).join('、') || '暂未分配，可在班级管理中安排任教。' }}</view>
+      </view>
+      <view v-if="!listedTeachers.length" class="card empty-state">{{ query ? '没有找到对应教师，试试其他关键词。' : '本校暂无教师，点击“添加教师”开始。' }}</view>
     </template>
 
     <template v-else-if="mode === 'list' && section === 'adminClasses'">

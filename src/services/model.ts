@@ -22,12 +22,13 @@ export type Screen =
   | "classes"
   | "classMembers"
   | "adminClasses"
+  | "adminTeachers"
   | "adminStudents"
   | "aiReview"
   | "aiBatch"
   | "growth";
 // Administration uses separate navigation and does not grant teaching or feedback access.
-export type AdminScreen = "home" | "adminClasses" | "adminStudents" | "profile";
+export type AdminScreen = "home" | "adminClasses" | "adminTeachers" | "adminStudents" | "profile";
 
 export interface Administrator {
   id: string;
@@ -78,6 +79,8 @@ export interface TeacherSummary {
 }
 export interface Teacher extends TeacherSummary {
   subject: string;
+  /** Optional contact information; not a verified login or binding credential. */
+  phone?: string;
   organizationIds: string[];
   classIds: string[];
 }

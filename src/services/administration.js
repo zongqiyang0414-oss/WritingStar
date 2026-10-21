@@ -94,6 +94,31 @@ export class AdministrationService {
     this.commit(next);
     return { ...schoolClass };
   }
+  async createTeacher(input, role) {
+    const organization = this.managedOrganization(input.organizationId, role);
+    const name = field(input.name, "教师姓名", 30);
+    const subject = field(input.subject, "任教学科", 30);
+    if (input.phone !== undefined && typeof input.phone !== "string") throw new Error("请填写有效的11位手机号。");
+    const phone = (input.phone || "").trim();
+    if (phone && !/^1[3-9]\d{9}$/.test(phone)) throw new Error("请填写有效的11位手机号。");
+    if (phone && this.state.teachers.some((item) => item.organizationIds.includes(organization.id) && item.phone === phone))
+      throw new Error("本校已有该手机号的教师，请核对已有档案。");
+    const classIds = input.classIds === undefined ? [] : input.classIds;
+    if (!Array.isArray(classIds) || new Set(classIds).size !== classIds.length) throw new Error("请重新选择任教班级。");
+    for (const id of classIds) {
+      const schoolClass = this.managedClass(id, role);
+      if (schoolClass.organizationId !== organization.id) throw new Error("只能选择当前学校／机构的任教班级。");
+    }
+    const next = this.read();
+    const teacher = {
+      id: identifier("teacher"), name, initial: [...name][0], subject,
+      ...(phone ? { phone } : {}), organizationIds: [organization.id], classIds: [...classIds],
+    };
+    next.teachers.push(teacher);
+    this.recordAdministration(next, organization.id, `添加教师：${name} · ${subject} · ${classIds.length ? "任教" + classIds.length + "个班级" : "待分配班级"}`, role);
+    this.commit(next);
+    return { ...teacher, organizationIds: [...teacher.organizationIds], classIds: [...teacher.classIds] };
+  }
   async setClassTeachers(input, role) {
     const schoolClass = this.managedClass(input.classId, role);
     if (!Array.isArray(input.teacherIds) || new Set(input.teacherIds).size !== input.teacherIds.length)
