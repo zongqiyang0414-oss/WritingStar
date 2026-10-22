@@ -294,3 +294,24 @@ test('教师核对修改AI结果后直接完成批阅并进入反馈，原AI结�
   assert.deepEqual(service.read().submissions.find(item => item.id === 'submission-1').aiReview, originalAi);
   assert.equal(page.feedback.value.handwriting.summary, '教师核对后的总体评价');
 });
+
+
+test('全班AI一键发布刷新统计并显示成功提示，不弹出确认且跳过未完成作品', async () => {
+  const { page, service, show } = await setup();
+  await service.startAiReview('submission-1', 'teacher');
+  await service.finishAnalysis('submission-1');
+  show();
+  const submission = page.state.value.submissions.find(item => item.id === 'submission-1');
+  page.openAssignment(page.state.value.assignments.find(item => item.id === submission.assignmentId));
+  page.openAiBatch();
+  const ready = page.aiSummary.value.readyToPublish;
+  assert.ok(ready > 0);
+  await page.publishAiBatch();
+  assert.equal(page.screen.value, 'aiBatch');
+  assert.equal(page.aiSummary.value.readyToPublish, 0);
+  assert.equal(page.state.value.submissions.find(item => item.id === submission.id).status, 'published');
+  assert.equal(page.modal.value, null);
+  assert.equal(page.error.value, '');
+  assert.match(page.toast.value, /已发布/);
+  assert.ok(service.feedback(submission.id, 'student'));
+});

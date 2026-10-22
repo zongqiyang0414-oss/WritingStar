@@ -64,7 +64,10 @@
 .ai-batch-counts > view + view { border-left: 1px solid #d9e2dd; }
 .ai-batch-counts text { font-family: Georgia, serif; font-size: 24px; color: #45696c; }
 .ai-batch-counts view view { font-size: 10px; color: #85938b; }
-.ai-batch-start { font-size: 13px; }
+.ai-batch-start, .ai-batch-publish { font-size: 13px; }
+.ai-batch-attention-summary { display: flex; flex-wrap: wrap; gap: 5px 14px; margin: -5px 0 15px; color: #9a7659; }
+.ai-batch-waiting { text-align: center; margin-top: 10px; }
+.ai-batch-filter-note { margin: -5px 0 15px; font-size: 10px; }
 .ai-batch-filters { display: flex; gap: 4px; flex-wrap: wrap; margin: 15px 0; }
 .ai-batch-filters button { font-size: 11px; padding: 6px 11px; border-radius: 18px; color: #829187; }
 .ai-batch-filters button.active { background: #e0ebdf; color: #3e6a48; font-weight: 600; }
@@ -72,6 +75,7 @@
 .ai-batch-row-top { display: flex; align-items: center; gap: 10px; }
 .ai-row-status { flex-shrink: 0; border-radius: 5px; font-size: 9px; background: #f0f2ee; color: #879389; padding: 3px 7px; }
 .ai-row-status.completed { background: #e9f2e1; color: #5c7e4b; }
+.ai-row-status.ready { background: #f5ecd7; color: #8c7548; }
 .ai-row-status.working { background: #e5edf4; color: #6886a0; }
 .ai-row-status.failed { background: #faeae2; color: #b67b63; }
 .ai-batch-row-bottom { display: flex; align-items: center; gap: 10px; justify-content: space-between; border-top: 1px solid var(--line); padding: 10px 0; margin-top: 12px; }

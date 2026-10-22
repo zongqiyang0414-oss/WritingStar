@@ -75,6 +75,7 @@ const { bottomInset: bottomInset } = {
     openAiReview,
     openAiBatch,
     beginAiBatch,
+    publishAiBatch,
     startSingleAi,
     refreshAi,
     applyAiSuggestions,
@@ -181,7 +182,7 @@ function toggleFeedbackDimension(id) {
   <view class="stage" :style="{ '--wechat-bottom-inset': bottomInset + 'px' }">
     <!-- #ifdef H5 -->
     <view class="desktop-intro">
-      <view class="intro-brand"><image class="desktop-brand-logo" src="/static/brand/writingstar-logo-horizontal.png" mode="aspectFit" /></view>
+      <view class="intro-brand"><view class="brand-logo-frame desktop-logo-frame"><image class="desktop-brand-logo" src="/static/brand/writingstar-logo-horizontal-transparent.png" mode="aspectFit" aria-label="写字星" /></view></view>
       <view class="intro-body">
         <view class="intro-kicker">
           把每一次书写
@@ -226,7 +227,7 @@ function toggleFeedbackDimension(id) {
     <view class="app-shell">
       <view class="app-header">
         <view class="top-row">
-          <view class="mobile-brand"><image class="header-brand-logo" src="/static/brand/writingstar-logo-horizontal.png" mode="aspectFit" /></view>
+          <view class="mobile-brand"><view class="brand-logo-frame"><image class="header-brand-logo" src="/static/brand/writingstar-logo-horizontal-transparent.png" mode="aspectFit" aria-label="写字星" /></view></view>
         </view>
         <view class="role-row">
           <text class="tiny subtle"> 当前身份 </text>
@@ -375,7 +376,9 @@ function toggleFeedbackDimension(id) {
                 :busy="busy"
                 @start="beginAiBatch(false)"
                 @retry="beginAiBatch(true)"
+                @publish="publishAiBatch"
                 @view="openAiReview"
+                @review="openReview"
                 @feedback="openFeedback"
               />
             </template>
@@ -737,9 +740,9 @@ function toggleFeedbackDimension(id) {
                             </view>
                             <template v-if="isTeacher">
                               <view class="card ai-assignment-entry">
-                                <view class="ai-entry-heading"><view class="ai-entry-symbol">✧</view><view class="grow"><view class="section-title">全班AI批阅</view><view class="tiny subtle">已提交作品统一批阅，逐份查看双写建议</view></view></view>
-                                <view class="ai-entry-counts"><text>待AI批阅 {{ aiSummary.eligible }}</text><text>处理中 {{ aiSummary.running }}</text><text>AI已完成 {{ aiSummary.completed }}</text></view>
-                                <button class="primary full-width" :disabled="busy || !aiSummary.eligible" @click="beginAiBatch(false)">{{ aiSummary.eligible ? '一键AI批阅 · ' + aiSummary.eligible + ' 份' : aiSummary.running ? '全班批阅进行中' : '暂无待AI批阅作品' }}</button>
+                                <view class="ai-entry-heading"><view class="ai-entry-symbol">✧</view><view class="grow"><view class="section-title">全班AI批阅结果</view><view class="tiny subtle">学生提交后自动批阅，核对结果后发布</view></view></view>
+                                <view class="ai-entry-counts"><text>处理中 {{ aiSummary.running }}</text><text>待发布 {{ aiSummary.readyToPublish }}</text><text>已发布 {{ aiSummary.published }}</text></view>
+                                <button class="primary full-width" :disabled="busy || !aiSummary.readyToPublish" @click="publishAiBatch">{{ busy ? '发布中…' : aiSummary.readyToPublish ? '一键发布 · ' + aiSummary.readyToPublish + ' 份' : aiSummary.running ? 'AI批阅进行中' : '暂无可发布结果' }}</button>
                                 <button class="text-button full-width spaced-small" :disabled="busy" @click="openAiBatch">查看全班进度与结果 ›</button>
                               </view>
                               <view class="section-heading">
@@ -838,6 +841,7 @@ function toggleFeedbackDimension(id) {
                                         }}
                                         ›
                                       </button>
+                                      <button v-if="item4.submission.status === 'published'" class="text-button" :disabled="busy" @click="toggleExcellent(item4.submission)">{{ item4.submission.excellent ? '取消优秀作业' : '设为优秀作业' }}</button>
                                     </template>
                                     <button v-if="!item4.submission || item4.submission.status === 'published'" class="text-button" :disabled="busy" @click="openTeacherSubmit(selectedAssignment, item4)">{{ item4.submission ? '代交订正' : '代交作业' }} ›</button>
                                   </view>

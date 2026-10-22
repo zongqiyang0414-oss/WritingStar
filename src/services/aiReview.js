@@ -1,7 +1,8 @@
 import { AdministrationService } from "./administration.js";
 import { sampleReview } from "./seed.js";
-import { emptyReview } from "./rubric.js";
+import { DIMENSION_IDS, validateReview } from "./rubric.js";
 import { activeStudents, formerAssignmentStudents, latestSubmission } from "./school.js";
+import { teacherSummary } from "./identity.js";
 
 const copy = (value) => JSON.parse(JSON.stringify(value));
 export const AI_RUNNING = ["queued", "reading", "reviewing"];
@@ -47,6 +48,43 @@ export function settleAiTask(submission, now, fail = false) {
   if (["processing", "failed"].includes(submission.status)) submission.status = "pending";
 }
 
+function publicationError(review) {
+  try {
+    for (const category of ["handwriting", "composition"]) {
+      if (!review?.[category]?.comments || DIMENSION_IDS.some((id) => typeof review[category].comments[id] !== "string"))
+        return "评价内容不完整，请先单份核对。";
+    }
+    return validateReview(review);
+  } catch {
+    return "评价内容不完整，请先单份核对。";
+  }
+}
+
+function hasDraftContent(review) {
+  if (!review || typeof review !== "object") return !!review;
+  return !!review.nextSteps || ["handwriting", "composition"].some((category) => {
+    const item = review[category];
+    return !!item?.summary || Object.values(item?.scores || {}).some((value) => value !== null && value !== undefined)
+      || Object.values(item?.comments || {}).some(Boolean);
+  });
+}
+
+/** Use the same candidate for the displayed count and the atomic publication. */
+export function aiPublishStatus(submission) {
+  const unavailable = { publishable: false, publishSource: null, publishIssue: "" };
+  if (!submission || submission.status === "published" || submission.aiReview?.state !== "completed") return unavailable;
+  const aiError = publicationError(submission.aiReview.result);
+  if (aiError) return { ...unavailable, publishIssue: aiError };
+  if (submission.status !== "pending") return { ...unavailable, publishIssue: "作品状态待核对，请先单份查看。" };
+  // Older drafts may predate draftRevision. Preserve their existing edits too.
+  const teacherEdited = submission.draftRevision > 0 || (hasDraftContent(submission.draft)
+    && JSON.stringify(submission.draft) !== JSON.stringify(submission.aiReview.result));
+  const publishSource = teacherEdited ? "teacher" : "ai";
+  const review = teacherEdited ? submission.draft : submission.aiReview.result;
+  const issue = publicationError(review);
+  return { publishable: !issue, publishSource, publishIssue: issue || "" };
+}
+
 export function aiAssignmentRows(state, assignmentId) {
   const assignment = state.assignments.find((item) => item.id === assignmentId);
   if (!assignment) return [];
@@ -59,6 +97,7 @@ export function aiAssignmentRows(state, assignmentId) {
       student, submission, phase, label: AI_LABELS[phase],
       former: student.archived || student.classId !== assignment.classId,
       eligible: !!submission && submission.status !== "published" && (!submission.aiReview || AI_RETRYABLE.includes(phase)),
+      ...aiPublishStatus(submission),
     };
   });
 }
@@ -72,6 +111,8 @@ export function aiAssignmentSummary(rows) {
     running: count(AI_RUNNING), completed: count(["completed"]),
     failed: count(["failed"]), unavailable: count(["unavailable"]),
     published: count(["published"]), notStarted: count(["notStarted"]),
+    readyToPublish: rows.filter((item) => item.publishable).length,
+    requiresReview: rows.filter((item) => item.phase === "completed" && !item.publishable).length,
   };
 }
 
@@ -133,6 +174,34 @@ export class AiReviewService extends AdministrationService {
     item.draft = copy(item.aiReview.result);
     item.draftRevision = (item.draftRevision || 0) + 1;
     this.commit(next);
+  }
+  async publishAiBatch(assignmentId, role) {
+    const assignment = this.state.assignments.find((item) => item.id === assignmentId);
+    this.teachingClass(assignment?.classId || "", role);
+    const rows = aiAssignmentRows(this.state, assignmentId);
+    const candidates = rows.filter((row) => row.publishable);
+    const result = {
+      published: candidates.map((row) => row.submission.id),
+      skipped: rows.length - candidates.length,
+      requiresReview: rows.filter((row) => row.phase === "completed" && !row.publishable).map((row) => row.submission.id),
+      sources: { ai: candidates.filter((row) => row.publishSource === "ai").length, teacher: candidates.filter((row) => row.publishSource === "teacher").length },
+    };
+    if (!candidates.length) return result;
+    const next = this.read();
+    const publishedAt = this.clock().toISOString();
+    const publishedBy = teacherSummary(this.teacher(role));
+    for (const row of candidates) {
+      const item = this.get(next, row.submission.id);
+      const review = copy(row.publishSource === "teacher" ? item.draft : item.aiReview.result);
+      item.draft = copy(review);
+      item.published = review;
+      item.status = "published";
+      item.publishedAt = publishedAt;
+      item.publishedBy = copy(publishedBy);
+    }
+    // One write makes failure roll back the complete set, including snapshots.
+    this.commit(next);
+    return result;
   }
   /** Local mock worker. A backend job service must replace this before real AI integration. */
   advanceAiReviews() {

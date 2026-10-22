@@ -515,7 +515,7 @@ export function usePrototype() {
   }
   function openReview(e) {
     guard(() => {
-      reviewReturn.value = screen.value === "aiReview" ? "aiReview" : "assignment";
+      reviewReturn.value = ["aiReview", "aiBatch"].includes(screen.value) ? screen.value : "assignment";
       submissionId.value = e.id;
       assignmentId.value = e.assignmentId;
       review.value = presentReview(e.draft);
@@ -588,6 +588,17 @@ export function usePrototype() {
       const result = await service.startAiBatch(selectedAssignment.value.id, role.value, retryOnly, failAnalysis.value);
       navigate("aiBatch");
       if (!result.queued.length) notify("已有结果和正在批阅的作品已保留");
+    });
+  }
+  async function publishAiBatch() {
+    if (busy.value || !isTeacher.value || !selectedAssignment.value) return;
+    await runAction(async () => {
+      const result = await service.publishAiBatch(selectedAssignment.value.id, role.value);
+      const publishedCount = result.published.length;
+      const pendingCount = result.requiresReview.length;
+      notify(publishedCount
+        ? `已发布 ${publishedCount} 份反馈${pendingCount ? `，${pendingCount} 份评价待补全` : ""}`
+        : pendingCount ? `${pendingCount} 份评价待补全，请逐份核对` : "暂无可发布结果");
     });
   }
   function openExcellentWorks(assignment = null) {
@@ -701,6 +712,7 @@ export function usePrototype() {
     aiStateLabel: (submission) => AI_LABELS[submission?.aiReview?.state || "notStarted"],
     openAiReview,
     beginAiBatch,
+    publishAiBatch,
     openAiBatch: () => {
       if (isTeacher.value && selectedAssignment.value) guard(() => navigate("aiBatch"));
     },

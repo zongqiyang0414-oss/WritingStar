@@ -127,16 +127,29 @@ textarea:focus {
 .top-row {
   justify-content: space-between;
 }
-.header-brand-logo {
-  display: block;
-  width: 160px;
-  height: 52px;
+.mobile-brand {
+  justify-content: flex-start;
+  width: 100%;
 }
+.brand-logo-frame {
+  position: relative;
+  overflow: hidden;
+  width: 240px;
+  height: 78px;
+  flex: none;
+}
+.desktop-logo-frame {
+  width: 280px;
+  height: 91px;
+}
+.header-brand-logo,
 .desktop-brand-logo {
+  position: absolute;
   display: block;
-  width: 200px;
-  height: 75px;
-  max-width: 100%;
+  width: 116%;
+  height: 153.36%;
+  left: -5.515%;
+  top: -34.328%;
 }
 .brand-mark {
   width: 48px;
@@ -2084,6 +2097,7 @@ textarea:focus {
 }
 .organization-context {
   margin-top: 14px;
+  margin-bottom: 18px;
   padding: 10px 12px;
   border: 1px solid #e8eee8;
   background: #f7faf6;
