@@ -271,7 +271,6 @@ onBeforeUnmount(() => {
       <view class="section-title">
         {{ title }}
       </view>
-      <text class="tiny subtle"> {{ scale.minimum }}—100分 </text>
     </view>
     <view class="small subtle trend-subtitle">
       {{ subtitle }}
@@ -309,7 +308,6 @@ onBeforeUnmount(() => {
         </view>
         <text> 写作 </text>
       </button>
-      <text class="tiny subtle series-hint"> 轻点切换 </text>
     </view>
     <view class="trend-plot-wrap">
       <view class="trend-plot">

@@ -127,6 +127,17 @@ textarea:focus {
 .top-row {
   justify-content: space-between;
 }
+.header-brand-logo {
+  display: block;
+  width: 160px;
+  height: 52px;
+}
+.desktop-brand-logo {
+  display: block;
+  width: 200px;
+  height: 75px;
+  max-width: 100%;
+}
 .brand-mark {
   width: 48px;
   height: 48px;
@@ -433,6 +444,8 @@ textarea:focus {
 }
 .trend-card {
   margin-top: 18px;
+  position: relative;
+  z-index: 0;
 }
 .trend-subtitle {
   margin-top: 5px;
@@ -524,6 +537,8 @@ textarea:focus {
 }
 .trend-canvas {
   display: block;
+  position: relative;
+  z-index: 0;
 }
 .trend-empty {
   position: absolute;
@@ -1485,8 +1500,8 @@ textarea:focus {
   display: flex;
   justify-content: space-around;
   padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
-  background: rgba(255, 255, 255, 0.93);
-  backdrop-filter: blur(16px);
+  background: #ffffff;
+  opacity: 1;
   border-top: 1px solid #e5ebdf;
   position: fixed;
   bottom: 0;
@@ -1494,7 +1509,8 @@ textarea:focus {
   transform: translate(-50%);
   width: 458px;
   max-width: 100%;
-  z-index: 10;
+  z-index: 100;
+  box-shadow: 0 -2px 12px rgba(37, 63, 53, 0.05);
 }
 .bottom-nav button {
   width: 28%;
@@ -1516,24 +1532,32 @@ textarea:focus {
   line-height: 1.1;
   font-weight: 400;
 }
-.toast {
+.toast,
+.notification-toast {
   position: fixed;
   left: 50%;
-  bottom: 89px;
-  transform: translate(-50%);
+  top: 50%;
+  bottom: auto;
+  transform: translate(-50%, -50%);
   max-width: 370px;
-  width: -moz-max-content;
-  width: max-content;
-  padding: 12px 18px;
-  border-radius: 11px;
-  background: rgba(36, 75, 59, 0.937);
-  color: #fff;
-  font-size: 12px;
+  width: calc(100% - 48px);
+  padding: 16px 20px;
+  border-radius: 12px;
+  background: #253f35;
+  color: #ffffff;
+  font-size: 14px;
   line-height: 1.7;
-  box-shadow: 0 8px 25px rgba(36, 75, 59, 0.125);
-  z-index: 30;
+  box-shadow: 0 8px 25px rgba(36, 75, 59, 0.16);
+  z-index: 1000;
   text-align: center;
+  pointer-events: none;
+  overflow-wrap: anywhere;
 }
+.notification-toast.error,
+.notification-toast.is-error {
+  background: #813e31;
+}
+
 .error-message {
   background: #fbeee8;
   border: 1px solid #eed4c8;

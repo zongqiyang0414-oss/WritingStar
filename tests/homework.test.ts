@@ -53,8 +53,8 @@ test("教师可补交已截止作业，学生截止限制及本轮防重复提�
   const first = await service.submitForStudent(assignment.id, "student-1", samplePhotos, "补交", "teacher");
   await assert.rejects(service.submitForStudent(assignment.id, "student-1", samplePhotos, "", "teacher"), /本轮作品已提交/);
   await service.finishAnalysis(first.id);
-  await service.setExcellent(first.id, true, "teacher");
   await service.publish(first.id, sampleReview(), "teacher");
+  await service.setExcellent(first.id, true, "teacher");
   const original = service.latest(assignment.id, "student-1");
   const revision = await service.submitForStudent(assignment.id, "student-1", samplePhotos, "订正", "teacher");
   assert.equal(revision.version, 2);
@@ -95,17 +95,25 @@ test("代交图片校验、模拟失败和存储失败均不创建半份提交",
   assert.equal(service.read().submissions.length, before.submissions.length + 1);
 });
 
-test("教师可将学生或代交作品选为优秀，全班只取得原图及展示信息", async () => {
+test("优秀作品须先完成批阅，全班取得原图和正式评价，不取得私密草稿", async () => {
   const { service, assignment } = await setup();
   const own = await service.submit(assignment.id, samplePhotos, "私密提交说明", "student");
   const another = await service.submitForStudent(assignment.id, "student-2", samplePhotos, "不向全班展示", "teacher");
+  await assert.rejects(service.setExcellent(own.id, true, "teacher"), /先完成批阅/);
+  for (const submission of [own, another]) {
+    await service.finishAnalysis(submission.id);
+    await service.publish(submission.id, sampleReview(), "teacher");
+  }
   await service.setExcellent(own.id, true, "teacher");
   await service.setExcellent(another.id, true, "teacher");
   assert.equal(service.excellentWorks("class-1", "student", assignment.id).length, 2);
   const shared = service.excellentWork(another.id, "student");
   assert.equal(shared.studentName, service.read().students.find((item: any) => item.id === "student-2").name);
   assert.deepEqual(shared.photos, another.photos);
-  for (const key of ["draft", "published", "aiReview", "note", "studentId", "submittedBy"])
+  assert.deepEqual(shared.published, sampleReview());
+  shared.published.nextSteps = "读取结果不能改写原反馈";
+  assert.deepEqual(service.excellentWork(another.id, "student").published, sampleReview());
+  for (const key of ["draft", "aiReview", "note", "studentId", "submittedBy"])
     assert.equal(Object.hasOwn(shared, key), false, key);
   assert.throws(() => service.feedback(another.id, "student"), /只能查看/);
   assert.throws(() => service.aiResult(another.id, "student"), /本人|当前关联|只能/);
@@ -118,6 +126,8 @@ test("教师可将学生或代交作品选为优秀，全班只取得原图及�
 test("优秀作业的管理和阅读均按任教或当前学生班级隔离", async () => {
   const { service, assignment } = await setup();
   const submission = await service.submit(assignment.id, samplePhotos, "", "student");
+  await service.finishAnalysis(submission.id);
+  await service.publish(submission.id, sampleReview(), "teacher");
   await service.setExcellent(submission.id, true, "teacher");
   for (const role of ["student", "admin", "parent"])
     await assert.rejects(service.setExcellent(submission.id, true, role), /教师身份/);

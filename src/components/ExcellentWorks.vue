@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import { displayPhoto } from "../services/presentation.js";
+import { rubric, total } from "../services/rubric.js";
 
 const props = defineProps({
   works: { type: Array, default: () => [] },
@@ -13,8 +14,24 @@ const props = defineProps({
 });
 defineEmits(["view", "remove", "back"]);
 const page = ref(0);
-watch(() => props.work?.id, () => { page.value = 0; });
+const category = ref("handwriting");
+const collapsedDimensions = ref([]);
+watch(() => props.work?.id, () => {
+  page.value = 0;
+  category.value = "handwriting";
+  collapsedDimensions.value = [];
+});
 const photo = computed(() => props.work?.photos[page.value]);
+const evaluation = computed(() => props.work?.published?.[category.value]);
+function isExpanded(id) {
+  return !collapsedDimensions.value.includes(`${category.value}:${id}`);
+}
+function toggleDimension(id) {
+  const key = `${category.value}:${id}`;
+  collapsedDimensions.value = isExpanded(id)
+    ? [...collapsedDimensions.value, key]
+    : collapsedDimensions.value.filter((item) => item !== key);
+}
 function preview() {
   if (!photo.value) return;
   uni.previewImage({
@@ -44,6 +61,34 @@ function preview() {
             <button class="secondary" :disabled="page >= work.pageCount - 1" @click="page++">下一页</button>
           </view>
         </view>
+        <template v-if="work.published && evaluation">
+          <view class="category-switch">
+            <button :class="{ active: category === 'handwriting' }" @click="category = 'handwriting'">书写评价</button>
+            <button :class="{ active: category === 'composition' }" @click="category = 'composition'">写作评价</button>
+          </view>
+          <view class="card excellent-evaluation">
+            <view class="card-top">
+              <view class="section-title">{{ category === 'handwriting' ? '书写' : '写作' }}评价</view>
+              <view class="excellent-review-total">{{ total(evaluation) ?? '—' }}<text> / 100</text></view>
+            </view>
+            <view class="strong">总体评价</view>
+            <view class="paragraph small excellent-review-text">{{ evaluation.summary }}</view>
+            <view class="section-title">五大思维</view>
+            <view v-for="dimension in rubric[category]" :key="dimension.id" class="excellent-review-dimension">
+              <button class="excellent-dimension-toggle" :aria-expanded="isExpanded(dimension.id)" @click="toggleDimension(dimension.id)">
+                <text class="grow">{{ dimension.name }}</text>
+                <text class="strong">{{ evaluation.scores[dimension.id] }} / {{ dimension.max }}</text>
+                <text class="excellent-toggle-label">{{ isExpanded(dimension.id) ? '收起' : '展开' }}</text>
+                <view :class="['excellent-chevron', { expanded: isExpanded(dimension.id) }]" />
+              </button>
+              <view v-if="isExpanded(dimension.id)" class="small excellent-review-text excellent-dimension-comment">{{ evaluation.comments[dimension.id] || '暂无分项评语' }}</view>
+            </view>
+          </view>
+          <view class="card">
+            <view class="section-title">批阅建议</view>
+            <view class="paragraph small excellent-review-text">{{ work.published.nextSteps }}</view>
+          </view>
+        </template>
       </template>
       <view v-else class="card empty-state">
         <view class="strong">这份作品已取消展示或当前无法查看</view>
@@ -51,16 +96,10 @@ function preview() {
       </view>
     </template>
     <template v-else>
-      <view class="card excellent-intro">
-        <view class="eyebrow">{{ className }} · 共同进步</view>
-        <view class="detail-title">向好作品学一学</view>
-        <view class="small subtle">{{ assignmentTitle || '本班全部作业' }} · {{ works.length }} 份优秀作品</view>
-        <view class="paragraph small subtle">看看同学怎样写好字、讲好故事，把学到的方法用在下一次练习中。</view>
-      </view>
       <view v-if="!works.length" class="card empty-state">
         <view class="excellent-symbol">★</view>
         <view class="strong">还没有优秀作业</view>
-        <view class="paragraph small">{{ teacher ? '在提交名单或批阅页，将值得分享的作品设为优秀作业。' : '老师选出优秀作品后，会展示在这里。' }}</view>
+        <view class="paragraph small">{{ teacher ? '在已完成批阅的作业详情页，将作品设为优秀作业。' : '老师选出优秀作品后，会展示在这里。' }}</view>
       </view>
       <view v-for="item in works" :key="item.id" class="card excellent-card">
         <view class="card-top">

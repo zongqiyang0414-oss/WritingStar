@@ -21,6 +21,7 @@ import { prepareAdministration, previewAdminBinding } from "./administration.js"
 import { AiReviewService, AI_RUNNING, createAiTask, settleAiTask } from "./aiReview.js";
 
 import { latestSubmission } from "./school.js";
+import { BUILTIN_ASSIGNMENT_TEMPLATES, assignmentContent } from "./assignmentTemplates.js";
 
 export const clone = (e) => JSON.parse(JSON.stringify(e));
 function freezeSnapshot(value) {
@@ -337,6 +338,8 @@ export class MockService extends AiReviewService {
     this.teachingSubmission(submissionId, role);
     if (typeof enabled !== "boolean") throw new Error("请选择是否设为优秀作业。");
     const submission = this.get(this.state, submissionId);
+    if (enabled && (submission.status !== "published" || !submission.published))
+      throw new Error("请先完成批阅，再设为优秀作业。");
     if (Boolean(submission.excellent) === enabled) return;
     this.updateSubmission(submissionId, {
       excellent: enabled
@@ -356,7 +359,7 @@ export class MockService extends AiReviewService {
       .map((item) => [item.id, item]));
     if (assignmentId && !assignments.has(assignmentId)) throw new Error("作业不属于当前班级。");
     return clone(this.state.submissions
-      .filter((item) => item.excellent && assignments.has(item.assignmentId) && (!assignmentId || item.assignmentId === assignmentId))
+      .filter((item) => item.excellent && item.status === "published" && item.published && assignments.has(item.assignmentId) && (!assignmentId || item.assignmentId === assignmentId))
       .sort((a, b) => b.excellent.selectedAt.localeCompare(a.excellent.selectedAt) || b.submittedAt.localeCompare(a.submittedAt))
       .map((item) => ({
         id: item.id,
@@ -377,9 +380,9 @@ export class MockService extends AiReviewService {
     if (!assignment) throw new Error("作业不存在。");
     const summary = this.excellentWorks(assignment.classId, role).find((item) => item.id === submissionId);
     if (!summary) throw new Error("这份作品尚未设为优秀作业或已取消展示。");
-    // Classmates receive original pages and selection details only. Teacher
-    // drafts, AI results, private submission notes and account data stay private.
-    return { ...summary, photos: clone(submission.photos) };
+    // Only the selected version's formally published evaluation is shared.
+    // Drafts, AI task data, private notes and account data stay private.
+    return { ...summary, photos: clone(submission.photos), published: clone(submission.published) };
   }
   async finishAnalysis(submissionId, fail = false) {
     const current = this.get(this.state, submissionId);
@@ -411,25 +414,69 @@ export class MockService extends AiReviewService {
     });
   }
   async createAssignment(input, role) {
-    const t = this.teachingClass(input.classId, role);
-    if (!input.title.trim() || !input.requirements.trim())
-      throw new Error("请填写作业标题和要求。");
-    if (
-      !Number.isFinite(Date.parse(input.dueAt)) ||
-      Date.parse(input.dueAt) <= this.clock().getTime()
-    )
+    const assignments = await this.createAssignments({ ...input, classIds: [input.classId] }, role);
+    return assignments[0];
+  }
+  async createAssignments(input, role) {
+    this.teacher(role);
+    const classIds = Array.isArray(input.classIds) ? [...new Set(input.classIds)] : [];
+    if (!classIds.length) throw new Error("请选择发布班级。");
+    // Validate the complete batch before a single storage write.
+    const classes = classIds.map((classId) => this.teachingClass(classId, role));
+    const content = assignmentContent(input);
+    const dueAt = typeof input.dueAt === "string" ? input.dueAt.trim() : "";
+    if (dueAt && (!Number.isFinite(Date.parse(dueAt)) || Date.parse(dueAt) <= this.clock().getTime()))
       throw new Error("截止时间需要晚于现在。");
-    const l = {
-      ...input,
-      title: input.title.trim(),
-      requirements: input.requirements.trim(),
-      id: `assignment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      className: t.name,
-      createdAt: this.clock().toISOString(),
-      teacher: teacherSummary(this.teacher(role)),
+    const createdAt = this.clock().toISOString();
+    const teacher = teacherSummary(this.teacher(role));
+    const assignments = classes.map((schoolClass, index) => ({
+      ...content,
+      dueAt,
+      classId: schoolClass.id,
+      id: `assignment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${index}`,
+      className: schoolClass.name,
+      createdAt,
+      teacher,
+    }));
+    this.commit({ ...this.state, assignments: [...assignments, ...this.state.assignments] });
+    return clone(assignments);
+  }
+  assignmentTemplates(role) {
+    const teacher = this.teacher(role);
+    return clone([
+      ...(this.state.assignmentTemplates || []).filter((item) => item.ownerTeacherId === teacher.id),
+      ...BUILTIN_ASSIGNMENT_TEMPLATES,
+    ]);
+  }
+  async saveAssignmentTemplate(input, role) {
+    const teacher = this.teacher(role);
+    const content = assignmentContent(input);
+    const templates = this.state.assignmentTemplates || [];
+    const current = input.id ? templates.find((item) => item.id === input.id && item.ownerTeacherId === teacher.id) : null;
+    if (input.id && !current) throw new Error("只能修改自己的作业模板。");
+    const template = {
+      ...content,
+      id: current?.id || `template-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      ownerTeacherId: teacher.id,
+      createdAt: current?.createdAt || this.clock().toISOString(),
+      updatedAt: this.clock().toISOString(),
+      builtin: false,
     };
-    this.commit({ ...this.state, assignments: [l, ...this.state.assignments] });
-    return clone(l);
+    this.commit({
+      ...this.state,
+      assignmentTemplates: current ? templates.map((item) => item.id === current.id ? template : item) : [template, ...templates],
+    });
+    return clone(template);
+  }
+  async deleteAssignmentTemplate(id, role) {
+    const teacher = this.teacher(role);
+    const templates = this.state.assignmentTemplates || [];
+    if (!templates.some((item) => item.id === id && item.ownerTeacherId === teacher.id))
+      throw new Error("只能删除自己的作业模板。");
+    this.commit({
+      ...this.state,
+      assignmentTemplates: templates.filter((item) => item.id !== id),
+    });
   }
   prepareClassPractice() {
     const e = withClassPractice(this.state, this.clock());

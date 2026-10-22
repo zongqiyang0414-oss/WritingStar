@@ -74,7 +74,7 @@ export function createSeed(now = new Date()) {
       organizations: [
         {
           id: "organization-1",
-          name: "星河小学",
+          name: "甲秀小学",
           kind: "school",
         },
         {

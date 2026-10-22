@@ -21,19 +21,28 @@ vm.createContext(sandbox);
 vm.runInContext(generate(ast).code + ';globalThis.baseline={Service:ea,seed:Le};', sandbox);
 const baseline = sandbox.baseline;
 const copy = value => JSON.parse(JSON.stringify(value));
+// The restored release used the previous demonstration school name. Normalize
+// only that confirmed branding change; compare every other field unchanged.
+const withCurrentSchoolName = state => {
+  const current = copy(state);
+  for (const organization of current.organizations || []) {
+    if (organization.id === 'organization-1' && organization.name === '星河小学') organization.name = '甲秀小学';
+  }
+  return current;
+};
 const clock = () => new Date('2026-10-15T10:00:00Z');
 function service(Service, initial = null) {
   let saved = copy(initial);
   return new Service({read: () => copy(saved), write: state => {saved = copy(state);}}, clock);
 }
 
-test('恢复源码的完整初始状态与已发布v0.9.1逐字段一致', () => {
-  assert.deepEqual(createSeed(clock()), copy(baseline.seed(clock())));
+test('除已确认的学校更名外，恢复源码初始状态与已发布v0.9.1逐字段一致', () => {
+  assert.deepEqual(createSeed(clock()), withCurrentSchoolName(baseline.seed(clock())));
 });
 test('学校、班级、53名学生及13项作业的全部练习数据与发布版本一致', () => {
   const source = service(MockService), deployed = service(baseline.Service);
   source.prepareClassPractice(); deployed.prepareClassPractice();
-  assert.deepEqual(source.read(), prepareAdministration(copy(deployed.read())));
+  assert.deepEqual(source.read(), prepareAdministration(withCurrentSchoolName(deployed.read())));
   assert.equal(source.read().students.filter(student => student.classId === 'class-1').length, 53);
   assert.equal(source.read().assignments.filter(assignment => assignment.classId === 'class-1').length, 13);
 });
@@ -56,5 +65,5 @@ test('绑定、保存草稿、发布与刷新后的全部状态延续已发布�
     assert.equal(current.feedback('submission-1', 'student'), null);
     await current.publish('submission-1', review, 'teacher');
   }
-  assert.deepEqual(source.read(), prepareAdministration(copy(deployed.read())));
+  assert.deepEqual(source.read(), prepareAdministration(withCurrentSchoolName(deployed.read())));
 });

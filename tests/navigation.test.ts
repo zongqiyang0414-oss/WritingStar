@@ -146,21 +146,19 @@ test('教师选择学生代交，失败保留照片，成功后进入该学生�
   page.openAssignment(assignment);
   page.openTeacherSubmit(assignment);
   assert.equal(page.screen.value, 'submit');
-  page.submit();
+  await page.submit();
   assert.match(page.error.value, /选择代交的学生/);
   const index = page.submissionStudents.value.findIndex(item => item.id === 'student-1');
   page.selectSubmissionStudent(index);
   page.addSamples();
   page.failSubmit.value = true;
-  page.submit();
-  assert.match(page.modal.value.title, /小禾/);
-  await page.confirmModal();
+  await page.submit();
+  assert.equal(page.modal.value, null);
   assert.equal(page.screen.value, 'submit');
   assert.match(page.error.value, /提交失败/);
   assert.equal(page.photos.value.length, 2);
   page.failSubmit.value = false;
-  page.submit();
-  await page.confirmModal();
+  await page.submit();
   assert.equal(page.error.value, '');
   assert.equal(page.screen.value, 'aiReview');
   assert.equal(page.selectedSubmission.value.studentId, 'student-1');
@@ -210,11 +208,12 @@ test('同班学生可读优秀作品并逐级返回，普通反馈入口仍不�
     classId: 'class-1', title: '全班参考', requirements: '写清经过', dueAt: new Date(Date.now() + 86400000).toISOString(),
   }, 'teacher');
   const submission = await service.submitForStudent(assignment.id, 'student-2', seed.samplePhotos, '不共享的说明', 'teacher');
+  await service.finishAnalysis(submission.id);
+  await service.publish(submission.id, seed.sampleReview(), 'teacher');
   show();
   page.openAssignment(assignment);
   await page.toggleExcellent(submission);
-  assert.match(page.modal.value.body, /全班|本班/);
-  await page.confirmModal();
+  assert.equal(page.modal.value, null);
   page.switchRole('student');
   page.openAssignment(assignment);
   page.openExcellentWorks(assignment);
@@ -224,6 +223,7 @@ test('同班学生可读优秀作品并逐级返回，普通反馈入口仍不�
   assert.equal(page.excellentWork.value.photos.length, 2);
   assert.equal(page.excellentWork.value.note, undefined);
   assert.equal(page.excellentWork.value.draft, undefined);
+  assert.deepEqual(page.excellentWork.value.published, seed.sampleReview());
   page.openFeedback(submission);
   assert.equal(page.screen.value, 'excellentWork');
   page.back();
@@ -236,4 +236,61 @@ test('同班学生可读优秀作品并逐级返回，普通反馈入口仍不�
   await page.toggleExcellent(submission);
   assert.equal(page.screen.value, 'excellentWorks');
   assert.equal(page.excellentWorks.value.length, 0);
+});
+
+test('多班级不限截止发布后进入首个班级作业详情，不产生其他班级副本', async () => {
+  const { page, service } = await setup();
+  const original = service.read();
+  page.go('create');
+  page.newTitle.value = '多班级共同练习';
+  page.newRequirements.value = '';
+  page.newDue.value = '';
+  page.newClassIds.value = ['class-2', 'class-1'];
+  await page.createAssignment();
+  const added = service.read().assignments.filter(item => !original.assignments.some(previous => previous.id === item.id));
+  assert.equal(added.length, 2);
+  assert.deepEqual(added.map(item => item.classId), ['class-2', 'class-1']);
+  assert.ok(added.every(item => item.dueAt === '' && item.requirements === ''));
+  assert.equal(page.screen.value, 'assignment');
+  assert.equal(page.currentClass.value.id, 'class-2');
+  assert.equal(page.selectedAssignment.value.id, added[0].id);
+  assert.equal(page.expired(page.selectedAssignment.value), false);
+  assert.equal(page.newTitle.value, '');
+  assert.equal(page.error.value, '');
+  assert.equal(page.modal.value, null);
+});
+
+test('点击登录直接建立当前身份登录状态，绑定仍独立完成且没有确认弹窗', async () => {
+  const { page, service, show } = await setup();
+  await service.restartBinding('teacher');
+  show();
+  assert.equal(page.accountSignedIn.value, false);
+  await page.loginForBinding();
+  assert.equal(page.accountSignedIn.value, true);
+  assert.equal(service.read().teacherAccount.teacherId, null);
+  assert.equal(page.needsBinding.value, true);
+  assert.equal(page.modal.value, null);
+  assert.equal(page.error.value, '');
+});
+
+test('教师核对修改AI结果后直接完成批阅并进入反馈，原AI结果不被改写', async () => {
+  const { page, service, show } = await setup();
+  await service.startAiReview('submission-1', 'teacher');
+  await service.finishAnalysis('submission-1');
+  show();
+  const submission = page.state.value.submissions.find(item => item.id === 'submission-1');
+  const originalAi = mock.clone(submission.aiReview);
+  const edited = mock.clone(submission.aiReview.result);
+  edited.handwriting.scores.intuitive = 9;
+  edited.handwriting.summary = '教师核对后的总体评价';
+  edited.nextSteps = '先调整字的间距。';
+  page.openAiReview(submission);
+  await page.applyAiSuggestions(edited);
+  assert.equal(page.error.value, '');
+  assert.equal(page.modal.value, null);
+  assert.equal(page.screen.value, 'feedback');
+  assert.equal(page.selectedSubmission.value.status, 'published');
+  assert.deepEqual(service.feedback('submission-1', 'student'), edited);
+  assert.deepEqual(service.read().submissions.find(item => item.id === 'submission-1').aiReview, originalAi);
+  assert.equal(page.feedback.value.handwriting.summary, '教师核对后的总体评价');
 });

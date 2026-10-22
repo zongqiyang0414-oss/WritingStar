@@ -35,7 +35,6 @@
   border-radius: 10px;
   background: #f7f4ec;
 }
-.excellent-intro,
 .excellent-detail-intro {
   background: #fffcf5;
 }
@@ -66,4 +65,52 @@
 .submission-provenance {
   margin-top: 6px;
   line-height: 1.6;
+}
+.excellent-review-total {
+  color: var(--green);
+  font-size: 25px;
+  font-family: Georgia, serif;
+}
+.excellent-review-total text {
+  color: #7f8b80;
+  font-size: 12px;
+}
+.excellent-review-text {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.excellent-review-dimension {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+}
+.excellent-dimension-toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+  padding: 16px 0;
+  text-align: left;
+  font-size: 12px;
+}
+.excellent-toggle-label {
+  color: #738875;
+  font-size: 11px;
+  margin-left: 4px;
+}
+.excellent-chevron {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  margin: 0 3px 4px 0;
+  border-right: 1.5px solid #738875;
+  border-bottom: 1.5px solid #738875;
+  transform: rotate(45deg);
+}
+.excellent-chevron.expanded {
+  transform: rotate(225deg);
+  margin-top: 6px;
+}
+.excellent-dimension-comment {
+  padding-bottom: 10px;
+  line-height: 1.8;
 }

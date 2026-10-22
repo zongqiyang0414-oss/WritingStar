@@ -53,7 +53,7 @@ export function classStatisticsModel(state, classId, now) {
   });
   const rows = model.assignments.map((assignment) => ({
     ...assignment,
-    ongoing: Date.parse(assignment.dueAt) > now,
+    ongoing: !assignment.dueAt || Date.parse(assignment.dueAt) > now,
   }));
   const ongoing = rows.filter((assignment) => assignment.ongoing).length;
   return {

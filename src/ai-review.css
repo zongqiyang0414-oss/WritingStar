@@ -2,18 +2,6 @@
 .ai-work-context { margin-bottom: 20px; }
 .ai-work-context .tiny { overflow-wrap: anywhere; }
 .ai-type-tag { color: #536c80; background: #e5edf4; border: 1px solid #d6e1ea; border-radius: 7px; padding: 4px 8px; font-size: 10px; white-space: nowrap; letter-spacing: .5px; }
-.ai-result-hero { position: relative; overflow: hidden; background: #e7eef3; border: 1px solid #dce6ec; padding: 23px 21px; border-radius: 18px; margin-bottom: 18px; color: #4e6379; }
-.ai-result-hero .eyebrow { position: relative; z-index: 1; color: #6d8191; font-size: 9px; }
-.ai-result-headline { position: relative; z-index: 1; font-size: 24px; font-family: STSong, SimSun, serif; line-height: 1.5; max-width: 260px; margin: 12px 0; color: #344f64; }
-.ai-result-hero > .small { position: relative; z-index: 1; font-size: 11px; max-width: 280px; }
-.ai-orb { position: absolute; right: -4px; top: 18px; font-family: Georgia, serif; font-size: 110px; color: #9cafc0; opacity: .25; line-height: 1; }
-.ai-result-ready { background: #e7efdf; border-color: #dce6d1; color: #627555; }
-.ai-result-ready .ai-result-headline { color: #385e43; }
-.ai-result-ready .eyebrow { color: #75896a; }
-.ai-result-status { display: inline-flex; align-items: center; gap: 7px; margin-top: 17px; font-size: 10px; background: #ffffff90; border: 1px solid #ffffffb0; padding: 5px 10px; border-radius: 20px; }
-.ai-status-dot { display: inline-block; flex-shrink: 0; width: 6px; height: 6px; background: #6e93a9; border-radius: 50%; }
-.ai-status-dot.pulsing { animation: ai-pulse 1.6s ease-in-out infinite; }
-@keyframes ai-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 .ai-progress-card { padding: 20px; }
 .ai-progress-track { height: 5px; overflow: hidden; border-radius: 6px; background: #dce6e6; margin: 15px 0; }
 .ai-progress-fill { height: 100%; border-radius: 6px; background: #6f9d9a; transition: width .5s ease; }
@@ -32,13 +20,19 @@
 .ai-score-writing .ai-score-value { color: #8c7445; }
 .ai-score-value text { font-size: 11px; color: #88907d; }
 .ai-next-steps { padding: 19px 20px; background: #f1f5ed; border-color: #e1e9d7; }
-.ai-next-steps .section-title { margin-top: 7px; }
+.ai-next-steps .section-title { margin-top: 0; }
 .ai-preserve-lines { white-space: pre-wrap; }
 .ai-dimensions { padding: 6px 18px 0; }
 .ai-dimensions > .paragraph { margin-bottom: 18px; }
 .ai-dimension { border-top: 1px solid var(--line); }
 .ai-dimension-toggle { display: flex; align-items: center; gap: 10px; width: 100%; padding: 15px 0; font-size: 12px; text-align: left; }
-.ai-dimension-arrow { width: 16px; text-align: right; color: #8b9a86; }
+.ai-summary-title { margin: 15px 0 10px; }
+.review-collapse-label { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; font-size: 10px; color: #738875; }
+.review-chevron { display: inline-block; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); margin: -3px 2px 0; }
+.review-chevron.expanded { transform: rotate(225deg); margin-top: 3px; }
+.ai-dimension-toggle { flex-wrap: wrap; }
+.ai-dimension-toggle > .strong { white-space: nowrap; }
+.dimension-label { flex-wrap: wrap; row-gap: 4px; }
 .ai-dimension-comment { padding-bottom: 17px; }
 .ai-learning-note { margin: 15px 0; padding: 0 3px; font-size: 11px; color: #829081; }
 .ai-original-work { padding: 17px; margin-top: 18px; }
@@ -71,7 +65,6 @@
 .ai-batch-counts text { font-family: Georgia, serif; font-size: 24px; color: #45696c; }
 .ai-batch-counts view view { font-size: 10px; color: #85938b; }
 .ai-batch-start { font-size: 13px; }
-.ai-batch-scope { margin: 15px 2px 25px; line-height: 1.85; }
 .ai-batch-filters { display: flex; gap: 4px; flex-wrap: wrap; margin: 15px 0; }
 .ai-batch-filters button { font-size: 11px; padding: 6px 11px; border-radius: 18px; color: #829187; }
 .ai-batch-filters button.active { background: #e0ebdf; color: #3e6a48; font-weight: 600; }
@@ -87,13 +80,13 @@
 @media (max-width: 360px) {
   .ai-batch-filters button { padding: 5px 8px; font-size: 10px; }
   .ai-work-context { gap: 8px; }
-  .ai-result-headline { font-size: 22px; }
   .ai-row-status { font-size: 8px; padding: 3px 5px; }
   .ai-batch-row { padding-left: 12px; padding-right: 12px; }
   .ai-review-shortcut { gap: 8px; }
   .ai-review-shortcut .tiny { font-size: 9px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ai-status-dot.pulsing { animation: none; }
   .ai-progress-fill { transition: none; }
 }
+
+.ai-edit-toggle { margin-bottom: 18px !important; }

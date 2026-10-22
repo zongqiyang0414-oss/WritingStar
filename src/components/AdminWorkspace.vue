@@ -222,8 +222,8 @@ function time(value) { const date = new Date(value); return `${date.getMonth() +
       <view class="admin-stats"><view><view class="admin-stat-number">{{ classes.length }}</view><view class="tiny subtle">班级</view></view><view><view class="admin-stat-number">{{ students.filter(item => !item.archived).length }}</view><view class="tiny subtle">在班学生</view></view><view><view class="admin-stat-number">{{ teachers.length }}</view><view class="tiny subtle">本校教师</view></view></view>
       <view class="section-heading"><view class="section-title">日常管理</view><text class="tiny subtle">{{ organization.kind === 'school' ? '本校管理范围' : '本机构管理范围' }}</text></view>
       <view class="admin-shortcuts">
-        <button class="card admin-shortcut" :disabled="busy" @click="emit('navigate', 'adminClasses')"><view class="admin-shortcut-icon">▦</view><view class="strong">班级管理</view><view class="tiny subtle">建班 · 名单 · 任教分配</view><text class="entry-arrow">↗</text></button>
-        <button class="card admin-shortcut" :disabled="busy" @click="emit('navigate', 'adminStudents')"><view class="admin-shortcut-icon warm">♙</view><view class="strong">学生管理</view><view class="tiny subtle">档案 · 搜索 · 归档恢复</view><text class="entry-arrow">↗</text></button>
+        <button class="card admin-shortcut" :disabled="busy" @click="emit('navigate', 'adminClasses')"><view class="admin-shortcut-icon">▦</view><view class="strong">班级管理</view><view class="tiny subtle">建班 · 名单 · 任教分配</view><text class="entry-arrow">›</text></button>
+        <button class="card admin-shortcut" :disabled="busy" @click="emit('navigate', 'adminStudents')"><view class="admin-shortcut-icon warm">♙</view><view class="strong">学生管理</view><view class="tiny subtle">档案 · 搜索 · 归档恢复</view><text class="entry-arrow">›</text></button>
       </view>
       <button class="admin-transfer-entry" :disabled="busy" @click="addTeacher"><view><view class="strong">添加教师</view><view class="tiny subtle">完善教师资料，安排任教班级</view></view><text>＋</text></button>
       <button class="admin-transfer-entry" :disabled="busy || classes.length < 2" @click="startTransfer()"><view><view class="strong">学生调班</view><view class="tiny subtle">单人或批量调整，保留学习记录</view></view><text>⇄</text></button>
@@ -235,7 +235,7 @@ function time(value) { const date = new Date(value); return `${date.getMonth() +
     <template v-else-if="mode === 'list' && section === 'profile'">
       <view class="card profile-card"><view class="avatar">{{ administrator.initial }}</view><view class="detail-title">{{ administrator.name }}</view><view class="small subtle">学校／机构管理员</view></view>
       <view class="card"><view class="section-title">管理范围</view><view class="profile-information-row"><text class="subtle">学校／机构</text><text>{{ organization.name }}</text></view><view class="small subtle spaced">负责本校班级、教师和学生档案及任教分配。需要变更授权范围时，请联系学校负责人。</view></view>
-      <view class="card"><view class="section-title">日常工作</view><view class="paragraph small">添加教师并分配任教班级，将学生加入对应班级。学生离班时可归档档案，重新入班时可恢复。</view><button class="secondary full-width spaced" :disabled="busy" @click="emit('navigate', 'home')">返回管理工作台 ↗</button></view>
+      <view class="card"><view class="section-title">日常工作</view><view class="paragraph small">添加教师并分配任教班级，将学生加入对应班级。学生离班时可归档档案，重新入班时可恢复。</view><button class="secondary full-width spaced" :disabled="busy" @click="emit('navigate', 'home')">返回管理工作台 ›</button></view>
     </template>
 
     <template v-else-if="mode === 'list' && section === 'adminTeachers'">

@@ -1,6 +1,6 @@
 /** Local prototype administration. Real authorization must come from the backend session. */
 export const ADMIN_INVITATIONS = [
-  { code: "MA2026", role: "admin", administratorId: "admin-xinghe", label: "王管理员 · 星河小学", status: "active" },
+  { code: "MA2026", role: "admin", administratorId: "admin-xinghe", label: "王管理员 · 甲秀小学", status: "active" },
   { code: "MB2026", role: "admin", administratorId: "admin-qinghe", label: "林管理员 · 青禾学习中心", status: "active" },
   { code: "MEX2026", role: "admin", administratorId: "admin-xinghe", label: "过期管理员码", status: "expired" },
 ];

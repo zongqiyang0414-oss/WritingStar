@@ -8,6 +8,7 @@ export function mean(values) {
     : null;
 }
 export function formatDate(value, includeTime = false) {
+  if (!value) return "不限";
   const t = new Date(value);
   return (
     `${t.getMonth() + 1}月${t.getDate()}日` +

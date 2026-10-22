@@ -1,4 +1,5 @@
 <script setup>
+import AssignmentComposer from "../../components/AssignmentComposer.vue";
 import ClassSelector from "../../components/ClassSelector.vue";
 import ClassStatistics from "../../components/ClassStatistics.vue";
 import InvitationBinding from "../../components/InvitationBinding.vue";
@@ -14,7 +15,7 @@ import AiBatchReview from "../../components/AiBatchReview.vue";
 import ExcellentWorks from "../../components/ExcellentWorks.vue";
 import { displayPhoto } from "../../services/presentation.js";
 import { growthIllustration } from "../../services/assets.js";
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { usePrototype } from "../../composables/usePrototype.js";
 
 const { bottomInset: bottomInset } = {
@@ -58,6 +59,10 @@ const { bottomInset: bottomInset } = {
     newRequirements: newRequirements,
     newDue: newDue,
     newClassId: newClassId,
+    newClassIds,
+    assignmentTemplates,
+    saveAssignmentTemplate,
+    deleteAssignmentTemplate,
     modal: modal,
     roles: roles,
     startupError: startupError,
@@ -163,19 +168,20 @@ const { bottomInset: bottomInset } = {
     restartBinding: restartBinding,
     bindingHelp: bindingHelp,
   } = usePrototype();
+const feedbackCollapsed = ref([]);
+watch([category, selectedSubmission], () => { feedbackCollapsed.value = []; });
+function toggleFeedbackDimension(id) {
+  feedbackCollapsed.value = feedbackCollapsed.value.includes(id)
+    ? feedbackCollapsed.value.filter(value => value !== id)
+    : [...feedbackCollapsed.value, id];
+}
 </script>
 
 <template>
   <view class="stage" :style="{ '--wechat-bottom-inset': bottomInset + 'px' }">
     <!-- #ifdef H5 -->
     <view class="desktop-intro">
-      <view class="intro-brand">
-        <view class="brand-mark"> 星 </view>
-        <view>
-          <view class="brand-name"> 写字星 </view>
-          <view class="eyebrow"> WRITINGSTAR </view>
-        </view>
-      </view>
+      <view class="intro-brand"><image class="desktop-brand-logo" src="/static/brand/writingstar-logo-horizontal.png" mode="aspectFit" /></view>
       <view class="intro-body">
         <view class="intro-kicker">
           把每一次书写
@@ -220,20 +226,7 @@ const { bottomInset: bottomInset } = {
     <view class="app-shell">
       <view class="app-header">
         <view class="top-row">
-          <view class="mobile-brand">
-            <view class="brand-mark small"> 星 </view>
-            <view>
-              <view class="brand-name"> 写字星 </view>
-              <view class="subtle tiny"> 写字 · 写作 · 一起成长 </view>
-            </view>
-          </view>
-          <view class="header-avatar">
-            {{
-              isAdmin ? adminIdentity?.initial || "人" : isTeacher
-                ? teacherIdentity?.initial || "人"
-                : boundStudent?.initial || "人"
-            }}
-          </view>
+          <view class="mobile-brand"><image class="header-brand-logo" src="/static/brand/writingstar-logo-horizontal.png" mode="aspectFit" /></view>
         </view>
         <view class="role-row">
           <text class="tiny subtle"> 当前身份 </text>
@@ -249,17 +242,6 @@ const { bottomInset: bottomInset } = {
             </template>
           </view>
         </view>
-        <template v-if="needsBinding" />
-        <template v-else>
-          <OrganizationSelector
-            :key="0"
-            :organizations="organizationOptions"
-            :model-value="currentOrganization?.id || ''"
-            :allow-switch="isTeacher || isAdmin"
-            :disabled="busy"
-            @update:modelValue="switchOrganization"
-          />
-        </template>
       </view>
       <template v-if="startupError">
         <view :key="0" class="fatal card">
@@ -284,7 +266,7 @@ const { bottomInset: bottomInset } = {
             @confirm="confirmBinding"
             @help="bindingHelp"
           />
-          <view v-if="error" class="error-message" role="alert">{{ error }}</view>
+          <OrganizationSelector v-if="!needsBinding && screen === 'profile'" :organizations="organizationOptions" :model-value="currentOrganization?.id || ''" :allow-switch="true" :disabled="busy" @update:modelValue="switchOrganization" />
           <AdminWorkspace
             v-if="!needsBinding"
             :key="currentOrganization?.id"
@@ -461,9 +443,7 @@ const { bottomInset: bottomInset } = {
                           </view>
                         </view>
                       </view>
-                      <view class="tiny subtle">
-                        每名学生的每项作业计 1 份，按最新提交状态统计。
-                      </view>
+
                     </view>
                     <view class="section-heading">
                       <view class="section-title"> 班级作业 </view>
@@ -530,14 +510,14 @@ const { bottomInset: bottomInset } = {
                       @click="(e) => go('growth')"
                     >
                       <view>
-                        <view class="strong"> {{ "看看我的成长" }} ↗ </view>
+                        <view class="strong"> {{ "看看我的成长" }} </view>
                         <view class="small subtle">
                           已收到
                           {{ growthSummary?.feedbackCount || 0 }} 份作业反馈 ·
                           {{ growthSummary?.revisionCount || 0 }} 次订正
                         </view>
                       </view>
-                      <text class="personal-growth-entry-mark"> ↗ </text>
+                      <text class="personal-growth-entry-mark"> </text>
                     </button>
                     <view class="section-heading">
                       <view class="section-title">
@@ -590,7 +570,7 @@ const { bottomInset: bottomInset } = {
                         {{ item2.title }}
                       </view>
                       <view class="small subtle">
-                        {{ date(item2.dueAt) }} 截止
+                        {{ item2.dueAt ? date(item2.dueAt) + ' 截止' : '不限截止时间' }}
                       </view>
                       <template v-if="isTeacher">
                         <view :key="0" class="task-counts">
@@ -650,7 +630,7 @@ const { bottomInset: bottomInset } = {
                                 : "查看任务"
                               : "查看反馈"
                           }}
-                          <text> ↗ </text>
+                          <text> </text>
                         </button>
                       </view>
                     </view>
@@ -667,7 +647,7 @@ const { bottomInset: bottomInset } = {
                       }}
                     </view>
                   </template>
-                  <view class="home-footer"> 写字有章法 · 写作有温度 </view>
+
                 </view>
               </template>
               <template v-else>
@@ -737,7 +717,7 @@ const { bottomInset: bottomInset } = {
                                 {{ selectedAssignment.title }}
                               </view>
                               <view class="small subtle">
-                                {{ date(selectedAssignment.dueAt) }} 截止
+                                {{ selectedAssignment.dueAt ? date(selectedAssignment.dueAt) + ' 截止' : '不限截止时间' }}
                               </view>
                               <view class="divider" />
                               <view class="strong"> 这次写什么 </view>
@@ -756,7 +736,6 @@ const { bottomInset: bottomInset } = {
                               <button class="text-button" :disabled="busy" @click="openExcellentWorks(selectedAssignment)">查看作品 ›</button>
                             </view>
                             <template v-if="isTeacher">
-                              <button class="secondary full-width spaced-small" :disabled="busy || !submissionStudents.length" @click="openTeacherSubmit(selectedAssignment)">代学生提交作业</button>
                               <view class="card ai-assignment-entry">
                                 <view class="ai-entry-heading"><view class="ai-entry-symbol">✧</view><view class="grow"><view class="section-title">全班AI批阅</view><view class="tiny subtle">已提交作品统一批阅，逐份查看双写建议</view></view></view>
                                 <view class="ai-entry-counts"><text>待AI批阅 {{ aiSummary.eligible }}</text><text>处理中 {{ aiSummary.running }}</text><text>AI已完成 {{ aiSummary.completed }}</text></view>
@@ -859,7 +838,6 @@ const { bottomInset: bottomInset } = {
                                         }}
                                         ›
                                       </button>
-                                      <button class="text-button" :disabled="busy" @click="toggleExcellent(item4.submission)">{{ item4.submission.excellent ? '取消优秀作业' : '设为优秀作业' }}</button>
                                     </template>
                                     <button v-if="!item4.submission || item4.submission.status === 'published'" class="text-button" :disabled="busy" @click="openTeacherSubmit(selectedAssignment, item4)">{{ item4.submission ? '代交订正' : '代交作业' }} ›</button>
                                   </view>
@@ -1016,12 +994,7 @@ const { bottomInset: bottomInset } = {
                                   {{ statusLabel(selectedSubmission) }}
                                 </text>
                               </view>
-                              <view class="card homework-actions homework-selection-bar">
-                                <text v-if="selectedSubmission.excellent" class="badge excellent-badge">★ 优秀作业 · 全班可参考</text>
-                                <text v-else class="small subtle">将这版作品分享给全班同学</text>
-                                <button class="text-button" :disabled="busy" @click="toggleExcellent(selectedSubmission)">{{ selectedSubmission.excellent ? '取消优秀作业' : '设为优秀作业' }}</button>
-                              </view>
-                              <view class="ai-review-shortcut"><view><view class="strong">AI双写建议</view><view class="tiny subtle">{{ aiStateLabel(selectedSubmission) }} · 与教师草稿分别保留</view></view><button class="text-button" :disabled="busy" @click="openAiReview(selectedSubmission)">查看AI批阅 ›</button></view>
+                              <view class="ai-review-shortcut"><view><view class="strong">AI双写建议</view><view class="tiny subtle">{{ aiStateLabel(selectedSubmission) }}</view></view><button class="text-button" :disabled="busy" @click="openAiReview(selectedSubmission)">查看AI批阅 ›</button></view>
                               <template
                                 v-if="
                                   'processing' === selectedSubmission.status ||
@@ -1158,18 +1131,11 @@ const { bottomInset: bottomInset } = {
                                 >
                                   <view :key="2" class="action-bar">
                                     <button
-                                      class="secondary"
-                                      :disabled="busy"
-                                      @click="saveDraft"
-                                    >
-                                      {{ busy ? "保存中…" : "保存草稿" }}
-                                    </button>
-                                    <button
                                       class="primary"
                                       :disabled="busy"
                                       @click="publish"
                                     >
-                                      发布反馈 ↗
+                                      完成批阅
                                     </button>
                                   </view>
                                 </template>
@@ -1179,21 +1145,7 @@ const { bottomInset: bottomInset } = {
                           <template v-else>
                             <template v-if="'submit' === screen">
                               <view :key="9">
-                                <view class="submit-intro">
-                                  <view class="eyebrow">
-                                    {{ selectedAssignment.title }}
-                                  </view>
-                                  <view class="detail-title">
-                                    {{
-                                      isTeacher ? "帮学生记录这次努力" : mine
-                                        ? "下一次，写得更好"
-                                        : "提交作品，看看AI的建议"
-                                    }}
-                                  </view>
-                                  <view class="paragraph small subtle">
-                                    整页拍清楚，按阅读顺序排列。提交前检查是否有缺页或模糊的照片。
-                                  </view>
-                                </view>
+                                <view class="submit-intro"><view class="detail-title">{{ selectedAssignment.title }}</view></view>
                                 <view v-if="isTeacher" class="card teacher-submit-student">
                                   <view class="section-title">为哪位学生提交</view>
                                   <view class="small subtle spaced-small">{{ selectedAssignment.className }}</view>
@@ -1381,11 +1333,8 @@ const { bottomInset: bottomInset } = {
                                       </view>
                                     </view>
                                     <view class="next-steps card">
-                                      <view class="eyebrow">
-                                        下一步 / 小小的进步
-                                      </view>
                                       <view class="section-title">
-                                        先做好这两件事
+                                        批阅建议
                                       </view>
                                       <view class="paragraph preserve-lines">
                                         {{ feedback.nextSteps }}
@@ -1428,6 +1377,7 @@ const { bottomInset: bottomInset } = {
                                       </button>
                                     </view>
                                     <view class="card">
+                                      <view class="section-title">总体评价</view>
                                       <view class="paragraph">
                                         {{ feedback[category].summary }}
                                       </view>
@@ -1438,13 +1388,8 @@ const { bottomInset: bottomInset } = {
                                         <view class="feedback-dimension">
                                           <button
                                             class="feedback-dimension-head"
-                                            @click="
-                                              (a) =>
-                                                (openDimension =
-                                                  openDimension === item6.id
-                                                    ? null
-                                                    : item6.id)
-                                            "
+                                            :aria-expanded="!feedbackCollapsed.includes(item6.id)"
+                                            @click="toggleFeedbackDimension(item6.id)"
                                           >
                                             <text>
                                               {{ item6.name }}
@@ -1460,16 +1405,10 @@ const { bottomInset: bottomInset } = {
                                                 / {{ item6.max }}
                                               </text>
                                             </text>
-                                            <text class="subtle">
-                                              {{
-                                                openDimension === item6.id
-                                                  ? "−"
-                                                  : "＋"
-                                              }}
-                                            </text>
+                                            <view class="review-collapse-label"><text>{{ feedbackCollapsed.includes(item6.id) ? '展开' : '收起' }}</text><view :class="['review-chevron', { expanded: !feedbackCollapsed.includes(item6.id) }]" /></view>
                                           </button>
                                           <template
-                                            v-if="openDimension === item6.id"
+                                            v-if="!feedbackCollapsed.includes(item6.id)"
                                           >
                                             <view
                                               :key="0"
@@ -1492,6 +1431,7 @@ const { bottomInset: bottomInset } = {
                                         </view>
                                       </template>
                                     </view>
+                                    <button v-if="isTeacher && !studentFor(selectedSubmission)?.archived && studentFor(selectedSubmission)?.classId === selectedAssignment.classId && latest(selectedAssignment.id, selectedSubmission.studentId)?.id === selectedSubmission.id" class="secondary full-width spaced" :disabled="busy" @click="openTeacherSubmit(selectedAssignment, studentFor(selectedSubmission))">代交订正</button>
                                     <template v-if="!isTeacher && canSubmit">
                                       <button
                                         :key="0"
@@ -1500,7 +1440,7 @@ const { bottomInset: bottomInset } = {
                                           (e) => openSubmit(selectedAssignment)
                                         "
                                       >
-                                        按建议，再写一次 ↗
+                                        按建议，再写一次
                                       </button>
                                     </template>
                                     <button
@@ -1627,6 +1567,7 @@ const { bottomInset: bottomInset } = {
                                 <template v-else>
                                   <template v-if="'profile' === screen">
                                     <view :key="12">
+                                      <OrganizationSelector :organizations="organizationOptions" :model-value="currentOrganization?.id || ''" :allow-switch="isTeacher" :disabled="busy" @update:modelValue="switchOrganization" />
                                       <view class="card profile-card">
                                         <view class="avatar">
                                           {{
@@ -1735,7 +1676,7 @@ const { bottomInset: bottomInset } = {
                                           </view>
                                           <view class="profile-information-row">
                                             <text class="subtle">
-                                              学校／机构
+                                              学校
                                             </text>
                                             <text>
                                               {{ currentOrganization?.name }}
@@ -1775,13 +1716,13 @@ const { bottomInset: bottomInset } = {
                                             class="secondary spaced"
                                             @click="(e) => go('home')"
                                           >
-                                            {{ "查看我的任务" }} ↗
+                                            {{ "查看我的任务" }}
                                           </button>
                                           <button
                                             class="secondary spaced personal-growth-profile-link"
                                             @click="(e) => go('growth')"
                                           >
-                                            查看成长趋势 ↗
+                                            查看成长趋势
                                           </button>
                                           <button
                                             class="text-button full-width spaced"
@@ -1818,76 +1759,7 @@ const { bottomInset: bottomInset } = {
                                       "
                                     >
                                       <template v-if="'create' === screen">
-                                        <view :key="14">
-                                          <view class="card form-card">
-                                            <view class="field-label">
-                                              作业标题
-                                            </view>
-                                            <input
-                                              placeholder="例如：我想感谢的一个人"
-                                              maxlength="50"
-                                              class="form-input"
-                                              v-model="newTitle"
-                                            />
-                                            <view class="field-label">
-                                              写作要求
-                                            </view>
-                                            <textarea
-                                              placeholder="告诉孩子写什么、怎样写，以及拍照要求"
-                                              maxlength="1500"
-                                              auto-height=""
-                                              :cursor-spacing="100"
-                                              v-model="newRequirements"
-                                            />
-                                            <view class="field-label">
-                                              截止日期
-                                            </view>
-                                            <picker
-                                              mode="date"
-                                              :value="newDue"
-                                              @change="
-                                                (e) => (newDue = e.detail.value)
-                                              "
-                                            >
-                                              <view class="date-picker">
-                                                {{ newDue }}
-                                                <text> 20:00 截止 › </text>
-                                              </view>
-                                            </picker>
-                                            <view class="field-label">
-                                              发布班级
-                                            </view>
-                                            <ClassSelector
-                                              :classes="teachingClassOptions"
-                                              :disabled="busy"
-                                              v-model="newClassId"
-                                            />
-                                            <view class="small subtle">
-                                              {{
-                                                activeStudents(
-                                                  state,
-                                                  newClassId,
-                                                ).length
-                                              }}
-                                              位学生将收到这份作业
-                                            </view>
-                                            <view class="dual-tags">
-                                              <text> 书写 100 分 </text>
-                                              <text> 写作 100 分 </text>
-                                              <text> 五大思维量表 </text>
-                                            </view>
-                                          </view>
-                                          <view class="notice">
-                                            发布后，班级学生即可在任务中查看这份作业。
-                                          </view>
-                                          <button
-                                            class="primary spaced"
-                                            :disabled="busy"
-                                            @click="createAssignment"
-                                          >
-                                            发布作业 ↗
-                                          </button>
-                                        </view>
+                                        <AssignmentComposer :key="14" v-model:title="newTitle" v-model:requirements="newRequirements" v-model:due="newDue" v-model:classIds="newClassIds" :classes="teachingClassOptions" :student-counts="Object.fromEntries(teachingClassOptions.map(item => [item.id, activeStudents(state, item.id).length]))" :templates="assignmentTemplates" :busy="busy" @publish="createAssignment" @save-template="saveAssignmentTemplate" @delete-template="deleteAssignmentTemplate" />
                                       </template>
                                     </template>
                                     <template v-else>
@@ -1918,11 +1790,6 @@ const { bottomInset: bottomInset } = {
                   </template>
                 </template>
               </template>
-            </template>
-            <template v-if="error">
-              <view :key="15" class="error-message" role="alert">
-                {{ error }}
-              </view>
             </template>
           </view>
         </template>
@@ -1968,7 +1835,7 @@ const { bottomInset: bottomInset } = {
               :disabled="busy"
               @click="(e) => go('growth')"
             >
-              <text class="nav-glyph"> ↗ </text>
+              <text class="nav-glyph"> </text>
               <text> 成长 </text>
             </button>
           </template>
@@ -2056,9 +1923,9 @@ const { bottomInset: bottomInset } = {
       />
     </view>
     <!-- #endif -->
-    <template v-if="toast">
-      <view :key="0" class="toast" role="status">
-        {{ toast }}
+    <template v-if="toast || error">
+      <view :key="0" :class="['notification-toast', { error: !!error }]" :role="error ? 'alert' : 'status'">
+        {{ error || toast }}
       </view>
     </template>
     <template v-if="modal">

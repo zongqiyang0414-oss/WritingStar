@@ -1,4 +1,5 @@
 <script setup>
+import { ref, watch } from "vue";
 import { rubric, total } from "../services/rubric.js";
 
 const props = defineProps({
@@ -10,6 +11,13 @@ const props = defineProps({
   },
 });
 const emit = defineEmits(["category", "dimension", "score"]);
+const collapsedDimensions = ref([]);
+watch(() => [props.category, props.review], () => { collapsedDimensions.value = []; });
+function toggleDimension(id) {
+  collapsedDimensions.value = collapsedDimensions.value.includes(id)
+    ? collapsedDimensions.value.filter(item => item !== id)
+    : [...collapsedDimensions.value, id];
+}
 </script>
 
 <template>
@@ -49,15 +57,11 @@ const emit = defineEmits(["category", "dimension", "score"]);
         <view class="dimension-heading">
           <button
             class="dimension-label"
-            @click="
-              (s) =>
-                emit('dimension', openDimension === item1.id ? null : item1.id)
-            "
+            :aria-expanded="!collapsedDimensions.includes(item1.id)"
+            @click="toggleDimension(item1.id)"
           >
             {{ item1.name }}
-            <text class="subtle">
-              {{ openDimension === item1.id ? "−" : "＋" }}
-            </text>
+            <view class="review-collapse-label"><text>{{ collapsedDimensions.includes(item1.id) ? '展开' : '收起' }}</text><view :class="['review-chevron', { expanded: !collapsedDimensions.includes(item1.id) }]" /></view>
           </button>
           <view class="score-input-wrap">
             <input
@@ -78,7 +82,7 @@ const emit = defineEmits(["category", "dimension", "score"]);
             }"
           />
         </view>
-        <template v-if="openDimension === item1.id">
+        <template v-if="!collapsedDimensions.includes(item1.id)">
           <view :key="0" class="dimension-expanded">
             <view class="small subtle">
               {{ item1.description }}
@@ -99,7 +103,7 @@ const emit = defineEmits(["category", "dimension", "score"]);
   </view>
   <view class="card form-card">
     <view class="section-title">
-      {{ "handwriting" === category ? "书写" : "写作" }}总评
+      总体评价
     </view>
     <textarea
       :disabled="readonly"
@@ -112,10 +116,7 @@ const emit = defineEmits(["category", "dimension", "score"]);
     />
   </view>
   <view class="card form-card">
-    <view class="section-title"> 下一步，先做好这两件事 </view>
-    <view class="small subtle spaced-small">
-      这段建议会出现在学生反馈页。
-    </view>
+    <view class="section-title"> 批阅建议 </view>
     <textarea
       :disabled="readonly"
       aria-label="订正建议"

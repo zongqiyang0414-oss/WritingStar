@@ -131,7 +131,7 @@ test("排名保留并列、未发布不计分与全班搜索名次，两套量�
   const model = studentRankingModel(state, "class-1", "handwriting");
   assert.equal(model.studentCount, 4);
   assert.equal(model.className, "四年级（1）班");
-  assert.equal(model.organizationName, "星河小学");
+  assert.equal(model.organizationName, "甲秀小学");
   assert.deepEqual(model.ranks.map(({ id, rank, handwriting }) => ({ id, rank, handwriting })).sort((a, b) => a.id.localeCompare(b.id)), [
     { id: "student-1", rank: 1, handwriting: 80 },
     { id: "student-2", rank: 1, handwriting: 80 },
@@ -164,7 +164,7 @@ test("个人成长保留每轮原作和订正，未发布分数留空且平均�
   assert.deepEqual(model.trend.map(({ id, handwriting, composition }) => ({ id, handwriting, composition })),
     model.history.map(({ id, handwriting, composition }) => ({ id, handwriting, composition })));
   assert.equal(model.trend.at(-1).note, "第 3 版 · 待发布成绩");
-  assert.equal(model.organizationName, "星河小学");
+  assert.equal(model.organizationName, "甲秀小学");
   const learner = studentGrowthModel(state, "class-1", "student-1", "composition", "learner");
   assert.equal(learner.rankEntry, null);
   assert.deepEqual(learner.summary, model.summary);

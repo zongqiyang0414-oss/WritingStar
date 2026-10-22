@@ -118,10 +118,20 @@ export interface Assignment {
   title: string;
   classId: string;
   className: string;
+  /** Empty string means no deadline; historical ISO timestamps remain valid. */
   dueAt: string;
   requirements: string;
   createdAt: string;
   teacher?: TeacherSummary;
+}
+export interface AssignmentTemplate {
+  id: string;
+  title: string;
+  requirements: string;
+  builtin: boolean;
+  ownerTeacherId?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 export interface Submission {
   id: string;
@@ -135,7 +145,7 @@ export interface Submission {
   actor: Exclude<Role, "admin"> | "parent";
   /** Teacher who submitted this version on the student's behalf. */
   submittedBy?: TeacherSummary;
-  /** Selection belongs to this version, independently of feedback publication. */
+  /** Selection belongs to a version whose feedback has been published. */
   excellent?: { selectedAt: string; selectedBy: TeacherSummary } | null;
   status: "processing" | "failed" | "pending" | "published";
   draft: Review;
@@ -176,6 +186,8 @@ export interface PrototypeState {
   teacherClassIds: string[];
   classes: SchoolClass[];
   assignments: Assignment[];
+  /** Added without changing schema or clearing existing records. */
+  assignmentTemplates?: AssignmentTemplate[];
   students: Student[];
   submissions: Submission[];
 }

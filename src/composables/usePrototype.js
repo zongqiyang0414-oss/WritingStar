@@ -17,7 +17,7 @@ import {
   taskStatuses,
 } from "../services/school.js";
 import { clone } from "../services/mock.js";
-import { computed, onUnmounted, ref, shallowRef } from "vue";
+import { computed, onUnmounted, ref, shallowRef, watch } from "vue";
 import { createSeed, samplePhotos } from "../services/seed.js";
 import {
   emptyReview,
@@ -54,6 +54,7 @@ export function usePrototype() {
     screen = ref("home"),
     selectedClassId = ref("class-1"),
     newClassId = ref("class-1"),
+    newClassIds = ref(["class-1"]),
     rosterClassId = ref("class-1"),
     memberSearch = ref(""),
     organizationId = ref("organization-1"),
@@ -107,7 +108,11 @@ export function usePrototype() {
     busy = ref(false),
     error = ref(""),
     toast = ref("");
-  let toastTimer;
+  let toastTimer, errorTimer;
+  watch(error, (message) => {
+    clearTimeout(errorTimer);
+    if (message) errorTimer = setTimeout(() => { error.value = ""; }, 3600);
+  });
   const photos = ref([]),
     note = ref(""),
     failSubmit = ref(false),
@@ -457,7 +462,7 @@ export function usePrototype() {
       (dirty.value
         ? (modal.value = {
             title: "还有未保存的修改",
-            body: adminDirty.value ? "离开后，未保存的管理信息会丢失。你可以取消并先保存。" : screen.value === "submit" ? "离开后，本次选择的照片和提交说明将丢弃。你可以取消并继续提交。" : "离开后，未保存的评分和评语会丢失。你可以取消并先保存草稿。",
+            body: adminDirty.value ? "离开后，未保存的管理信息会丢失。你可以取消并先保存。" : screen.value === "submit" ? "离开后，本次选择的照片和提交说明将丢弃。你可以取消并继续提交。" : "离开后，未保存的评分和评语会丢失。你可以取消并完成批阅。",
             confirm: "放弃修改",
             action: () => {
               if (screen.value === "submit") { photos.value = []; note.value = ""; }
@@ -478,7 +483,7 @@ export function usePrototype() {
       (!isTeacher.value && rosterScreens.includes(e)) ||
       (("create" !== e || teachingClassOptions.value.length) &&
         guard(() => {
-          "create" === e && (newClassId.value = currentClass.value.id);
+          "create" === e && (newClassId.value = currentClass.value.id, newClassIds.value = [currentClass.value.id]);
           navigate(e);
         }));
   }
@@ -603,20 +608,15 @@ export function usePrototype() {
     const save = async () => {
       await runAction(async () => {
         await service.setExcellent(current.id, enabled, role.value);
-        notify(enabled ? "已设为优秀作业，全班可查看原作品" : "已取消优秀作业展示");
+        notify(enabled ? "已设为优秀作业" : "已取消优秀作业展示");
         if (!enabled && screen.value === "excellentWork") navigate("excellentWorks");
       });
     };
-    if (!enabled) return save();
-    modal.value = {
-      title: "设为优秀作业？",
-      body: `${studentFor(current)?.name || "该学生"}的第 ${current.version} 版原作品将供本班同学参考。未发布的评分、评语和提交说明不会展示。之后可以取消。`,
-      confirm: "设为优秀作业",
-      action: save,
-    };
+    return save();
   }
   onUnmounted(() => {
     clearTimeout(toastTimer);
+    clearTimeout(errorTimer);
     clearInterval(clockTimer);
     clearInterval(aiTimer);
   });
@@ -669,6 +669,17 @@ export function usePrototype() {
     newRequirements,
     newDue,
     newClassId,
+    newClassIds,
+    assignmentTemplates: computed(() => {
+      state.value;
+      return isTeacher.value && teacherIdentity.value ? service.assignmentTemplates(role.value) : [];
+    }),
+    saveAssignmentTemplate: async (input) => {
+      await runAction(async () => { await service.saveAssignmentTemplate(input, role.value); notify("模板已保存到题库"); });
+    },
+    deleteAssignmentTemplate: async (id) => {
+      await runAction(async () => { await service.deleteAssignmentTemplate(id, role.value); notify("模板已删除"); });
+    },
     modal,
     roles: [
       {
@@ -700,17 +711,18 @@ export function usePrototype() {
       });
     },
     refreshAi: advanceAiQueue,
-    applyAiSuggestions: () => {
-      if (!isTeacher.value || !selectedSubmission.value) return;
-      modal.value = {
-        title: "用AI建议作为本轮草稿？",
-        body: "当前教师草稿将替换为这份AI建议。AI原始结果保留，确认后请逐项复核，再发布老师的正式反馈。",
-        confirm: "应用并复核",
-        action: async () => {
-          await runAction(async () => { await service.applyAiReview(submissionId.value, role.value); });
-          if (!error.value) openReview(state.value.submissions.find(item => item.id === submissionId.value));
-        },
-      };
+    applyAiSuggestions: async (editedReview) => {
+      const item = selectedSubmission.value;
+      if (busy.value || !isTeacher.value || !item || !item.aiReview?.result) return;
+      await runAction(async () => {
+        const completedReview = clone(editedReview || item.aiReview.result);
+        const invalid = validateReview(completedReview);
+        if (invalid) throw new Error(invalid);
+        if (["processing", "failed"].includes(item.status)) await service.manualReview(item.id, role.value);
+        await service.publish(item.id, completedReview, role.value);
+        notify("已完成批阅");
+      });
+      if (!error.value) openFeedback(state.value.submissions.find(row => row.id === item.id));
     },
     reviewAiSubmission: async () => {
       const item = selectedSubmission.value;
@@ -781,6 +793,7 @@ export function usePrototype() {
         : "neutral";
     },
     date: function (e) {
+      if (!e) return "不限";
       const a = new Date(e);
       return `${a.getMonth() + 1}月${a.getDate()}日 ${String(a.getHours()).padStart(2, "0")}:${String(a.getMinutes()).padStart(2, "0")}`;
     },
@@ -839,27 +852,16 @@ export function usePrototype() {
         notify("草稿已保存，发布后学生可见");
       });
     },
-    publish: function () {
-      const a = validateReview(review.value);
-      a
-        ? (error.value = a)
-        : (modal.value = {
-            title: "发布这份反馈？",
-            body: "发布后，学生可查看这份书写与写作评分、评语及订正建议。",
-            confirm: "确认发布",
-            action: async () => {
-              await runAction(async () => {
-                await service.publish(
-                  submissionId.value,
-                  review.value,
-                  role.value,
-                );
-                reviewBaseline.value = JSON.stringify(review.value);
-                notify("反馈已发布");
-                navigate(reviewReturn.value);
-              });
-            },
-          });
+    publish: async function () {
+      if (busy.value) return;
+      const invalid = validateReview(review.value);
+      if (invalid) { error.value = invalid; return; }
+      await runAction(async () => {
+        await service.publish(submissionId.value, review.value, role.value);
+        reviewBaseline.value = JSON.stringify(review.value);
+        notify("已完成批阅");
+      });
+      if (!error.value) openFeedback(state.value.submissions.find(item => item.id === submissionId.value));
     },
     confirmModal: async function () {
       var e;
@@ -891,27 +893,20 @@ export function usePrototype() {
     submit: function () {
       if (!submissionStudent.value) { error.value = "请先选择代交的学生。"; return; }
       if (!isTeacher.value && !canSubmit.value) { error.value = "当前作业暂不能提交，请返回作业详情查看。"; return; }
-      photos.value.length
-        ? (modal.value = {
-            title: isTeacher.value ? `确认代${submissionStudent.value.name}提交${previousSubmission.value ? "订正" : "作业"}？` : previousSubmission.value ? "确认提交订正？" : "确认提交作品？",
-            body: `${selectedAssignment.value.title} · ${selectedAssignment.value.className}，共 ${photos.value.length} 页。请核对学生、页序和清晰度。提交后本轮不可重复提交，原作品和反馈保留。`,
-            confirm: "确认提交",
-            action: async () => {
-              await runAction(async () => {
-                const args = [photos.value, note.value, role.value, failSubmit.value, failAnalysis.value];
-                const a = isTeacher.value
-                  ? await service.submitForStudent(assignmentId.value, submissionStudent.value.id, ...args)
-                  : await service.submit(assignmentId.value, ...args);
-                refresh();
-                photos.value = [];
-                note.value = "";
-                submissionId.value = a.id;
-                aiReviewReturn.value = "assignment";
-                navigate("aiReview");
-              });
-            },
-          })
-        : (error.value = "请先选择作品照片。");
+      if (!photos.value.length) { error.value = "请先选择作品照片。"; return; }
+      return runAction(async () => {
+        const args = [photos.value, note.value, role.value, failSubmit.value, failAnalysis.value];
+        const result = isTeacher.value
+          ? await service.submitForStudent(assignmentId.value, submissionStudent.value.id, ...args)
+          : await service.submit(assignmentId.value, ...args);
+        refresh();
+        photos.value = [];
+        note.value = "";
+        submissionId.value = result.id;
+        aiReviewReturn.value = "assignment";
+        navigate("aiReview");
+        notify("作业已提交");
+      });
     },
     retry: async function (a) {
       await runAction(async () => { await service.startAiReview(a.id, role.value); });
@@ -926,27 +921,29 @@ export function usePrototype() {
     },
     createAssignment: async function () {
       await runAction(async () => {
-        const a = new Date(`${newDue.value}T20:00:00`);
-        if (!Number.isFinite(a.getTime()))
-          throw new Error("请选择有效的截止日期。");
-        const t = await service.createAssignment(
-          {
-            title: newTitle.value,
-            requirements: newRequirements.value,
-            dueAt: a.toISOString(),
-            classId: newClassId.value,
-          },
-          role.value,
-        );
-        selectedClassId.value = t.classId;
+        let dueAt = "";
+        if (newDue.value) {
+          const deadline = new Date(`${newDue.value}T20:00:00`);
+          if (!Number.isFinite(deadline.getTime())) throw new Error("请选择有效的截止日期。");
+          dueAt = deadline.toISOString();
+        }
+        const assignments = await service.createAssignments({
+          title: newTitle.value,
+          requirements: newRequirements.value,
+          dueAt,
+          classIds: newClassIds.value,
+        }, role.value);
+        const first = assignments[0];
+        selectedClassId.value = first.classId;
+        organizationId.value = state.value.classes.find(item => item.id === first.classId)?.organizationId || organizationId.value;
         assignmentPeriod.value = "ongoing";
         detailReturn.value = "home";
-        assignmentId.value = t.id;
+        assignmentId.value = first.id;
         refresh();
         navigate("assignment");
         newTitle.value = "";
         newRequirements.value = "";
-        notify("作业已发布到" + t.className);
+        notify(`作业已发布到 ${assignments.length} 个班级`);
       });
     },
     reset: function () {
@@ -964,6 +961,7 @@ export function usePrototype() {
             role.value = "teacher";
             selectedClassId.value = "class-1";
             newClassId.value = "class-1";
+            newClassIds.value = ["class-1"];
             rosterClassId.value = "class-1";
             memberSearch.value = "";
             organizationId.value = "organization-1";
@@ -1121,23 +1119,8 @@ export function usePrototype() {
       return e.publishedBy || DEFAULT_TEACHER;
     },
     needsBinding,
-    loginForBinding: function () {
-      busy.value ||
-        (modal.value = {
-          title: "微信登录写字星",
-          body:
-            isAdmin.value
-              ? "登录后，使用学校负责人提供的管理员邀请码确认管理范围，维护班级和学生信息。"
-              : "teacher" === role.value
-              ? "登录后，使用学校提供的教师邀请码确认任教学校与班级，开始布置作业和批阅。"
-              : "登录后，使用学校提供的邀请码关联学习档案，查看作业和老师的反馈。",
-          confirm: "继续",
-          action: async () => {
-            await runAction(async () => {
-              await service.signIn(role.value);
-            });
-          },
-        });
+    loginForBinding: async function () {
+      await runAction(async () => { await service.signIn(role.value); });
     },
     previewBinding: function () {
       if (!busy.value && service) {
@@ -1210,17 +1193,7 @@ export function usePrototype() {
         });
     },
     bindingHelp: function () {
-      modal.value = {
-        title: "联系学校管理员",
-        body:
-          isAdmin.value
-            ? "管理员权限由学校负责人授权。请联系负责人核对管理员姓名及学校／机构，不能通过普通教师或学生邀请码获取管理权限。"
-            : "teacher" === role.value
-            ? "请向学校管理员核对教师姓名、所属学校和任教班级。任教分配由管理员维护，小程序仅展示已分配的范围。"
-            : "请向学校管理员核对学生姓名、学校和班级。邀请码由学校提供；信息有误时请由管理员处理。",
-        confirm: "知道了",
-        action: () => {},
-      };
+      notify("请联系学校管理员核对身份、学校和班级信息。");
     },
   };
 }
