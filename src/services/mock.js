@@ -322,33 +322,64 @@ export class MockService extends AiReviewService {
       throw new Error("只能提交当前学生所在班级的作业。");
     if (Date.parse(n.dueAt) <= this.clock().getTime())
       throw new Error("作业已截止，暂不能提交。");
-    if (!photos.length || photos.length > 6)
-      throw new Error("请添加 1–6 张作品图片。");
-    if (new Set(photos.map((e) => e.id)).size !== photos.length)
-      throw new Error("图片重复，请重新选择。");
-    const u = latestSubmission(this.state, assignmentId, i.id);
-    if (u && "published" !== u.status)
-      throw new Error("本轮作品已提交，请等待老师发布反馈后再订正。");
-    if (fail) throw new Error("提交失败，图片已保留，请重试。");
-    const o = this.clock().toISOString(),
-      c = {
-        id: `submission-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        assignmentId,
-        studentId: i.id,
-        version: (u?.version || 0) + 1,
-        photos: clone(photos),
-        note: note.trim(),
-        actor: role,
-        submittedAt: o,
-        status: "processing",
-        draft: emptyReview(),
-        published: null,
-        publishedAt: null,
-        draftRevision: 0,
-      };
-    c.aiReview = createAiTask(c, "student", this.clock(), failAnalysis);
-    this.commit({ ...this.state, submissions: [...this.state.submissions, c] });
-    return clone(c);
+    return saveSubmission(this, assignmentId, i, photos, note, role, fail, failAnalysis);
+  }
+  async submitForStudent(assignmentId, studentId, photos, note, role, fail = false, failAnalysis = false) {
+    const assignment = this.state.assignments.find((item) => item.id === assignmentId);
+    if (!assignment) throw new Error("作业不存在。");
+    this.teachingClass(assignment.classId, role);
+    const student = this.state.students.find((item) => item.id === studentId);
+    if (!student || student.archived || student.classId !== assignment.classId)
+      throw new Error("请选择本班在班学生，不能为已调班或归档的学生代交。");
+    return saveSubmission(this, assignmentId, student, photos, note, role, fail, failAnalysis);
+  }
+  async setExcellent(submissionId, enabled, role) {
+    this.teachingSubmission(submissionId, role);
+    if (typeof enabled !== "boolean") throw new Error("请选择是否设为优秀作业。");
+    const submission = this.get(this.state, submissionId);
+    if (Boolean(submission.excellent) === enabled) return;
+    this.updateSubmission(submissionId, {
+      excellent: enabled
+        ? { selectedAt: this.clock().toISOString(), selectedBy: teacherSummary(this.teacher(role)) }
+        : null,
+    });
+  }
+  excellentWorks(classId, role, assignmentId = "") {
+    if (role === "teacher") this.teachingClass(classId, role);
+    else {
+      const student = this.learner(role);
+      if (student.archived || student.classId !== classId)
+        throw new Error("只能查看当前所在班级的优秀作业。");
+    }
+    const assignments = new Map(this.state.assignments
+      .filter((item) => item.classId === classId)
+      .map((item) => [item.id, item]));
+    if (assignmentId && !assignments.has(assignmentId)) throw new Error("作业不属于当前班级。");
+    return clone(this.state.submissions
+      .filter((item) => item.excellent && assignments.has(item.assignmentId) && (!assignmentId || item.assignmentId === assignmentId))
+      .sort((a, b) => b.excellent.selectedAt.localeCompare(a.excellent.selectedAt) || b.submittedAt.localeCompare(a.submittedAt))
+      .map((item) => ({
+        id: item.id,
+        assignmentId: item.assignmentId,
+        title: assignments.get(item.assignmentId).title,
+        className: assignments.get(item.assignmentId).className,
+        studentName: this.state.students.find((student) => student.id === item.studentId)?.name || "同学",
+        version: item.version,
+        pageCount: item.photos.length,
+        cover: item.photos[0]?.url || "",
+        selectedAt: item.excellent.selectedAt,
+        selectedBy: item.excellent.selectedBy,
+      })));
+  }
+  excellentWork(submissionId, role) {
+    const submission = this.get(this.state, submissionId);
+    const assignment = this.state.assignments.find((item) => item.id === submission.assignmentId);
+    if (!assignment) throw new Error("作业不存在。");
+    const summary = this.excellentWorks(assignment.classId, role).find((item) => item.id === submissionId);
+    if (!summary) throw new Error("这份作品尚未设为优秀作业或已取消展示。");
+    // Classmates receive original pages and selection details only. Teacher
+    // drafts, AI results, private submission notes and account data stay private.
+    return { ...summary, photos: clone(submission.photos) };
   }
   async finishAnalysis(submissionId, fail = false) {
     const current = this.get(this.state, submissionId);
@@ -410,4 +441,35 @@ export class MockService extends AiReviewService {
       prepareAdministration(this.state.classPracticeVersion ? withClassPractice(e, this.clock()) : e),
     );
   }
+}
+
+function saveSubmission(service, assignmentId, student, photos, note, role, fail, failAnalysis) {
+    if (!photos.length || photos.length > 6)
+      throw new Error("请添加 1–6 张作品图片。");
+    if (new Set(photos.map((e) => e.id)).size !== photos.length)
+      throw new Error("图片重复，请重新选择。");
+    const u = latestSubmission(service.state, assignmentId, student.id);
+    if (u && "published" !== u.status)
+      throw new Error("本轮作品已提交，请等待老师发布反馈后再订正。");
+    if (fail) throw new Error("提交失败，图片已保留，请重试。");
+    const o = service.clock().toISOString(),
+      c = {
+        id: `submission-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        assignmentId,
+        studentId: student.id,
+        version: (u?.version || 0) + 1,
+        photos: clone(photos),
+        note: note.trim(),
+        actor: role,
+        ...(role === "teacher" && { submittedBy: teacherSummary(service.teacher(role)) }),
+        submittedAt: o,
+        status: "processing",
+        draft: emptyReview(),
+        published: null,
+        publishedAt: null,
+        draftRevision: 0,
+      };
+    c.aiReview = createAiTask(c, role, service.clock(), failAnalysis);
+    service.commit({ ...service.state, submissions: [...service.state.submissions, c] });
+    return clone(c);
 }

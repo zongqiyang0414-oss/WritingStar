@@ -136,3 +136,104 @@ test('学生从成长摘要打开原版反馈，不能打开其他学生作品',
   page.openFeedback({ id: another.id });
   assert.equal(page.screen.value, 'growth');
 });
+
+test('教师选择学生代交，失败保留照片，成功后进入该学生的AI批阅', async () => {
+  const { page, service, show } = await setup();
+  const assignment = await service.createAssignment({
+    classId: 'class-1', title: '代交体验', requirements: '写清经过', dueAt: new Date(Date.now() + 86400000).toISOString(),
+  }, 'teacher');
+  show();
+  page.openAssignment(assignment);
+  page.openTeacherSubmit(assignment);
+  assert.equal(page.screen.value, 'submit');
+  page.submit();
+  assert.match(page.error.value, /选择代交的学生/);
+  const index = page.submissionStudents.value.findIndex(item => item.id === 'student-1');
+  page.selectSubmissionStudent(index);
+  page.addSamples();
+  page.failSubmit.value = true;
+  page.submit();
+  assert.match(page.modal.value.title, /小禾/);
+  await page.confirmModal();
+  assert.equal(page.screen.value, 'submit');
+  assert.match(page.error.value, /提交失败/);
+  assert.equal(page.photos.value.length, 2);
+  page.failSubmit.value = false;
+  page.submit();
+  await page.confirmModal();
+  assert.equal(page.error.value, '');
+  assert.equal(page.screen.value, 'aiReview');
+  assert.equal(page.selectedSubmission.value.studentId, 'student-1');
+  assert.equal(page.selectedSubmission.value.actor, 'teacher');
+  assert.equal(page.photos.value.length, 0);
+  page.back();
+  assert.equal(page.screen.value, 'assignment');
+  assert.equal(page.submissionStudents.value.some(item => item.id === 'student-1'), false);
+  page.switchRole('student');
+  page.openAssignment(assignment);
+  assert.equal(page.mine.value.submittedBy.name, '陈老师');
+  assert.equal(page.canSubmit.value, false);
+});
+
+test('更换代交学生和离开提交页会提示，取消保留照片，确认更换清空照片', async () => {
+  const { page, service, show } = await setup();
+  const assignment = await service.createAssignment({
+    classId: 'class-1', title: '匹配学生', requirements: '写清经过', dueAt: new Date(Date.now() + 86400000).toISOString(),
+  }, 'teacher');
+  show();
+  page.openTeacherSubmit(assignment, page.state.value.students.find(item => item.id === 'student-1'));
+  page.addSamples();
+  page.note.value = '小禾的照片';
+  const index = page.submissionStudents.value.findIndex(item => item.id === 'student-2');
+  page.selectSubmissionStudent(index);
+  assert.match(page.modal.value.title, /更换代交学生/);
+  page.modal.value = null;
+  assert.equal(page.submissionStudent.value.id, 'student-1');
+  assert.equal(page.photos.value.length, 2);
+  page.selectSubmissionStudent(index);
+  await page.confirmModal();
+  assert.equal(page.submissionStudent.value.id, 'student-2');
+  assert.equal(page.photos.value.length, 0);
+  assert.equal(page.note.value, '');
+  page.addSamples();
+  page.back();
+  assert.equal(page.screen.value, 'submit');
+  assert.match(page.modal.value.body, /照片/);
+  await page.confirmModal();
+  assert.equal(page.screen.value, 'assignment');
+  assert.equal(page.photos.value.length, 0);
+});
+
+test('同班学生可读优秀作品并逐级返回，普通反馈入口仍不能打开同学作品', async () => {
+  const { page, service, show } = await setup();
+  const assignment = await service.createAssignment({
+    classId: 'class-1', title: '全班参考', requirements: '写清经过', dueAt: new Date(Date.now() + 86400000).toISOString(),
+  }, 'teacher');
+  const submission = await service.submitForStudent(assignment.id, 'student-2', seed.samplePhotos, '不共享的说明', 'teacher');
+  show();
+  page.openAssignment(assignment);
+  await page.toggleExcellent(submission);
+  assert.match(page.modal.value.body, /全班|本班/);
+  await page.confirmModal();
+  page.switchRole('student');
+  page.openAssignment(assignment);
+  page.openExcellentWorks(assignment);
+  assert.equal(page.excellentWorks.value.length, 1);
+  page.openExcellentWork(page.excellentWorks.value[0]);
+  assert.equal(page.screen.value, 'excellentWork');
+  assert.equal(page.excellentWork.value.photos.length, 2);
+  assert.equal(page.excellentWork.value.note, undefined);
+  assert.equal(page.excellentWork.value.draft, undefined);
+  page.openFeedback(submission);
+  assert.equal(page.screen.value, 'excellentWork');
+  page.back();
+  assert.equal(page.screen.value, 'excellentWorks');
+  page.back();
+  assert.equal(page.screen.value, 'assignment');
+  page.switchRole('teacher');
+  page.openExcellentWorks();
+  page.openExcellentWork(page.excellentWorks.value.find(item => item.id === submission.id));
+  await page.toggleExcellent(submission);
+  assert.equal(page.screen.value, 'excellentWorks');
+  assert.equal(page.excellentWorks.value.length, 0);
+});

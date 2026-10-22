@@ -11,6 +11,7 @@ import TeachingClasses from "../../components/TeachingClasses.vue";
 import AdminWorkspace from "../../components/AdminWorkspace.vue";
 import AiReviewPanel from "../../components/AiReviewPanel.vue";
 import AiBatchReview from "../../components/AiBatchReview.vue";
+import ExcellentWorks from "../../components/ExcellentWorks.vue";
 import { displayPhoto } from "../../services/presentation.js";
 import { growthIllustration } from "../../services/assets.js";
 import { ref } from "vue";
@@ -40,6 +41,17 @@ const { bottomInset: bottomInset } = {
     toast: toast,
     photos: photos,
     note: note,
+    submissionStudents,
+    submissionStudent,
+    previousSubmission,
+    selectSubmissionStudent,
+    classExcellentWorks,
+    excellentWorks,
+    excellentWork,
+    excellentAssignmentId,
+    openExcellentWorks,
+    openExcellentWork,
+    toggleExcellent,
     failSubmit: failSubmit,
     failAnalysis: failAnalysis,
     newTitle: newTitle,
@@ -90,6 +102,7 @@ const { bottomInset: bottomInset } = {
     openReview: openReview,
     openFeedback: openFeedback,
     openSubmit: openSubmit,
+    openTeacherSubmit,
     editScore: editScore,
     saveDraft: saveDraft,
     publish: publish,
@@ -340,6 +353,20 @@ const { bottomInset: bottomInset } = {
                 v-model:code="inviteCode"
               />
             </template>
+            <template v-else-if="screen === 'excellentWorks' || screen === 'excellentWork'">
+              <ExcellentWorks
+                :works="excellentWorks"
+                :work="excellentWork"
+                :detail="screen === 'excellentWork'"
+                :teacher="isTeacher"
+                :busy="busy"
+                :class-name="currentClass.name"
+                :assignment-title="excellentAssignmentId ? selectedAssignment?.title || '' : ''"
+                @view="openExcellentWork"
+                @remove="toggleExcellent"
+                @back="back"
+              />
+            </template>
             <template v-else-if="screen === 'aiReview' && selectedSubmission">
               <AiReviewPanel
                 key="single-ai-review"
@@ -521,6 +548,11 @@ const { bottomInset: bottomInset } = {
                       </view>
                     </view>
                   </template>
+                  <view v-if="!boundStudent?.archived" class="card excellent-entry">
+                    <view class="excellent-symbol">★</view>
+                    <view class="grow"><view class="strong">班级优秀作业</view><view class="tiny subtle">{{ classExcellentWorks.length }} 份作品 · 一起学习好方法</view></view>
+                    <button class="text-button" :disabled="busy" @click="openExcellentWorks()">去看看 ›</button>
+                  </view>
                   <template v-for="item2 in visibleAssignments" :key="item2.id">
                     <view class="assignment-card card">
                       <view class="card-top">
@@ -718,7 +750,13 @@ const { bottomInset: bottomInset } = {
                                 <text> 完整五维评价 </text>
                               </view>
                             </view>
+                            <view v-if="!boundStudent?.archived" class="card excellent-entry">
+                              <view class="excellent-symbol">★</view>
+                              <view class="grow"><view class="strong">本次优秀作业</view><view class="tiny subtle">{{ classExcellentWorks.filter((item) => item.assignmentId === selectedAssignment.id).length }} 份作品供全班参考</view></view>
+                              <button class="text-button" :disabled="busy" @click="openExcellentWorks(selectedAssignment)">查看作品 ›</button>
+                            </view>
                             <template v-if="isTeacher">
+                              <button class="secondary full-width spaced-small" :disabled="busy || !submissionStudents.length" @click="openTeacherSubmit(selectedAssignment)">代学生提交作业</button>
                               <view class="card ai-assignment-entry">
                                 <view class="ai-entry-heading"><view class="ai-entry-symbol">✧</view><view class="grow"><view class="section-title">全班AI批阅</view><view class="tiny subtle">已提交作品统一批阅，逐份查看双写建议</view></view></view>
                                 <view class="ai-entry-counts"><text>待AI批阅 {{ aiSummary.eligible }}</text><text>处理中 {{ aiSummary.running }}</text><text>AI已完成 {{ aiSummary.completed }}</text></view>
@@ -759,6 +797,8 @@ const { bottomInset: bottomInset } = {
                                     <view class="strong">
                                       {{ item4.name }}
                                     </view>
+                                    <view v-if="item4.submission?.excellent" class="tiny submission-provenance"><text class="badge excellent-badge">★ 优秀作业</text></view>
+                                    <view v-if="item4.submission?.actor === 'teacher'" class="tiny subtle submission-provenance">{{ item4.submission.submittedBy?.name || '教师' }}代交</view>
                                     <view class="small subtle">
                                       {{
                                         item4.submission
@@ -819,7 +859,9 @@ const { bottomInset: bottomInset } = {
                                         }}
                                         ›
                                       </button>
+                                      <button class="text-button" :disabled="busy" @click="toggleExcellent(item4.submission)">{{ item4.submission.excellent ? '取消优秀作业' : '设为优秀作业' }}</button>
                                     </template>
+                                    <button v-if="!item4.submission || item4.submission.status === 'published'" class="text-button" :disabled="busy" @click="openTeacherSubmit(selectedAssignment, item4)">{{ item4.submission ? '代交订正' : '代交作业' }} ›</button>
                                   </view>
                                 </view>
                               </template>
@@ -860,6 +902,7 @@ const { bottomInset: bottomInset } = {
                                     {{
                                       "parent" === mine.actor
                                         ? "家长代交（历史）"
+                                        : "teacher" === mine.actor ? (mine.submittedBy?.name || "教师") + "代交"
                                         : "学生提交"
                                     }}
                                   </view>
@@ -972,6 +1015,11 @@ const { bottomInset: bottomInset } = {
                                 >
                                   {{ statusLabel(selectedSubmission) }}
                                 </text>
+                              </view>
+                              <view class="card homework-actions homework-selection-bar">
+                                <text v-if="selectedSubmission.excellent" class="badge excellent-badge">★ 优秀作业 · 全班可参考</text>
+                                <text v-else class="small subtle">将这版作品分享给全班同学</text>
+                                <button class="text-button" :disabled="busy" @click="toggleExcellent(selectedSubmission)">{{ selectedSubmission.excellent ? '取消优秀作业' : '设为优秀作业' }}</button>
                               </view>
                               <view class="ai-review-shortcut"><view><view class="strong">AI双写建议</view><view class="tiny subtle">{{ aiStateLabel(selectedSubmission) }} · 与教师草稿分别保留</view></view><button class="text-button" :disabled="busy" @click="openAiReview(selectedSubmission)">查看AI批阅 ›</button></view>
                               <template
@@ -1137,7 +1185,7 @@ const { bottomInset: bottomInset } = {
                                   </view>
                                   <view class="detail-title">
                                     {{
-                                      mine
+                                      isTeacher ? "帮学生记录这次努力" : mine
                                         ? "下一次，写得更好"
                                         : "提交作品，看看AI的建议"
                                     }}
@@ -1145,6 +1193,16 @@ const { bottomInset: bottomInset } = {
                                   <view class="paragraph small subtle">
                                     整页拍清楚，按阅读顺序排列。提交前检查是否有缺页或模糊的照片。
                                   </view>
+                                </view>
+                                <view v-if="isTeacher" class="card teacher-submit-student">
+                                  <view class="section-title">为哪位学生提交</view>
+                                  <view class="small subtle spaced-small">{{ selectedAssignment.className }}</view>
+                                  <picker mode="selector" :range="submissionStudents" range-key="label" :disabled="busy || !submissionStudents.length" :value="Math.max(0, submissionStudents.findIndex((student) => student.id === submissionStudent?.id))" @change="selectSubmissionStudent($event.detail.value)">
+                                    <view class="teacher-submit-picker">{{ submissionStudents.find((student) => student.id === submissionStudent?.id)?.label || '请选择学生' }} ﹀</view>
+                                  </picker>
+                                  <view class="tiny subtle">仅可选择本班在班学生；已有待批阅作品的学生，请先发布反馈后再代交订正。</view>
+                                  <view v-if="expired(selectedAssignment)" class="tiny subtle spaced-small">作业已截止，教师仍可帮助学生补交。</view>
+                                  <view v-if="submissionStudent" class="teacher-submit-selection">本次将为{{ submissionStudent.name }}提交第 {{ (previousSubmission?.version || 0) + 1 }} 版{{ previousSubmission ? '订正作品' : '作品' }}，并标明{{ teacherIdentity.name }}代交。</view>
                                 </view>
                                 <view class="ai-submit-preview"><view class="ai-entry-symbol">✧</view><view class="grow"><view class="strong">提交后，开始AI双写批阅</view><view class="tiny subtle">识别作品 → 分析书写与写作 → 生成学习建议</view><view class="tiny subtle spaced-small">你可以先看AI建议，老师正式反馈单独发布。</view></view></view>
                                 <view class="upload-area">
@@ -1225,11 +1283,11 @@ const { bottomInset: bottomInset } = {
                                 </template>
                                 <view class="card form-card">
                                   <view class="section-title">
-                                    给老师的话
+                                    {{ isTeacher ? '提交说明' : '给老师的话' }}
                                     <text class="small subtle"> 选填 </text>
                                   </view>
                                   <textarea
-                                    placeholder="有什么想请老师特别看一看？"
+                                    :placeholder="isTeacher ? '可填写本次代交或订正的说明' : '有什么想请老师特别看一看？'"
                                     auto-height=""
                                     :cursor-spacing="100"
                                     maxlength="400"
@@ -1241,13 +1299,13 @@ const { bottomInset: bottomInset } = {
                                 </view>
                                 <button
                                   class="primary spaced"
-                                  :disabled="busy || !photos.length"
+                                  :disabled="busy || !photos.length || !submissionStudent || (!isTeacher && !canSubmit)"
                                   @click="submit"
                                 >
                                   {{
                                     busy
                                       ? "提交中…"
-                                      : mine ? "提交订正并开始AI批阅" : "提交并开始AI批阅"
+                                      : isTeacher ? '确认代交并开始AI批阅' : mine ? "提交订正并开始AI批阅" : "提交并开始AI批阅"
                                   }}
                                 </button>
                               </view>
@@ -1260,6 +1318,7 @@ const { bottomInset: bottomInset } = {
                               >
                                 <view :key="10">
                                   <template v-if="feedback">
+                                    <view v-if="isTeacher" class="card homework-actions homework-selection-bar"><text class="small subtle">{{ selectedSubmission.excellent ? '★ 优秀作业 · 全班可参考' : '分享这版作品，供全班参考' }}</text><button class="text-button" :disabled="busy" @click="toggleExcellent(selectedSubmission)">{{ selectedSubmission.excellent ? '取消优秀作业' : '设为优秀作业' }}</button></view>
                                     <view class="feedback-intro">
                                       <view class="eyebrow">
                                         第 {{ selectedSubmission.version }} 版 ·
@@ -1504,7 +1563,9 @@ const { bottomInset: bottomInset } = {
                                           第 {{ item7.version }} 版 ·
                                           {{ date(item7.submittedAt) }} ·
                                           {{ item7.photos.length }} 页
+                                          {{ item7.actor === 'teacher' ? ' · ' + (item7.submittedBy?.name || '教师') + '代交' : '' }}
                                         </view>
+                                        <view v-if="item7.excellent" class="spaced-small"><text class="badge excellent-badge">★ 优秀作业</text></view>
                                         <view class="history-thumbs">
                                           <template
                                             v-for="item8 in item7.photos"

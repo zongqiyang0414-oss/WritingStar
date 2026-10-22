@@ -1,0 +1,69 @@
+.homework-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.homework-actions .secondary {
+  flex: 1;
+}
+.excellent-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.excellent-entry .grow {
+  min-width: 0;
+}
+.excellent-entry .text-button {
+  flex-shrink: 0;
+}
+.excellent-symbol {
+  color: #b78735;
+  font-size: 24px;
+  line-height: 1.5;
+}
+.excellent-badge {
+  color: #94671e;
+  background: #faf0d9;
+}
+.excellent-cover {
+  width: 100%;
+  height: 170px;
+  margin: 14px 0;
+  border-radius: 10px;
+  background: #f7f4ec;
+}
+.excellent-intro,
+.excellent-detail-intro {
+  background: #fffcf5;
+}
+.excellent-workspace .detail-title {
+  overflow-wrap: break-word;
+}
+.teacher-submit-student {
+  margin-bottom: 16px;
+}
+.teacher-submit-picker {
+  margin: 12px 0;
+  padding: 14px 12px;
+  background: #f3f6ee;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--green);
+  font-size: 13px;
+}
+.teacher-submit-selection {
+  padding-top: 10px;
+  color: var(--green);
+  font-size: 13px;
+  line-height: 1.8;
+}
+.homework-selection-bar {
+  margin: 12px 0;
+}
+.submission-provenance {
+  margin-top: 6px;
+  line-height: 1.6;
+}

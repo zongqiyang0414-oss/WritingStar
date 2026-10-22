@@ -67,6 +67,10 @@ export function usePrototype() {
     assignmentPeriod = ref("ongoing"),
     detailReturn = ref("home"),
     feedbackReturn = ref("assignment"),
+    excellentReturn = ref("home"),
+    excellentAssignmentId = ref(""),
+    excellentSubmissionId = ref(""),
+    submissionStudentId = ref(""),
     aiReviewReturn = ref("assignment"),
     reviewReturn = ref("assignment"),
     now = ref(Date.now());
@@ -253,6 +257,38 @@ export function usePrototype() {
         ? latest(selectedAssignment.value?.id || "", boundStudent.value.id)
         : null;
     }),
+    submissionStudents = computed(() => isTeacher.value
+      ? activeStudents(state.value, selectedAssignment.value?.classId || "")
+        .filter((student) => {
+          const previous = latest(selectedAssignment.value.id, student.id);
+          return !previous || previous.status === "published";
+        })
+        .map((student) => ({
+          id: student.id,
+          name: student.name,
+          label: `${student.name}${student.studentNumber ? " · " + student.studentNumber : ""}${latest(selectedAssignment.value.id, student.id) ? " · 提交订正" : " · 首次提交"}`,
+        }))
+      : []),
+    submissionStudent = computed(() => isTeacher.value
+      ? submissionStudents.value.find((student) => student.id === submissionStudentId.value)
+      : boundStudent.value),
+    previousSubmission = computed(() => submissionStudent.value
+      ? latest(selectedAssignment.value?.id || "", submissionStudent.value.id)
+      : null),
+    classExcellentWorks = computed(() => {
+      if (!service || needsBinding.value || isAdmin.value) return [];
+      // Track snapshot changes even though the service owns the query.
+      state.value;
+      try { return service.excellentWorks(currentClass.value.id, role.value); }
+      catch { return []; }
+    }),
+    excellentWorks = computed(() => classExcellentWorks.value.filter((item) =>
+      !excellentAssignmentId.value || item.assignmentId === excellentAssignmentId.value)),
+    excellentWork = computed(() => {
+      if (!service || screen.value !== "excellentWork" || !excellentWorks.value.some((item) => item.id === excellentSubmissionId.value)) return null;
+      try { return service.excellentWork(excellentSubmissionId.value, role.value); }
+      catch { return null; }
+    }),
     isTeacher = computed(() => "teacher" === role.value),
     identity = computed(() => {
       var e;
@@ -288,7 +324,7 @@ export function usePrototype() {
     dirty = computed(() => {
       var e;
       return (
-        adminDirty.value || ("review" === screen.value &&
+        adminDirty.value || (screen.value === "submit" && (photos.value.length > 0 || note.value.trim().length > 0)) || ("review" === screen.value &&
         "pending" === selectedSubmission.value?.status &&
         JSON.stringify(review.value) !== reviewBaseline.value)
       );
@@ -317,7 +353,9 @@ export function usePrototype() {
           review: "双写批阅",
           aiReview: "AI双写批阅",
           aiBatch: "全班AI批阅",
-          submit: mine.value ? "提交订正" : "提交作品",
+          submit: isTeacher.value ? "代学生提交作业" : mine.value ? "提交订正" : "提交作品",
+          excellentWorks: "班级优秀作业",
+          excellentWork: "优秀作业",
           feedback: "老师的反馈",
           records: "作品记录",
           profile: "我的",
@@ -419,9 +457,12 @@ export function usePrototype() {
       (dirty.value
         ? (modal.value = {
             title: "还有未保存的修改",
-            body: adminDirty.value ? "离开后，未保存的管理信息会丢失。你可以取消并先保存。" : "离开后，未保存的评分和评语会丢失。你可以取消并先保存草稿。",
+            body: adminDirty.value ? "离开后，未保存的管理信息会丢失。你可以取消并先保存。" : screen.value === "submit" ? "离开后，本次选择的照片和提交说明将丢弃。你可以取消并继续提交。" : "离开后，未保存的评分和评语会丢失。你可以取消并先保存草稿。",
             confirm: "放弃修改",
-            action: e,
+            action: () => {
+              if (screen.value === "submit") { photos.value = []; note.value = ""; }
+              e();
+            },
           })
         : e());
   }
@@ -544,6 +585,36 @@ export function usePrototype() {
       if (!result.queued.length) notify("已有结果和正在批阅的作品已保留");
     });
   }
+  function openExcellentWorks(assignment = null) {
+    if (needsBinding.value || isAdmin.value || boundStudent.value?.archived) return;
+    if (assignment && !scopedAssignments.value.some((item) => item.id === assignment.id)) return;
+    guard(() => {
+      excellentReturn.value = screen.value === "assignment" ? "assignment" : "home";
+      excellentAssignmentId.value = assignment?.id || "";
+      excellentSubmissionId.value = "";
+      navigate("excellentWorks");
+    });
+  }
+  async function toggleExcellent(submission) {
+    if (!isTeacher.value || !submission || busy.value) return;
+    const current = state.value.submissions.find((item) => item.id === submission.id);
+    if (!current) return;
+    const enabled = !current.excellent;
+    const save = async () => {
+      await runAction(async () => {
+        await service.setExcellent(current.id, enabled, role.value);
+        notify(enabled ? "已设为优秀作业，全班可查看原作品" : "已取消优秀作业展示");
+        if (!enabled && screen.value === "excellentWork") navigate("excellentWorks");
+      });
+    };
+    if (!enabled) return save();
+    modal.value = {
+      title: "设为优秀作业？",
+      body: `${studentFor(current)?.name || "该学生"}的第 ${current.version} 版原作品将供本班同学参考。未发布的评分、评语和提交说明不会展示。之后可以取消。`,
+      confirm: "设为优秀作业",
+      action: save,
+    };
+  }
   onUnmounted(() => {
     clearTimeout(toastTimer);
     clearInterval(clockTimer);
@@ -569,6 +640,29 @@ export function usePrototype() {
     toast,
     photos,
     note,
+    submissionStudents,
+    submissionStudent,
+    previousSubmission,
+    classExcellentWorks,
+    excellentWorks,
+    excellentWork,
+    excellentAssignmentId,
+    openExcellentWorks,
+    openExcellentWork: (item) => {
+      if (!excellentWorks.value.some((work) => work.id === item?.id)) return;
+      excellentSubmissionId.value = item.id;
+      photoIndex.value = 0;
+      navigate("excellentWork");
+    },
+    toggleExcellent,
+    selectSubmissionStudent: (index) => {
+      const student = submissionStudents.value[Number(index)];
+      if (!student || busy.value || student.id === submissionStudentId.value) return;
+      const change = () => { submissionStudentId.value = student.id; photos.value = []; note.value = ""; };
+      if (photos.value.length || note.value.trim()) {
+        modal.value = { title: "更换代交学生？", body: "更换后将清空已选照片和提交说明，请为新选择的学生重新添加作品。", confirm: "更换学生", action: change };
+      } else change();
+    },
     failSubmit,
     failAnalysis,
     newTitle,
@@ -710,7 +804,7 @@ export function usePrototype() {
     openReview,
     openFeedback,
     openSubmit: function (e) {
-      boundStudent.value &&
+      !isTeacher.value && boundStudent.value && canSubmit.value &&
         scopedAssignments.value.some((a) => a.id === e.id) &&
         guard(() => {
           assignmentId.value = e.id;
@@ -720,6 +814,19 @@ export function usePrototype() {
           failAnalysis.value = false;
           navigate("submit");
         });
+    },
+    openTeacherSubmit: function (assignment, student = null) {
+      if (!isTeacher.value || !scopedAssignments.value.some((item) => item.id === assignment?.id)) return;
+      if (student && (student.archived || student.classId !== assignment.classId || (latest(assignment.id, student.id) && latest(assignment.id, student.id).status !== "published"))) return;
+      guard(() => {
+        assignmentId.value = assignment.id;
+        submissionStudentId.value = student?.id || "";
+        photos.value = [];
+        note.value = "";
+        failSubmit.value = false;
+        failAnalysis.value = false;
+        navigate("submit");
+      });
     },
     editScore: function (e, a) {
       const t = a.detail.value.trim();
@@ -782,25 +889,22 @@ export function usePrototype() {
       }
     },
     submit: function () {
+      if (!submissionStudent.value) { error.value = "请先选择代交的学生。"; return; }
+      if (!isTeacher.value && !canSubmit.value) { error.value = "当前作业暂不能提交，请返回作业详情查看。"; return; }
       photos.value.length
         ? (modal.value = {
-            title: mine.value ? "确认提交订正？" : "确认提交作品？",
-            body: `共 ${photos.value.length} 页。请检查页序和清晰度，提交后本轮不可重复提交。原作品和反馈将保留。`,
+            title: isTeacher.value ? `确认代${submissionStudent.value.name}提交${previousSubmission.value ? "订正" : "作业"}？` : previousSubmission.value ? "确认提交订正？" : "确认提交作品？",
+            body: `${selectedAssignment.value.title} · ${selectedAssignment.value.className}，共 ${photos.value.length} 页。请核对学生、页序和清晰度。提交后本轮不可重复提交，原作品和反馈保留。`,
             confirm: "确认提交",
             action: async () => {
               await runAction(async () => {
-                let a;
-                var t;
-                a = await ((t = photos.value),
-                service.submit(
-                  assignmentId.value,
-                  t,
-                  note.value,
-                  role.value,
-                  failSubmit.value,
-                  failAnalysis.value,
-                ));
+                const args = [photos.value, note.value, role.value, failSubmit.value, failAnalysis.value];
+                const a = isTeacher.value
+                  ? await service.submitForStudent(assignmentId.value, submissionStudent.value.id, ...args)
+                  : await service.submit(assignmentId.value, ...args);
                 refresh();
+                photos.value = [];
+                note.value = "";
                 submissionId.value = a.id;
                 aiReviewReturn.value = "assignment";
                 navigate("aiReview");
@@ -900,7 +1004,9 @@ export function usePrototype() {
     activeTab,
     back: function () {
       go(
-        screen.value === "aiReview" ? aiReviewReturn.value
+        screen.value === "excellentWork" ? "excellentWorks"
+          : screen.value === "excellentWorks" ? excellentReturn.value
+          : screen.value === "aiReview" ? aiReviewReturn.value
           : screen.value === "aiBatch" ? "assignment"
           : screen.value === "review" ? reviewReturn.value
           : "classMembers" === screen.value

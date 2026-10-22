@@ -5,4 +5,5 @@ export default {};
 @import "./styles.css";
 @import "./admin.css";
 @import "./ai-review.css";
+@import "./homework.css";
 </style>

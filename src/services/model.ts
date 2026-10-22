@@ -26,6 +26,8 @@ export type Screen =
   | "adminStudents"
   | "aiReview"
   | "aiBatch"
+  | "excellentWorks"
+  | "excellentWork"
   | "growth";
 // Administration uses separate navigation and does not grant teaching or feedback access.
 export type AdminScreen = "home" | "adminClasses" | "adminTeachers" | "adminStudents" | "profile";
@@ -131,6 +133,10 @@ export interface Submission {
   submittedAt: string;
   /** Parent may occur only as the source of an unchanged historical submission. */
   actor: Exclude<Role, "admin"> | "parent";
+  /** Teacher who submitted this version on the student's behalf. */
+  submittedBy?: TeacherSummary;
+  /** Selection belongs to this version, independently of feedback publication. */
+  excellent?: { selectedAt: string; selectedBy: TeacherSummary } | null;
   status: "processing" | "failed" | "pending" | "published";
   draft: Review;
   published: Review | null;
