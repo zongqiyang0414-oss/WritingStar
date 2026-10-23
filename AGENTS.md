@@ -1,5 +1,13 @@
 # 写字星前端协作约定
 
+## 2026-10-23 · v0.12.0 纸质作业与扫描收件箱
+
+- 新作业在 `createAssignments()` 同一次保存中生成 `assignment.paperPacket`，多班各有独立学生码。旧作业由任教教师生成／补充；已发学生码保持不变。学生只能取得本人卡片，家长协助学生端打印和提交，不恢复独立家长角色。
+- `paperWorkflow.js`重新校验学生码、作业、在班身份、页码、完整性与提交许可；识别码是本机记录定位符及校验和，不是服务端鉴权或防伪签名。批量提交原子保存，沿用单次提交与 `agreeResubmission()`：教师只代交首次，学生获准后可再次上传一次（许可可越过截止时间），失败不消费许可。
+- 新可选字段 `submission.paper` 仅记录收件来源、批次、卡片和人工确认页码；保持schema 6，旧照片、反馈和绑定不重置。真实照片始终 `sample: false`，提交即进入现有自动AI流程，不恢复教师启动AI入口或自动伪造评分。
+- H5答题卡打印／PNG和连续扫描在 `answerCards.js`、`documentScanner.js`；草稿通过 `scanDrafts.js` 的 IndexedDB保存，按身份和作业分开。微信用 `devicePaperScanner.js` 和原生画布生成、识别、校正／保存，处理失败保留原图人工确认；系统选图尚不等于微信连续自动拍摄，必须另做开发者工具／真机验收。
+- 延续最新分支 `feature/teacher-controlled-resubmission-2026-10-23`，不覆盖main或此前分支。验收、验证及前后端待接入规则随源码同步；私有Site和所有者访问范围不变。
+
 ## 2026-10-23后续当前规则 · 教师审核与记录返回
 
 - 教师反馈环节统一“审核”：待审核／已审核、教师一键审核、完成审核；审核完成学生立即看到正式反馈，不增加独立发布步骤。AI自动批阅仍称AI批阅；布置作业的发布行为与教师审核不同。
@@ -32,7 +40,7 @@
 - 已发现的WXSS白屏原因是`*`通配选择器。浏览器专用选择器与交互状态使用H5条件编译隔离；微信需要的盒模型规则用明确的组件标签。微信构建必须运行`npm run build:mp-weixin`，该命令已附带AppID及WXSS选择器检查，并生成含源码提交号的`build-info.json`。不要绕过此命令仅用`uni build`打包交付。
 - 云端构建与选择器检查不等于微信开发者工具或真机通过；区分网络连接错误`ECONNRESET`与源码样式编译错误，不能用更换网络代替修复明确的WXSS报错。
 
-当前完整开发工程为根目录`src/`中的v0.11.0，使用Vue 3、JavaScript业务模块及`model.ts`状态类型。默认`npm ci`、`npm run dev`；检查`npm run type-check`、`npm test`，构建`npm run build:h5`和`npm run build:mp-weixin`。`npm run build:site`从同一源码生成`dist/client/`供原私有Sites使用。`preview/`只保留恢复前的发布基准，不作为当前开发入口，不以其编译文件代替源码交付。不要再次执行历史修正脚本覆盖当前文件。
+当前完整开发工程为根目录`src/`中的v0.12.0，使用Vue 3、JavaScript业务模块及`model.ts`状态类型。默认`npm ci`、`npm run dev`；检查`npm run type-check`、`npm test`，构建`npm run build:h5`和`npm run build:mp-weixin`。`npm run build:site`从同一源码生成`dist/client/`供原私有Sites使用。`preview/`只保留恢复前的发布基准，不作为当前开发入口，不以其编译文件代替源码交付。不要再次执行历史修正脚本覆盖当前文件。
 
 2026-10-15已根据线上v0.9.1恢复可编辑、可构建的页面、组件、服务、样式和平台分支。原始源文件与开发历史未找回；恢复依据与目录见`docs/源码恢复说明.md`。根目录`src/`已更新为当前版本；旧v0.4.2源码留在Git历史。原Site ID、网址和所有者私有访问不变，最新部署结果见`docs/云端交付状态.md`。
 

@@ -122,6 +122,7 @@ export function usePrototype() {
     failAnalysis = ref(false),
     newTitle = ref(""),
     newRequirements = ref(""),
+    newPaperPages = ref(2),
     dueDate = new Date(Date.now() + 6048e5),
     newDue = ref(
       `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, "0")}-${String(dueDate.getDate()).padStart(2, "0")}`,
@@ -361,6 +362,8 @@ export function usePrototype() {
           review: "双写审核",
           aiReview: "AI双写批阅",
           aiBatch: "全班AI批阅",
+          paperCards: "学生专属答题卡",
+          paperScan: isTeacher.value ? "批量扫描收件箱" : "上传答题卡",
           submit: isTeacher.value ? "代学生提交作业" : "提交作品",
           excellentWorks: "班级优秀作业",
           excellentWork: "优秀作业",
@@ -579,6 +582,34 @@ export function usePrototype() {
         navigate("feedback");
       });
   }
+  const paperCards = computed(() => {
+    state.value;
+    if (!service || !selectedAssignment.value || role.value === "admin") return [];
+    try { return service.paperCards(selectedAssignment.value.id, role.value); }
+    catch { return []; }
+  });
+  function openPaper(screenName) {
+    if (!selectedAssignment.value || role.value === "admin") return;
+    guard(() => navigate(screenName));
+  }
+  async function issuePaperCards() {
+    await runAction(async () => {
+      await service.issuePaperCards(selectedAssignment.value.id, role.value);
+      refresh(); notify("全班专属答题卡已就绪，原有学生码保持不变");
+    });
+  }
+  async function submitPaper(payload) {
+    await runAction(async () => {
+      const result = await service.submitPaperBatch(selectedAssignment.value.id, payload.rows, role.value, failSubmit.value, failAnalysis.value);
+      refresh(); await payload.complete();
+      notify(`${result.length} 位学生的答题卡已提交，开始AI批阅`);
+      if (!isTeacher.value && result[0]) {
+        submissionId.value = result[0].id;
+        aiReviewReturn.value = "assignment";
+        navigate("aiReview");
+      }
+    });
+  }
   async function runAction(t) {
     if (!busy.value) {
       busy.value = true;
@@ -706,6 +737,12 @@ export function usePrototype() {
     failAnalysis,
     newTitle,
     newRequirements,
+    newPaperPages,
+    paperCards,
+    openPaperCards: () => openPaper("paperCards"),
+    openPaperScan: () => openPaper("paperScan"),
+    issuePaperCards,
+    submitPaper,
     newDue,
     newClassId,
     newClassIds,
@@ -988,6 +1025,7 @@ export function usePrototype() {
           requirements: newRequirements.value,
           dueAt,
           classIds: newClassIds.value,
+          paperPages: newPaperPages.value,
         }, role.value);
         const first = assignments[0];
         selectedClassId.value = first.classId;
@@ -999,7 +1037,7 @@ export function usePrototype() {
         navigate("assignment");
         newTitle.value = "";
         newRequirements.value = "";
-        notify(`作业已发布到 ${assignments.length} 个班级`);
+        notify(`作业已发布到 ${assignments.length} 个班级，专属答题卡已生成`);
       });
     },
     reset: function () {
@@ -1063,6 +1101,7 @@ export function usePrototype() {
           : screen.value === "excellentWorks" ? excellentReturn.value
           : screen.value === "aiReview" ? aiReviewReturn.value
           : screen.value === "aiBatch" ? "assignment"
+          : ["paperCards", "paperScan"].includes(screen.value) ? "assignment"
           : screen.value === "review" ? reviewReturn.value
           : "classMembers" === screen.value
           ? "classes"

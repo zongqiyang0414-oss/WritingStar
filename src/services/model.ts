@@ -27,6 +27,8 @@ export type Screen =
   | "adminStudents"
   | "aiReview"
   | "aiBatch"
+  | "paperCards"
+  | "paperScan"
   | "excellentWorks"
   | "excellentWork"
   | "growth";
@@ -124,6 +126,7 @@ export interface Assignment {
   requirements: string;
   createdAt: string;
   teacher?: TeacherSummary;
+  paperPacket?: { version: 1; pages: number; cards: { id: string; studentId: string; studentName: string; studentNumber: string; className: string }[] };
 }
 export interface AssignmentTemplate {
   id: string;
@@ -147,6 +150,7 @@ export interface Submission {
   actor: Exclude<Role, "admin"> | "parent";
   /** Teacher who submitted this version on the student's behalf. */
   submittedBy?: TeacherSummary;
+  paper?: { batchId: string; cardId: string; source: "teacher-scan" | "student-paper"; pages: { page: number; manual: boolean }[] };
   /** Selection belongs to a version whose feedback has been published. */
   excellent?: { selectedAt: string; selectedBy: TeacherSummary } | null;
   status: "processing" | "failed" | "pending" | "published";

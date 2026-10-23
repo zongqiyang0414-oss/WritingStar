@@ -10,10 +10,12 @@ const props = defineProps({
   templates: { type: Array, default: () => [] },
   studentCounts: { type: Object, default: () => ({}) },
   busy: Boolean,
+  paperPages: {type: Number, default: 2},
 });
 const emit = defineEmits([
   "update:title", "update:requirements", "update:due", "update:classIds",
   "publish", "save-template", "delete-template",
+  "update:paperPages",
 ]);
 const mode = ref("manual");
 const selectedTemplateId = ref("");
@@ -90,6 +92,9 @@ function toggleClass(id) {
       </view>
       <view v-if="!classes.length" class="small subtle">暂无可发布的任教班级。</view>
       <view class="small subtle composer-selection-summary">已选 {{ selectedClasses.length }} 个班级<text v-if="selectedStudentCount"> · {{ selectedStudentCount }} 位学生</text></view>
+      <view class="field-label">每份答题卡页数</view>
+      <picker :range="['1 页', '2 页', '3 页', '4 页', '5 页', '6 页']" :value="paperPages - 1" :disabled="busy" @change="emit('update:paperPages', Number($event.detail.value) + 1)"><view class="date-picker">{{ paperPages }} 页 <text>每页带学生码与页码 ›</text></view></picker>
+      <view class="small subtle spaced-small">发布后自动为所选班级的在班学生生成 A4 专属答题卡，家长可通过学生端下载打印。</view>
     </view>
     <button class="primary full-width spaced" :disabled="busy" @click="emit('publish')">{{ busy ? '发布中…' : '发布作业' }}</button>
   </view>

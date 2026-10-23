@@ -6,4 +6,5 @@ export default {};
 @import "./admin.css";
 @import "./ai-review.css";
 @import "./homework.css";
+@import "./paper-workflow.css";
 </style>

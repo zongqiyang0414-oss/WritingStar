@@ -22,6 +22,7 @@ import { prepareAdministration, previewAdminBinding } from "./administration.js"
 import { AiReviewService, AI_RUNNING, createAiTask, settleAiTask } from "./aiReview.js";
 
 import { latestSubmission } from "./school.js";
+import { createPaperPacket, pageCount, paperId, resolvePaperCode, validatePaperBatch } from "./paperWorkflow.js";
 import { BUILTIN_ASSIGNMENT_TEMPLATES, assignmentContent } from "./assignmentTemplates.js";
 
 export const clone = (e) => JSON.parse(JSON.stringify(e));
@@ -339,6 +340,58 @@ export class MockService extends AiReviewService {
       throw new Error("请选择本班在班学生，不能为已调班或归档的学生代交。");
     return saveSubmission(this, assignmentId, student, photos, note, role, fail, failAnalysis);
   }
+  async issuePaperCards(assignmentId, role, pages = 2) {
+    const assignment = this.state.assignments.find(a => a.id === assignmentId);
+    if (!assignment) throw new Error("作业不存在。");
+    this.teachingClass(assignment.classId, role);
+    const paperPacket = createPaperPacket(this.state, assignment, assignment.paperPacket?.pages || pages, assignment.paperPacket);
+    this.commit({ ...this.state, assignments: this.state.assignments.map(a => a.id === assignmentId ? { ...a, paperPacket } : a) });
+    return this.paperCards(assignmentId, role);
+  }
+  paperCards(assignmentId, role) {
+    const assignment = this.state.assignments.find(a => a.id === assignmentId);
+    if (!assignment) throw new Error("作业不存在。");
+    let own = null;
+    if (role === "teacher") this.teachingClass(assignment.classId, role);
+    else {
+      own = this.learner(role);
+      if (own.archived || own.classId !== assignment.classId) throw new Error("只能查看本人所在班级的答题卡。");
+    }
+    if (!assignment.paperPacket) return [];
+    return clone(assignment.paperPacket.cards.filter(card => (!own || card.studentId === own.id)
+      && this.state.students.some(s => s.id === card.studentId && s.classId === assignment.classId && !s.archived)));
+  }
+  paperMatch(assignmentId, code, role) {
+    const match = resolvePaperCode(this.state, assignmentId, code);
+    if (!this.paperCards(assignmentId, role).some(c => c.id === match.card.id)) throw new Error("只能识别本人的答题卡。");
+    return clone(match);
+  }
+  async submitPaperBatch(assignmentId, rows, role, fail = false, failAnalysis = false) {
+    const assignment = this.state.assignments.find(a => a.id === assignmentId);
+    if (!assignment) throw new Error("作业不存在。");
+    let own = "";
+    if (role === "teacher") this.teachingClass(assignment.classId, role);
+    else {
+      const student = this.learner(role);
+      if (student.archived || student.classId !== assignment.classId) throw new Error("只能提交本人所在班级的答题卡。");
+      if (Date.parse(assignment.dueAt) <= this.clock().getTime() && !canResubmit(this.latest(assignmentId, student.id))) throw new Error("作业已截止，请联系老师补交。");
+      own = student.id;
+    }
+    const groups = validatePaperBatch(this.state, assignmentId, rows, own);
+    if (fail) throw new Error("提交失败，扫描页面已保留，请重试。");
+    const batchId = paperId("batch");
+    const submissions = groups.map(group => {
+      const submission = buildSubmission(this, assignmentId, group.student, group.rows.map(r => r.photo), "", role, false, failAnalysis);
+      submission.paper = {
+        batchId, cardId: group.card.id, source: role === "teacher" ? "teacher-scan" : "student-paper",
+        pages: group.rows.map(r => ({ page: r.page, manual: r.manual })),
+      };
+      return submission;
+    });
+    // One write: storage errors never leave a partially submitted class batch.
+    this.commit({ ...this.state, submissions: [...consumeResubmissions(this, submissions), ...submissions] });
+    return clone(submissions);
+  }
   async agreeResubmission(submissionId, role) {
     this.teachingSubmission(submissionId, role);
     const current = this.get(this.state, submissionId);
@@ -453,6 +506,8 @@ export class MockService extends AiReviewService {
       createdAt,
       teacher,
     }));
+    const pages = pageCount(input.paperPages ?? 2);
+    for (const assignment of assignments) assignment.paperPacket = createPaperPacket(this.state, assignment, pages);
     this.commit({ ...this.state, assignments: [...assignments, ...this.state.assignments] });
     return clone(assignments);
   }
@@ -506,6 +561,11 @@ export class MockService extends AiReviewService {
 }
 
 function saveSubmission(service, assignmentId, student, photos, note, role, fail, failAnalysis) {
+    const c = buildSubmission(service, assignmentId, student, photos, note, role, fail, failAnalysis);
+    service.commit({ ...service.state, submissions: [...consumeResubmissions(service, [c]), c] });
+    return clone(c);
+}
+function buildSubmission(service, assignmentId, student, photos, note, role, fail, failAnalysis) {
     if (!photos.length || photos.length > 6)
       throw new Error("请添加 1–6 张作品图片。");
     if (new Set(photos.map((e) => e.id)).size !== photos.length)
@@ -532,11 +592,13 @@ function saveSubmission(service, assignmentId, student, photos, note, role, fail
         draftRevision: 0,
       };
     c.aiReview = createAiTask(c, role, service.clock(), failAnalysis);
-    const submissions = service.state.submissions.map(item => item.id === u?.id ? {
-      ...item,
-      resubmission: { ...item.resubmission, consumedAt: o },
-      ...(item.aiReview && AI_RUNNING.includes(item.aiReview.state) && { aiReview: { ...item.aiReview, state: "cancelled" } }),
-    } : item);
-    service.commit({ ...service.state, submissions: [...submissions, c] });
-    return clone(c);
+    return c;
+}
+function consumeResubmissions(service, additions) {
+  const previous = new Map(additions.map(item => [latestSubmission(service.state, item.assignmentId, item.studentId)?.id, item.submittedAt]));
+  return service.state.submissions.map(item => previous.has(item.id) ? {
+    ...item,
+    resubmission: { ...item.resubmission, consumedAt: previous.get(item.id) },
+    ...(item.aiReview && AI_RUNNING.includes(item.aiReview.state) && { aiReview: { ...item.aiReview, state: "cancelled" } }),
+  } : item);
 }

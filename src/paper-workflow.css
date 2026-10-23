@@ -1,0 +1,55 @@
+.paper-workspace { padding-bottom: 24px; }
+.paper-heading { padding: 8px 2px 20px; }
+.paper-overline { font-size: 10px; font-weight: 700; letter-spacing: 2.3px; color: #6b8c7a; margin-bottom: 9px; }
+.paper-title { font-size: 24px; line-height: 1.4; font-weight: 700; letter-spacing: -.5px; margin-bottom: 8px; color: #234b3a; }
+.paper-steps { display: flex; gap: 10px; justify-content: space-between; font-size: 11px; color: #5a7163; margin-bottom: 18px; }
+.paper-steps text { display: block; font-size: 20px; font-weight: 600; color: #b2c6b6; margin-bottom: 3px; }
+.paper-inline { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.paper-inline .grow { min-width: 0; }
+.paper-count { padding: 5px 9px; color: #257b61; background: #eaf4ed; border-radius: 7px; white-space: nowrap; font-size: 12px; }
+.paper-select { display: flex; justify-content: space-between; align-items: center; background: #f3f6f2; border: 1px solid #dde7dc; padding: 12px; border-radius: 9px; margin-top: 12px; font-size: 14px; }
+.paper-select text { color: #61776a; font-size: 12px; }
+.paper-page-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding-top: 15px; margin-top: 12px; border-top: 1px solid #e6ece4; font-size: 12px; }
+.paper-preview { padding: 7px; background: #fff; border: 1px solid #d6dfd3; border-radius: 4px; box-shadow: 0 6px 24px #244a3510; margin-top: 16px; }
+.paper-preview-image { width: 100%; display: block; height: auto; }
+.paper-code-caption { font-size: 11px; color: #7b8a7d; margin: 10px 0 18px; text-align: center; }
+.paper-actions { margin-top: 14px; }
+.paper-error { background: #fff2e8; border: 1px solid #eed5be; color: #945928; padding: 12px 14px; border-radius: 10px; font-size: 13px; overflow-wrap: anywhere; margin: 12px 0; }
+.paper-export-canvas { position: fixed; left: -5000px; top: 0; pointer-events: none; }
+.paper-entry-icon { width: 40px; height: 45px; flex-shrink: 0; border: 1px solid #c0d5c3; border-radius: 8px; background: #f0f6ed; color: #257b61; font-size: 27px; text-align: center; line-height: 43px; }
+.paper-assignment-entry { border: 1px solid #c7d9c5; background: #fbfcf7; margin-top: 14px; }
+.paper-entry-flow { display: flex; align-items: center; justify-content: space-between; gap: 5px; font-size: 10px; margin: 17px 0; color: #667a67; }
+.scan-import-actions { display: flex; gap: 9px; margin-top: 16px; }
+.scan-import-actions button { flex: 1; min-width: 0; padding: 11px 6px; font-size: 12px; text-align: center; }
+.scan-summary { display: flex; gap: 7px; padding: 16px 7px; background: #e8f0e4; border: 1px solid #d7e4d1; border-radius: 14px; margin-bottom: 16px; }
+.scan-summary view { flex: 1; text-align: center; font-size: 10px; color: #64765f; }
+.scan-summary text { display: block; font-size: 26px; font-weight: 700; line-height: 1.2; color: #315941; margin-bottom: 6px; }
+.scan-local-badge { font-size: 10px; color: #6b856d; flex-shrink: 0; }
+.scan-capture-card .section-title { font-size: 16px; }
+.scan-empty { text-align: center; margin-top: 16px; padding: 28px 20px; border: 1px dashed #c9d8c6; background: #f7faf3; }
+.scan-empty-symbol { font-size: 40px; color: #9db69a; margin-bottom: 12px; }
+.scan-student-group { margin-bottom: 10px; }
+.scan-group-issue { font-size: 11px; line-height: 1.6; color: #a06a32; margin-top: 7px; overflow-wrap: anywhere; }
+.scan-page-card { margin-bottom: 12px; }
+.scan-page-main { display: flex; gap: 12px; align-items: flex-start; }
+.scan-page-main .grow { min-width: 0; }
+.scan-page-thumb { width: 65px; height: 92px; flex-shrink: 0; border: 1px solid #dce4d8; border-radius: 5px; background: #eff3ec; }
+.scan-page-main .strong { font-size: 14px; overflow-wrap: anywhere; }
+.scan-row-actions { display: flex; align-items: center; gap: 17px; margin-top: 12px; }
+.scan-row-actions .primary { padding: 8px 12px; font-size: 12px; }
+.scan-row-actions .text-button { font-size: 12px; }
+.scan-identity-editor { margin-top: 15px; padding-top: 14px; border-top: 1px solid #e1e9dd; }
+.scan-code-input { margin-top: 12px; width: 100%; }
+.scan-submit-card { background: #f3f7ec; border: 1px solid #c7d8bd; margin-top: 20px; }
+.scan-camera-card { border-radius: 14px; overflow: hidden; background: #213b2e; color: white; margin: 16px 0; }
+.scan-camera-viewport { position: relative; height: 340px; background: #15251d; overflow: hidden; }
+.scan-camera-guides { position: absolute; top: 8%; bottom: 8%; left: 14%; right: 14%; border: 2px solid #d5e5b3; border-radius: 8px; pointer-events: none; z-index: 2; }
+.scan-camera-guide-text { text-align: center; margin-top: 12px; font-size: 11px; color: #eff5dd; text-shadow: 0 1px 5px #000; }
+.scan-camera-status { padding: 12px; font-size: 12px; text-align: center; color: #d9ebc8; }
+.scan-camera-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-around; gap: 9px; padding: 0 10px 14px; }
+.scan-camera-toolbar .secondary { background: #eaf1df; font-size: 12px; padding: 7px 12px; }
+.scan-camera-toolbar .text-button { color: #e0e9dc; font-size: 11px; }
+.scan-camera-toolbar switch { transform: scale(.65); transform-origin: center; width: 42px; vertical-align: middle; }
+/* #ifdef H5 */
+.scan-camera-viewport video { width: 100%; height: 100%; object-fit: contain; }
+/* #endif */

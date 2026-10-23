@@ -38,7 +38,7 @@ function switchValue(e) {
 <template>
   <view class="prototype-tools">
     <view class="prototype-tools-heading">
-      <text> 原型展示 · v0.11.0 </text>
+      <text> 原型展示 · v0.12.0 </text>
       <button
         class="text-button"
         :aria-expanded="expanded"
@@ -53,6 +53,7 @@ function switchValue(e) {
           样例数据保存在当前浏览器，尚未连接微信、后台及 AI 服务。
         </view>
         <view class="small subtle spaced-small">AI界面可用内置练习作品体验示例评分；自选照片只演示任务进度与等待结果，不会生成虚构分数。教师草稿与学生可见的AI结果分别保存。</view>
+        <view class="small subtle spaced-small">纸质作业：学生码识别、四角校正与草稿保存在设备本机完成；H5支持连续自动拍摄。微信端使用系统拍照／相册与画布处理，仍待真机确认。跨设备收件、云端存储及真实AI批阅待后端接入。</view>
         <view class="prototype-binding-tools">
           <view class="small subtle spaced-small">
             微信登录按钮仅模拟登录；教师、学生和管理员各自保留独立绑定。管理员权限正式接入时由服务端授权。以下为虚构邀请码：

@@ -15,6 +15,8 @@ import AdminWorkspace from "../../components/AdminWorkspace.vue";
 import AiReviewPanel from "../../components/AiReviewPanel.vue";
 import AiBatchReview from "../../components/AiBatchReview.vue";
 import ExcellentWorks from "../../components/ExcellentWorks.vue";
+import AnswerCardPanel from "../../components/AnswerCardPanel.vue";
+import PaperScanner from "../../components/PaperScanner.vue";
 import { displayPhoto } from "../../services/presentation.js";
 import { growthIllustration } from "../../services/assets.js";
 import { ref, watch } from "vue";
@@ -58,6 +60,12 @@ const { bottomInset: bottomInset } = {
     failAnalysis: failAnalysis,
     newTitle: newTitle,
     newRequirements: newRequirements,
+    newPaperPages,
+    paperCards,
+    openPaperCards,
+    openPaperScan,
+    issuePaperCards,
+    submitPaper,
     newDue: newDue,
     newClassId: newClassId,
     newClassIds,
@@ -207,7 +215,7 @@ function toggleFeedbackDimension(id) {
       </view>
       <view class="intro-foot">
         <text class="tiny-dot" />
-        原型展示 · v0.11.0
+        原型展示 · v0.12.0
       </view>
     </view>
     <!-- #endif -->
@@ -379,6 +387,12 @@ function toggleFeedbackDimension(id) {
                 @feedback="openFeedback(selectedSubmission)"
                 @back="back"
               />
+            </template>
+            <template v-else-if="screen === 'paperCards' && selectedAssignment">
+              <AnswerCardPanel :key="'cards-' + selectedAssignment.id" :assignment="selectedAssignment" :cards="paperCards" :teacher="isTeacher" :busy="busy" @issue="issuePaperCards" @scan="openPaperScan" />
+            </template>
+            <template v-else-if="screen === 'paperScan' && selectedAssignment">
+              <PaperScanner :key="'scan-' + role + '-' + selectedAssignment.id" :state="state" :assignment="selectedAssignment" :cards="paperCards" :teacher="isTeacher" :student-id="boundStudent?.id || ''" :identity-id="isTeacher ? teacherIdentity?.id : boundStudent?.id" :busy="busy" @submit="submitPaper" @cards="openPaperCards" @ai="openAiBatch" @confirm="modal = $event" />
             </template>
             <template v-else-if="screen === 'aiBatch' && isTeacher && selectedAssignment">
               <AiBatchReview
@@ -744,6 +758,12 @@ function toggleFeedbackDimension(id) {
                                 <text> 写作 100 分 </text>
                                 <text> 完整五维评价 </text>
                               </view>
+                            </view>
+                            <view v-if="isTeacher || !boundStudent?.archived" class="card paper-assignment-entry">
+                              <view class="paper-inline"><view class="paper-entry-icon">▤</view><view class="grow"><view class="section-title">纸上完成，自动归档</view><view class="tiny subtle">{{ selectedAssignment.paperPacket ? '每人 ' + selectedAssignment.paperPacket.pages + ' 页专属答题卡 · 学生码自动对应' : '生成带学生码的专属答题卡' }}</view></view></view>
+                              <view class="paper-entry-flow"><text>布置作业</text><text>›</text><text>打印答题卡</text><text>›</text><text>扫描提交</text><text>›</text><text>AI批阅</text></view>
+                              <view class="scan-import-actions"><button class="secondary" :disabled="busy" @click="openPaperCards">{{ isTeacher ? '查看 / 打印答题卡' : '下载 / 打印答题卡' }}</button><button class="primary" :disabled="busy" @click="openPaperScan">{{ isTeacher ? '批量扫描上传' : '上传答题卡' }}</button></view>
+                              <view v-if="!isTeacher" class="tiny subtle spaced-small">家长可协助打印和拍照，提交后可查看本人的AI学习建议。</view>
                             </view>
                             <view v-if="!boundStudent?.archived" class="card excellent-entry">
                               <view class="excellent-symbol">★</view>
@@ -1640,7 +1660,7 @@ function toggleFeedbackDimension(id) {
                                       "
                                     >
                                       <template v-if="'create' === screen">
-                                        <AssignmentComposer :key="14" v-model:title="newTitle" v-model:requirements="newRequirements" v-model:due="newDue" v-model:classIds="newClassIds" :classes="teachingClassOptions" :student-counts="Object.fromEntries(teachingClassOptions.map(item => [item.id, activeStudents(state, item.id).length]))" :templates="assignmentTemplates" :busy="busy" @publish="createAssignment" @save-template="saveAssignmentTemplate" @delete-template="deleteAssignmentTemplate" />
+                                        <AssignmentComposer :key="14" v-model:title="newTitle" v-model:requirements="newRequirements" v-model:due="newDue" v-model:classIds="newClassIds" v-model:paperPages="newPaperPages" :classes="teachingClassOptions" :student-counts="Object.fromEntries(teachingClassOptions.map(item => [item.id, activeStudents(state, item.id).length]))" :templates="assignmentTemplates" :busy="busy" @publish="createAssignment" @save-template="saveAssignmentTemplate" @delete-template="deleteAssignmentTemplate" />
                                       </template>
                                     </template>
                                     <template v-else>
