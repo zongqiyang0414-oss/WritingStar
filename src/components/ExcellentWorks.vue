@@ -48,7 +48,7 @@ function preview() {
         <view class="card excellent-detail-intro">
           <text class="badge excellent-badge">★ 优秀作业</text>
           <view class="detail-title">{{ work.title }}</view>
-          <view class="small subtle">{{ work.studentName }} · {{ work.className }} · 第 {{ work.version }} 版</view>
+          <view class="small subtle">{{ work.studentName }} · {{ work.className }}</view>
           <view class="small subtle spaced-small">{{ work.selectedBy.name }}选出，供全班同学参考</view>
           <button v-if="teacher" class="text-button spaced-small" :disabled="busy" @click="$emit('remove', work)">取消优秀作业</button>
         </view>
@@ -104,7 +104,7 @@ function preview() {
       <view v-for="item in works" :key="item.id" class="card excellent-card">
         <view class="card-top">
           <text class="badge excellent-badge">★ 优秀作业</text>
-          <text class="tiny subtle">第 {{ item.version }} 版 · {{ item.pageCount }} 页</text>
+          <text class="tiny subtle">{{ item.pageCount }} 页</text>
         </view>
         <view class="strong">{{ item.title }}</view>
         <view class="small subtle spaced-small">{{ item.studentName }} · {{ item.selectedBy.name }}选出</view>

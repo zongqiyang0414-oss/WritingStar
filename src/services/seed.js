@@ -47,7 +47,7 @@ export function sampleReview() {
     e.composition.comments[s] = t[l];
   });
   e.nextSteps =
-    "1. 把捡橘子、递袋子的动作写具体，补充一句当时的对话。\n2. 订正时注意左右结构的间距，并保持段首空格一致。";
+    "1. 把捡橘子、递袋子的动作写具体，补充一句当时的对话。\n2. 练习时注意左右结构的间距，并保持段首空格一致。";
   e.rubricVersion = RUBRIC_VERSION;
   return e;
 }

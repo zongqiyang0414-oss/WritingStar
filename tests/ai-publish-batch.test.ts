@@ -97,7 +97,7 @@ test("未完成AI、残缺结果和无效教师修改不自动发布，旧无rev
   assert.deepEqual(aiPublishStatus(legacy), { publishable: true, publishSource: "teacher", publishIssue: "" });
   legacy.draft.nextSteps = "";
   assert.equal(aiPublishStatus(legacy).publishable, false);
-  assert.match(aiPublishStatus(legacy).publishIssue, /订正建议/);
+  assert.match(aiPublishStatus(legacy).publishIssue, /批阅建议/);
 });
 
 test("批量发布校验任教权限，存储失败不留下部分反馈或修改AI结果", async () => {

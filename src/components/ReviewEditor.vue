@@ -119,8 +119,8 @@ function toggleDimension(id) {
     <view class="section-title"> 批阅建议 </view>
     <textarea
       :disabled="readonly"
-      aria-label="订正建议"
-      placeholder="写下优先订正的内容"
+      aria-label="批阅建议"
+      placeholder="写下下一步练习的内容"
       auto-height=""
       :cursor-spacing="100"
       maxlength="1500"

@@ -85,15 +85,16 @@ test("冻结快照中提交、分析和人工批阅按新作品更新，原反�
   await service.signIn("student");
   await service.bindInvitation("XS2026", "student");
   await service.publish("submission-1", sampleReview(), "teacher");
+  await service.setResubmissionAllowed("submission-1", true, "teacher");
   const original = service.snapshot();
   const revision = await service.submit("assignment-1", [{
     ...samplePhotos[0], id: "own-photo", sample: false,
-  }], "学生订正", "student");
+  }], "重新提交", "student");
   const processing = service.snapshot();
   assert.equal(original.submissions.length, 1);
-  assert.equal(processing.submissions[0], original.submissions[0]);
+  assert.equal(processing.submissions[0].published, original.submissions[0].published);
   assert.equal(latestSubmission(processing, "assignment-1", "student-1").id, revision.id);
-  assert.equal(latestPublishedSubmission(processing, "assignment-1", "student-1").id, "submission-1");
+  assert.equal(latestPublishedSubmission(processing, "assignment-1", "student-1"), null);
   await service.finishAnalysis(revision.id, true);
   const failed = service.snapshot();
   assert.equal(latestSubmission(failed, "assignment-1", "student-1").status, "failed");
@@ -114,7 +115,7 @@ test("冻结快照中提交、分析和人工批阅按新作品更新，原反�
   assert.equal(assigned.accounts.student.studentId, "student-1");
 });
 
-test("统计与成长历史按最新版本计状态、按最新已发布版本计分并隔离班级", () => {
+test("统计与成长只取最新提交，未发布不回退旧成绩，并隔离班级", () => {
   const state = createSeed(clock()),
     assignment = state.assignments[0],
     second = { ...assignment, id: "assignment-2", createdAt: "2026-10-15T10:00:00Z" },
@@ -147,18 +148,18 @@ test("统计与成长历史按最新版本计状态、按最新已发布版本�
   assert.deepEqual(assignmentCounts(snapshot, second), { missing: 2, pending: 0, completed: 1, total: 3 });
   assert.deepEqual(reports.map(({ id, missing, pending, completed, feedbackCount, handwriting, composition }) =>
     ({ id, missing, pending, completed, feedbackCount, handwriting, composition })), [
-    { id: "student-1", missing: 1, pending: 1, completed: 0, feedbackCount: 1, handwriting: 81, composition: 81 },
+    { id: "student-1", missing: 1, pending: 1, completed: 0, feedbackCount: 0, handwriting: null, composition: null },
     { id: "student-2", missing: 0, pending: 0, completed: 2, feedbackCount: 2, handwriting: 81.5, composition: 81.5 },
     { id: "student-3", missing: 2, pending: 0, completed: 0, feedbackCount: 0, handwriting: null, composition: null },
   ]);
   assert.deepEqual(rankedStudents(snapshot, "class-1", "handwriting").map(({ id, rank }) => ({ id, rank })), [
-    { id: "student-2", rank: 1 }, { id: "student-1", rank: 2 }, { id: "student-3", rank: null },
+    { id: "student-2", rank: 1 }, { id: "student-1", rank: null }, { id: "student-3", rank: null },
   ]);
   assert.equal(rankedStudents(snapshot, "class-1", "composition", " 同学乙 ")[0].rank, 1);
-  assert.deepEqual(studentHistory(snapshot, "class-1", "student-1").map(item => item.id), ["submission-1", "revision"]);
+  assert.deepEqual(studentHistory(snapshot, "class-1", "student-1").map(item => item.id), ["revision"]);
   assert.deepEqual(studentSummary(snapshot, "class-1", "student-1"), {
-    studentId: "student-1", classId: "class-1", handwriting: 81, composition: 81,
-    feedbackCount: 1, submissionCount: 2, revisionCount: 1,
+    studentId: "student-1", classId: "class-1", handwriting: null, composition: null,
+    feedbackCount: 0, submissionCount: 1,
   });
   assert.deepEqual(studentHistory(snapshot, "class-2", "student-1"), []);
   assert.equal(studentSummary(snapshot, "class-2", "student-1"), null);

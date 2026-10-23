@@ -1,3 +1,4 @@
+import { canResubmit } from "../services/submissionPolicy.js";
 import { pickPhotos } from "../platform/photos.js";
 import {
   DEFAULT_TEACHER,
@@ -36,7 +37,7 @@ import {
   studentRankingModel,
   studentGrowthModel,
   teachingClassesModel,
-  submissionHistoryGroups,
+  submissionRecordsModel,
 } from "../services/pageModels.js";
 
 export function usePrototype() {
@@ -267,20 +268,17 @@ export function usePrototype() {
       ? activeStudents(state.value, selectedAssignment.value?.classId || "")
         .filter((student) => {
           const previous = latest(selectedAssignment.value.id, student.id);
-          return !previous || previous.status === "published";
+          return !previous;
         })
         .map((student) => ({
           id: student.id,
           name: student.name,
-          label: `${student.name}${student.studentNumber ? " · " + student.studentNumber : ""}${latest(selectedAssignment.value.id, student.id) ? " · 提交订正" : " · 首次提交"}`,
+          label: `${student.name}${student.studentNumber ? " · " + student.studentNumber : ""} · 首次提交`,
         }))
       : []),
     submissionStudent = computed(() => isTeacher.value
       ? submissionStudents.value.find((student) => student.id === submissionStudentId.value)
       : boundStudent.value),
-    previousSubmission = computed(() => submissionStudent.value
-      ? latest(selectedAssignment.value?.id || "", submissionStudent.value.id)
-      : null),
     classExcellentWorks = computed(() => {
       if (!service || needsBinding.value || isAdmin.value) return [];
       // Track snapshot changes even though the service owns the query.
@@ -315,11 +313,11 @@ export function usePrototype() {
       state.value.submissions
         .filter((e) => {
           var a;
-          return e.studentId === historyStudent.value?.id;
+          return e.studentId === historyStudent.value?.id && latest(e.assignmentId, e.studentId)?.id === e.id;
         })
         .sort((e, a) => a.submittedAt.localeCompare(e.submittedAt)),
     ),
-    groupedHistory = computed(() => submissionHistoryGroups(state.value, historyStudent.value?.id || "")),
+    submissionRecords = computed(() => submissionRecordsModel(state.value, historyStudent.value?.id || "")),
     feedback = computed(() => {
       var e, a;
       return selectedSubmission.value?.published &&
@@ -342,8 +340,9 @@ export function usePrototype() {
           !boundStudent.value ||
           boundStudent.value.archived ||
           !selectedAssignment.value ||
-          (mine.value && "published" !== mine.value.status && !mine.value.aiReview?.qualityFlags?.some(flag => ["wrongImage", "unreadable"].includes(flag))) ||
-          expired(selectedAssignment.value)
+          (mine.value && !canResubmit(mine.value)) ||
+          selectedAssignment.value.classId !== boundStudent.value.classId ||
+          (expired(selectedAssignment.value) && !canResubmit(mine.value))
         ),
     ),
     title = computed(
@@ -361,7 +360,7 @@ export function usePrototype() {
           review: "双写批阅",
           aiReview: "AI双写批阅",
           aiBatch: "全班AI批阅",
-          submit: isTeacher.value ? "代学生提交作业" : mine.value ? "提交订正" : "提交作品",
+          submit: isTeacher.value ? "代学生提交作业" : "提交作品",
           excellentWorks: "班级优秀作业",
           excellentWork: "优秀作业",
           feedback: "老师的反馈",
@@ -600,8 +599,8 @@ export function usePrototype() {
       const publishedCount = result.published.length;
       const pendingCount = result.requiresReview.length;
       notify(publishedCount
-        ? `已发布 ${publishedCount} 份反馈${pendingCount ? `，${pendingCount} 份需逐份审核` : ""}`
-        : pendingCount ? `${pendingCount} 份需逐份审核` : "暂无可发布结果");
+        ? `已完成 ${publishedCount} 份批阅${pendingCount ? `，${pendingCount} 份需逐份审核` : ""}`
+        : pendingCount ? `${pendingCount} 份需逐份审核` : "暂无可批阅作业");
     });
   }
   function openExcellentWorks(assignment = null) {
@@ -656,7 +655,6 @@ export function usePrototype() {
     note,
     submissionStudents,
     submissionStudent,
-    previousSubmission,
     classExcellentWorks,
     excellentWorks,
     excellentWork,
@@ -782,7 +780,14 @@ export function usePrototype() {
     },
     identity,
     myHistory,
-    groupedHistory,
+    submissionRecords,
+    canResubmit,
+    canAllowResubmission: (item) => isTeacher.value && item && !studentFor(item)?.archived && studentFor(item)?.classId === state.value.assignments.find(assignment => assignment.id === item.assignmentId)?.classId && latest(item.assignmentId, item.studentId)?.id === item.id,
+    toggleResubmission: async (item) => {
+      if (!item || busy.value || !isTeacher.value) return;
+      const allow = !canResubmit(item);
+      await runAction(async () => { await service.setResubmissionAllowed(item.id, allow, role.value); notify(allow ? "已允许学生重新提交一次" : "已取消重新提交许可"); });
+    },
     feedback,
     canSubmit,
     title,
@@ -855,7 +860,7 @@ export function usePrototype() {
     },
     openTeacherSubmit: function (assignment, student = null) {
       if (!isTeacher.value || !scopedAssignments.value.some((item) => item.id === assignment?.id)) return;
-      if (student && (student.archived || student.classId !== assignment.classId || (latest(assignment.id, student.id) && latest(assignment.id, student.id).status !== "published"))) return;
+      if (student && (student.archived || student.classId !== assignment.classId || latest(assignment.id, student.id))) return;
       guard(() => {
         assignmentId.value = assignment.id;
         submissionStudentId.value = student?.id || "";
@@ -974,7 +979,7 @@ export function usePrototype() {
     reset: function () {
       modal.value = {
         title: "重置原型数据？",
-        body: "这会清除当前浏览器中的作业、提交、评分和订正记录，恢复初始原型。此操作不能撤销。",
+        body: "这会清除当前浏览器中的作业、提交和评分记录，恢复初始原型。此操作不能撤销。",
         confirm: "确认重置",
         action: () => {
           try {

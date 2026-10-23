@@ -2,6 +2,7 @@ import { AdministrationService } from "./administration.js";
 import { sampleReview } from "./seed.js";
 import { DIMENSION_IDS, validateReview, total } from "./rubric.js";
 import { activeStudents, formerAssignmentStudents, latestSubmission } from "./school.js";
+import { canResubmit } from "./submissionPolicy.js";
 import { teacherSummary } from "./identity.js";
 
 const copy = (value) => JSON.parse(JSON.stringify(value));
@@ -33,7 +34,7 @@ export function settleAiTask(submission, now, fail = false) {
   task.completedAt = now.toISOString();
   if (fail) {
     task.state = "failed";
-    task.error = "本次批阅没有完成，作品已保留，可重试或请老师批阅。";
+    task.error = "本次分析没有完成，作品已保留，可用原图重试或联系管理员。";
     if (submission.status === "processing") submission.status = "failed";
     return;
   }
@@ -45,7 +46,7 @@ export function settleAiTask(submission, now, fail = false) {
       submission.draft = copy(task.result);
   } else {
     task.state = "unavailable";
-    task.error = "作品已收到，暂未取得AI批阅结果。可稍后重试，或等待老师批阅。";
+    task.error = "作品已收到，暂未取得AI结果。可用原图重试或联系管理员。";
   }
   if (["processing", "failed"].includes(submission.status)) submission.status = "pending";
 }
@@ -89,6 +90,7 @@ export function aiQualityAttention(submission) {
 export function aiPublishStatus(submission) {
   const unavailable = { publishable: false, publishSource: null, publishIssue: "" };
   if (!submission || submission.status === "published" || submission.aiReview?.state !== "completed") return unavailable;
+  if (canResubmit(submission)) return { ...unavailable, publishIssue: "等待学生重新提交" };
   const attention = aiQualityAttention(submission);
   if (attention.length) return { ...unavailable, publishIssue: "需逐份审核：" + attention.join("、") };
   const aiError = publicationError(submission.aiReview.result);
@@ -134,7 +136,7 @@ export function aiAssignmentSummary(rows) {
     attention: rows.filter(item => item.needsAttention).length,
     waiting: rows.filter(item => ["notStarted", "failed", "unavailable", "cancelled"].includes(item.phase)).length,
     readyToPublish: rows.filter((item) => item.publishable).length,
-    requiresReview: rows.filter((item) => item.phase === "completed" && !item.publishable).length,
+    requiresReview: rows.filter((item) => item.phase === "completed" && !item.publishable && !canResubmit(item.submission)).length,
   };
 }
 
@@ -199,7 +201,7 @@ export class AiReviewService extends AdministrationService {
     const submission = this.authorizeAiSubmission(submissionId, role);
     if (submission.status === "published") throw new Error("老师已发布反馈，本轮不再重复AI批阅。");
     if (this.latest(submission.assignmentId, submission.studentId)?.id !== submission.id)
-      throw new Error("请对最新一版作品进行AI批阅。");
+      throw new Error("请对最新提交的作品进行AI批阅。");
     if (submission.aiReview && (AI_RUNNING.includes(submission.aiReview.state) || submission.aiReview.state === "completed"))
       return this.aiResult(submissionId, role);
     const next = this.read();
@@ -242,7 +244,7 @@ export class AiReviewService extends AdministrationService {
     const result = {
       published: candidates.map((row) => row.submission.id),
       skipped: rows.length - candidates.length,
-      requiresReview: rows.filter((row) => row.phase === "completed" && !row.publishable).map((row) => row.submission.id),
+      requiresReview: rows.filter((row) => row.phase === "completed" && !row.publishable && !canResubmit(row.submission)).map((row) => row.submission.id),
       sources: { ai: candidates.filter((row) => row.publishSource === "ai").length, teacher: candidates.filter((row) => row.publishSource === "teacher").length },
     };
     if (!candidates.length) return result;

@@ -15,6 +15,7 @@ import * as analytics from '../src/services/analytics.js';
 import * as pageModels from '../src/services/pageModels.js';
 import * as administration from '../src/services/administration.js';
 import * as aiReview from '../src/services/aiReview.js';
+import * as submissionPolicy from '../src/services/submissionPolicy.js';
 
 const generate = require('@babel/generator').default;
 
@@ -41,6 +42,7 @@ async function setup() {
     '../services/pageModels.js': pageModels,
     '../services/administration.js': administration,
     '../services/aiReview.js': aiReview,
+    '../services/submissionPolicy.js': submissionPolicy,
     'vue': { ...vue, onUnmounted: callback => disposals.push(callback) },
     '@dcloudio/uni-app': {
       onShow: callback => shows.push(callback),
@@ -312,6 +314,28 @@ test('全班AI一键发布刷新统计并显示成功提示，不弹出确认且
   assert.equal(page.state.value.submissions.find(item => item.id === submission.id).status, 'published');
   assert.equal(page.modal.value, null);
   assert.equal(page.error.value, '');
-  assert.match(page.toast.value, /已发布/);
+  assert.match(page.toast.value, /已完成/);
   assert.ok(service.feedback(submission.id, 'student'));
+});
+
+test('教师许可后学生只能重新提交一次，代交名单始终排除已提交学生', async () => {
+  const { page, service, show } = await setup();
+  const assignment = service.read().assignments.find(item => item.id === 'assignment-1');
+  page.openAssignment(assignment);
+  const first = service.latest(assignment.id, 'student-1');
+  assert.equal(page.canAllowResubmission(first), true);
+  assert.ok(!page.submissionStudents.value.some(item => item.id === 'student-1'));
+  page.switchRole('student'); page.openAssignment(assignment);
+  assert.equal(page.canSubmit.value, false); page.openSubmit(assignment); assert.equal(page.screen.value, 'assignment');
+  page.switchRole('teacher'); page.openAssignment(assignment);
+  await page.toggleResubmission(first);
+  assert.ok(page.toast.value.includes('允许学生重新提交'));
+  assert.ok(!page.submissionStudents.value.some(item => item.id === 'student-1'));
+  page.switchRole('student'); page.openAssignment(assignment); assert.equal(page.canSubmit.value, true);
+  page.openSubmit(assignment); await page.submit();
+  assert.equal(page.screen.value, 'aiReview');
+  assert.equal(service.latest(assignment.id, 'student-1').version, 2);
+  page.back(); assert.equal(page.canSubmit.value, false);
+  assert.equal(page.submissionRecords.value.filter(item => item.assignmentId === assignment.id).length, 1);
+  assert.equal(page.submissionRecords.value.find(item => item.assignmentId === assignment.id).id, service.latest(assignment.id, 'student-1').id);
 });

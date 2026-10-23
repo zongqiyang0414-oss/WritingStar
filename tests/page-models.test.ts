@@ -69,7 +69,7 @@ function fixture() {
     { id: "first", title: "第一次作业", classId: "class-1", createdAt: "2026-10-01T10:00:00Z", dueAt: "2026-10-20T10:00:00Z" },
   ].map((assignment) => ({ ...assignment, requirements: rawContent, internalSecret: rawContent }));
   // Deliberately unsorted: current task status uses the newest submission,
-  // while averages retain the newest published version of each assignment.
+  // and averages use only that same submission when published.
   state.submissions = [
     submission("he-pending", "student-1", "first", 3, null, "2026-10-13T10:00:00Z"),
     submission("lin-first", "student-2", "first", 1, [85, 80], "2026-10-11T10:00:00Z"),
@@ -105,7 +105,7 @@ function assertPresentationOnly(value) {
   visit(value);
 }
 
-test("班级统计分别保留最新提交状态与最近已发布成绩，排除离班学生及其他班级", () => {
+test("班级统计只取最新提交及其已发布成绩，排除离班学生及其他班级", () => {
   const model = classStatisticsModel(fixture(), "class-1", now.getTime());
   assert.equal(model.studentCount, 4);
   assert.equal(model.ongoing, 1);
@@ -120,7 +120,7 @@ test("班级统计分别保留最新提交状态与最近已发布成绩，排�
   assert.deepEqual(model.trend.map(({ id, handwriting, composition, note }) => ({
     id, handwriting, composition, note,
   })), [
-    { id: "first", handwriting: 80, composition: 84.7, note: "已发布 3 / 4 人" },
+    { id: "first", handwriting: 77.5, composition: 85, note: "已发布 2 / 4 人" },
     { id: "second", handwriting: 75, composition: 76, note: "已发布 2 / 4 人" },
     { id: "empty", handwriting: null, composition: null, note: "已发布 0 / 4 人" },
   ]);
@@ -133,7 +133,7 @@ test("排名保留并列、未发布不计分与全班搜索名次，两套量�
   assert.equal(model.className, "四年级（1）班");
   assert.equal(model.organizationName, "甲秀小学");
   assert.deepEqual(model.ranks.map(({ id, rank, handwriting }) => ({ id, rank, handwriting })).sort((a, b) => a.id.localeCompare(b.id)), [
-    { id: "student-1", rank: 1, handwriting: 80 },
+    { id: "student-1", rank: 2, handwriting: 75 },
     { id: "student-2", rank: 1, handwriting: 80 },
     { id: "student-3", rank: 3, handwriting: 70 },
     { id: "student-quiet", rank: null, handwriting: null },
@@ -146,24 +146,22 @@ test("排名保留并列、未发布不计分与全班搜索名次，两套量�
   assert.equal(studentRankingModel(state, "class-1", "composition").ranks[0].id, "student-3");
 });
 
-test("个人成长保留每轮原作和订正，未发布分数留空且平均分延续最近已发布版本", () => {
+test("个人成长每份作业只取最新提交，最新反馈未发布不沿用旧成绩", () => {
   const state = fixture();
   const model = studentGrowthModel(state, "class-1", "student-1");
   assert.deepEqual(model.summary, studentSummary(state, "class-1", "student-1"));
   assert.deepEqual(model.summary, {
-    studentId: "student-1", classId: "class-1", handwriting: 80, composition: 79,
-    feedbackCount: 2, submissionCount: 4, revisionCount: 2,
+    studentId: "student-1", classId: "class-1", handwriting: 75, composition: 74,
+    feedbackCount: 1, submissionCount: 2,
   });
-  assert.deepEqual(model.rankEntry, { rank: 1 });
+  assert.deepEqual(model.rankEntry, { rank: 2 });
   assert.deepEqual(model.history.map(({ id, published, handwriting, composition }) => ({ id, published, handwriting, composition })), [
-    { id: "he-original", published: true, handwriting: 81, composition: 81 },
-    { id: "he-revision", published: true, handwriting: 85, composition: 84 },
-    { id: "he-second", published: true, handwriting: 75, composition: 74 },
     { id: "he-pending", published: false, handwriting: null, composition: null },
+    { id: "he-second", published: true, handwriting: 75, composition: 74 },
   ]);
   assert.deepEqual(model.trend.map(({ id, handwriting, composition }) => ({ id, handwriting, composition })),
     model.history.map(({ id, handwriting, composition }) => ({ id, handwriting, composition })));
-  assert.equal(model.trend.at(-1).note, "第 3 版 · 待发布成绩");
+  assert.equal(model.trend[0].note, "待发布成绩");
   assert.equal(model.organizationName, "甲秀小学");
   const learner = studentGrowthModel(state, "class-1", "student-1", "composition", "learner");
   assert.equal(learner.rankEntry, null);
@@ -187,7 +185,7 @@ test("跨班学生不可进入个人成长，未提交学生保留空白摘要",
   assert.deepEqual(quiet.history, []);
 });
 
-test("任教班级汇总在班学生、作业和所有轮次记录，姓名学号搜索忽略空白与大小写", () => {
+test("任教班级汇总在班学生、作业和去重提交记录，姓名学号搜索忽略空白与大小写", () => {
   const state = fixture();
   const classes = state.classes.filter((schoolClass) => ["class-1", "class-2"].includes(schoolClass.id));
   const model = teachingClassesModel(state, classes, "class-1", "  xh001  ");
@@ -198,7 +196,7 @@ test("任教班级汇总在班学生、作业和所有轮次记录，姓名学�
   assert.equal(model.totalStudents, 6);
   assert.deepEqual(model.currentClass, model.classes[0]);
   assert.deepEqual(model.members.map(({ id, submissionCount }) => ({ id, submissionCount })), [
-    { id: "student-1", submissionCount: 4 },
+    { id: "student-1", submissionCount: 2 },
     { id: "student-2", submissionCount: 2 },
     { id: "student-3", submissionCount: 1 },
     { id: "student-quiet", submissionCount: 0 },
@@ -226,7 +224,7 @@ test("页面模型只传展示字段，原始照片、草稿、发布内容及�
   assertKeys(growth.student, ["id", "name", "initial", "className"]);
   assertKeys(growth.rankEntry, ["rank"]);
   for (const row of growth.history) {
-    assertKeys(row, ["id", "status", "published", "version", "submittedAt", "assignment", "handwriting", "composition"]);
+    assertKeys(row, ["id", "status", "published", "submittedAt", "assignment", "handwriting", "composition"]);
     assertKeys(row.assignment, ["title"]);
   }
   assertKeys(teaching, ["classes", "members", "filteredMembers", "currentClass", "totalStudents"]);
@@ -249,9 +247,9 @@ test("不可变快照复用时，时间、搜索、量表、角色和下一份�
   revised.status = "published";
   revised.published = review(95, 96);
   const updated = studentGrowthModel(Object.freeze(next), "class-1", "student-1");
-  assert.equal(initial.summary.handwriting, 80);
+  assert.equal(initial.summary.handwriting, 75);
   assert.equal(updated.summary.handwriting, 85);
-  assert.equal(updated.history.at(-1).published, true);
+  assert.equal(updated.history[0].published, true);
 
   const mutable = fixture();
   studentRankingModel(mutable, "class-1", "handwriting");

@@ -59,7 +59,7 @@ export function validateReview(review) {
     }
     if (!review[a].summary.trim()) return `请填写${t}总评。`;
   }
-  return review.nextSteps.trim() ? null : "请填写给学生的订正建议。";
+  return review.nextSteps.trim() ? null : "请填写给学生的批阅建议。";
 }
 export function emptyReview() {
   const e = () => ({

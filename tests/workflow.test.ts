@@ -128,10 +128,11 @@ test("仅旧家长已绑定时迁入学生端，原图、评分、反馈与订�
     api.total(service.feedback("submission-1", "student").handwriting),
     82,
   );
+  await service.setResubmissionAllowed("submission-1", true, "teacher");
   const revision = await service.submit(
     "assignment-1",
     api.photos,
-    "学生订正",
+    "重新提交",
     "student",
   );
   assert.equal(revision.actor, "student");
@@ -140,8 +141,8 @@ test("仅旧家长已绑定时迁入学生端，原图、评分、反馈与订�
   await service.publish(revision.id, api.review(), "teacher");
   const reload = new api.Service(storage, clock);
   assert.deepEqual(
-    clone(reload.read().submissions[0]),
-    snapshot.submissions[0],
+    clone(reload.read().submissions[0].published),
+    snapshot.submissions[0].published,
   );
   assert.equal(
     api.total(reload.feedback("submission-1", "student").handwriting),

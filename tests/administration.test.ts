@@ -224,6 +224,8 @@ test('归档学生保留反馈且不能新提交，恢复后可继续；不改�
   assert.deepEqual(service.feedback('submission-1', 'student'), sampleReview());
   assert.deepEqual(service.read().submissions, before.submissions);
   await service.setStudentArchived({ studentId: 'student-1', archived: false }, 'admin');
+  await assert.rejects(service.submit('assignment-1', samplePhotos, '', 'student'), /老师允许/);
+  await service.setResubmissionAllowed('submission-1', true, 'teacher');
   const revision = await service.submit('assignment-1', samplePhotos, '', 'student');
   assert.equal(revision.version, 2);
 });

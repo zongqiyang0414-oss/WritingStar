@@ -22,11 +22,14 @@ vm.runInContext(generate(ast).code + ';globalThis.baseline={Service:ea,seed:Le};
 const baseline = sandbox.baseline;
 const copy = value => JSON.parse(JSON.stringify(value));
 // The restored release used the previous demonstration school name. Normalize
-// only that confirmed branding change; compare every other field unchanged.
+// only confirmed branding and new sample feedback wording; preserve real legacy data.
 const withCurrentSchoolName = state => {
   const current = copy(state);
   for (const organization of current.organizations || []) {
     if (organization.id === 'organization-1' && organization.name === '星河小学') organization.name = '甲秀小学';
+  }
+  for (const submission of current.submissions || []) for (const key of ['draft', 'published']) {
+    if (submission[key]?.nextSteps) submission[key].nextSteps = submission[key].nextSteps.replace('订正时注意', '练习时注意');
   }
   return current;
 };
@@ -36,7 +39,7 @@ function service(Service, initial = null) {
   return new Service({read: () => copy(saved), write: state => {saved = copy(state);}}, clock);
 }
 
-test('除已确认的学校更名外，恢复源码初始状态与已发布v0.9.1逐字段一致', () => {
+test('除已确认学校名和示例建议文案外，初始状态与已发布v0.9.1逐字段一致', () => {
   assert.deepEqual(createSeed(clock()), withCurrentSchoolName(baseline.seed(clock())));
 });
 test('学校、班级、53名学生及13项作业的全部练习数据与发布版本一致', () => {

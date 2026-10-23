@@ -14,7 +14,7 @@ import {
   prepareTeacherState,
   sampleReview,
 } from "./seed.js";
-import { withRevisionPractice } from "./revisionPractice.js";
+import { canResubmit, prepareSubmissionPolicy } from "./submissionPolicy.js";
 import { emptyReview, validateReview } from "./rubric.js";
 import { migrateStudentEntry } from "./migration.js";
 import { withClassPractice } from "./classPractice.js";
@@ -132,7 +132,10 @@ export class MockService extends AiReviewService {
         : createSeed(clock()),
     );
     this.state = prepareAdministration(this.state);
-    (s && 6 === s.schemaVersion && s.administrationVersion === 1) || storage.write(this.state);
+    const prepared = prepareSubmissionPolicy(this.state);
+    const policyChanged = prepared !== this.state;
+    this.state = prepared;
+    (s && 6 === s.schemaVersion && s.administrationVersion === 1 && !policyChanged) || storage.write(this.state);
   }
   read() {
     return clone(this.state);
@@ -294,7 +297,7 @@ export class MockService extends AiReviewService {
   async saveDraft(submissionId, review, role) {
     this.teachingSubmission(submissionId, role);
     const l = this.get(this.state, submissionId);
-    if ("pending" !== l.status) throw new Error("这份作品当前不能修改草稿。");
+    if (this.latest(l.assignmentId, l.studentId)?.id !== l.id || canResubmit(l) || "pending" !== l.status) throw new Error("这份作品当前不能修改草稿，请查看最新提交。");
     this.updateSubmission(submissionId, { draft: clone(review), ...(l.aiReview && { draftRevision: (l.draftRevision || 0) + 1 }) });
   }
   async publish(submissionId, review, role) {
@@ -302,6 +305,7 @@ export class MockService extends AiReviewService {
     const s = validateReview(review);
     if (s) throw new Error(s);
     const n = this.get(this.state, submissionId);
+    if (this.latest(n.assignmentId, n.studentId)?.id !== n.id || canResubmit(n)) throw new Error("请等待学生重新提交，或先取消重新提交许可。");
     if ("pending" !== n.status)
       throw new Error("反馈已经发布或作品仍在处理中，请刷新查看。");
     this.updateSubmission(submissionId, {
@@ -322,7 +326,7 @@ export class MockService extends AiReviewService {
       throw new Error("当前学生已不在班级，原作品保留，请联系学校管理员。");
     if (n.classId !== i.classId)
       throw new Error("只能提交当前学生所在班级的作业。");
-    if (Date.parse(n.dueAt) <= this.clock().getTime())
+    if (Date.parse(n.dueAt) <= this.clock().getTime() && !canResubmit(this.latest(assignmentId, i.id)))
       throw new Error("作业已截止，暂不能提交。");
     return saveSubmission(this, assignmentId, i, photos, note, role, fail, failAnalysis);
   }
@@ -335,11 +339,22 @@ export class MockService extends AiReviewService {
       throw new Error("请选择本班在班学生，不能为已调班或归档的学生代交。");
     return saveSubmission(this, assignmentId, student, photos, note, role, fail, failAnalysis);
   }
+  async setResubmissionAllowed(submissionId, enabled, role) {
+    this.teachingSubmission(submissionId, role);
+    if (typeof enabled !== "boolean") throw new Error("请选择是否允许重新提交。");
+    const current = this.get(this.state, submissionId);
+    const assignment = this.state.assignments.find(item => item.id === current.assignmentId);
+    const student = this.state.students.find(item => item.id === current.studentId);
+    if (!student || student.archived || student.classId !== assignment.classId) throw new Error("只能允许本班在班学生重新提交。");
+    if (this.latest(current.assignmentId, current.studentId)?.id !== current.id) throw new Error("作品已更新，请查看最新提交。");
+    if (canResubmit(current) === enabled) return;
+    this.updateSubmission(submissionId, { resubmission: enabled ? { allowedAt: this.clock().toISOString(), allowedBy: teacherSummary(this.teacher(role)) } : null });
+  }
   async setExcellent(submissionId, enabled, role) {
     this.teachingSubmission(submissionId, role);
     if (typeof enabled !== "boolean") throw new Error("请选择是否设为优秀作业。");
     const submission = this.get(this.state, submissionId);
-    if (enabled && (submission.status !== "published" || !submission.published))
+    if (enabled && (this.latest(submission.assignmentId, submission.studentId)?.id !== submission.id || submission.status !== "published" || !submission.published))
       throw new Error("请先完成批阅，再设为优秀作业。");
     if (Boolean(submission.excellent) === enabled) return;
     this.updateSubmission(submissionId, {
@@ -360,7 +375,7 @@ export class MockService extends AiReviewService {
       .map((item) => [item.id, item]));
     if (assignmentId && !assignments.has(assignmentId)) throw new Error("作业不属于当前班级。");
     return clone(this.state.submissions
-      .filter((item) => item.excellent && item.status === "published" && item.published && assignments.has(item.assignmentId) && (!assignmentId || item.assignmentId === assignmentId))
+      .filter((item) => this.latest(item.assignmentId, item.studentId)?.id === item.id && item.excellent && item.status === "published" && item.published && assignments.has(item.assignmentId) && (!assignmentId || item.assignmentId === assignmentId))
       .sort((a, b) => b.excellent.selectedAt.localeCompare(a.excellent.selectedAt) || b.submittedAt.localeCompare(a.submittedAt))
       .map((item) => ({
         id: item.id,
@@ -479,10 +494,6 @@ export class MockService extends AiReviewService {
       assignmentTemplates: templates.filter((item) => item.id !== id),
     });
   }
-  prepareRevisionPractice() {
-    const next = withRevisionPractice(this.state, this.clock());
-    if (next !== this.state) this.commit(next);
-  }
   prepareClassPractice() {
     const e = withClassPractice(this.state, this.clock());
     e !== this.state && this.commit(e);
@@ -501,8 +512,8 @@ function saveSubmission(service, assignmentId, student, photos, note, role, fail
     if (new Set(photos.map((e) => e.id)).size !== photos.length)
       throw new Error("图片重复，请重新选择。");
     const u = latestSubmission(service.state, assignmentId, student.id);
-    if (u && "published" !== u.status && !u.aiReview?.qualityFlags?.some(flag => ["wrongImage", "unreadable"].includes(flag)))
-      throw new Error("本轮作品已提交，请等待老师发布反馈后再订正。");
+    if (u && (role !== "student" || !canResubmit(u)))
+      throw new Error("作品已提交，需老师允许后才能重新提交。");
     if (fail) throw new Error("提交失败，图片已保留，请重试。");
     const o = service.clock().toISOString(),
       c = {
@@ -522,6 +533,11 @@ function saveSubmission(service, assignmentId, student, photos, note, role, fail
         draftRevision: 0,
       };
     c.aiReview = createAiTask(c, role, service.clock(), failAnalysis);
-    service.commit({ ...service.state, submissions: [...service.state.submissions, c] });
+    const submissions = service.state.submissions.map(item => item.id === u?.id ? {
+      ...item,
+      resubmission: { ...item.resubmission, consumedAt: o },
+      ...(item.aiReview && AI_RUNNING.includes(item.aiReview.state) && { aiReview: { ...item.aiReview, state: "cancelled" } }),
+    } : item);
+    service.commit({ ...service.state, submissions: [...submissions, c] });
     return clone(c);
 }

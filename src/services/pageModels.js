@@ -2,7 +2,7 @@ import {
   activeStudents,
   assignmentCounts,
   classAssignments,
-  latestPublishedSubmission,
+  latestSubmission,
 } from "./school.js";
 import { formatDate, mean, rankedStudents, studentHistory } from "./analytics.js";
 import { organizationForClass } from "./identity.js";
@@ -37,7 +37,7 @@ export function classStatisticsModel(state, classId, now) {
       trend: assignments.map((assignment) => {
         const published = students
           .map((student) =>
-            latestPublishedSubmission(state, assignment.id, student.id)?.published,
+            latestSubmission(state, assignment.id, student.id)?.published,
           )
           .filter(Boolean);
         return {
@@ -105,21 +105,12 @@ export function studentGrowthModel(
       id: submission.id,
       status: submission.status,
       published: Boolean(submission.published),
-      version: submission.version,
       submittedAt: submission.submittedAt,
       assignment: { title: submission.assignment.title },
       handwriting: submission.handwriting,
       composition: submission.composition,
     }));
-    // Summary and trend share this one history query. Select the latest published
-    // version per assignment without exposing any review content to the view.
-    const latestPublished = new Map();
-    for (const submission of submissions) {
-      const previous = latestPublished.get(submission.assignmentId);
-      if (submission.published && (!previous || previous.version < submission.version))
-        latestPublished.set(submission.assignmentId, submission);
-    }
-    const published = [...latestPublished.values()];
+    const published = submissions.filter(item => item.published);
     const rankEntry =
       student && audience === "teacher"
         ? studentRankingModel(state, classId, category).ranks.find((entry) => entry.id === studentId)
@@ -137,15 +128,13 @@ export function studentGrowthModel(
             composition: mean(published.map((submission) => submission.composition)),
             feedbackCount: published.length,
             submissionCount: history.length,
-            revisionCount: history.filter((submission) => submission.version > 1).length,
           }
         : null,
       history,
       trend: history.map((submission) => ({
         id: submission.id,
         label: submission.assignment.title,
-        shortLabel: `第 ${submission.version} 版`,
-        note: `第 ${submission.version} 版 · ${submission.published ? "已发布成绩" : "待发布成绩"}`,
+        note: submission.published ? "已发布成绩" : "待发布成绩",
         detail: `提交：${formatDate(submission.submittedAt, true)}`,
         handwriting: submission.handwriting,
         composition: submission.composition,
@@ -164,18 +153,17 @@ export function teachingClassesModel(state, classes, classId, query = "") {
       studentCount: activeStudents(state, schoolClass.id).length,
       assignmentCount: classAssignments(state, schoolClass.id).length,
     }));
-    const submissionCounts = new Map();
-    for (const submission of state.submissions)
-      submissionCounts.set(
-        submission.studentId,
-        (submissionCounts.get(submission.studentId) || 0) + 1,
-      );
+    const submittedAssignments = new Map();
+    for (const submission of state.submissions) {
+      if (!submittedAssignments.has(submission.studentId)) submittedAssignments.set(submission.studentId, new Set());
+      submittedAssignments.get(submission.studentId).add(submission.assignmentId);
+    }
     const members = activeStudents(state, classId).map((student) => ({
       id: student.id,
       name: student.name,
       initial: student.initial,
       studentNumber: student.studentNumber,
-      submissionCount: submissionCounts.get(student.id) || 0,
+      submissionCount: submittedAssignments.get(student.id)?.size || 0,
     }));
     return {
       classes: rows,
@@ -196,29 +184,17 @@ export function teachingClassesModel(state, classes, classId, query = "") {
 }
 
 
-export function submissionHistoryGroups(state, studentId) {
-  return cachedModel(state, "records", studentId, () => {
-    const assignments = new Map(state.assignments.map(item => [item.id, item]));
-    const groups = new Map();
-    for (const submission of state.submissions) {
-      if (submission.studentId !== studentId || !assignments.has(submission.assignmentId)) continue;
-      const assignment = assignments.get(submission.assignmentId);
-      if (!groups.has(assignment.id)) groups.set(assignment.id, { id: assignment.id, title: assignment.title, createdAt: assignment.createdAt, versions: [] });
-      groups.get(assignment.id).versions.push({
-        id: submission.id, assignmentId: assignment.id, version: submission.version,
-        submittedAt: submission.submittedAt, date: formatDate(submission.submittedAt, true),
-        pageCount: submission.photos.length, published: !!submission.published,
-        handwriting: submission.published ? total(submission.published.handwriting) : null,
-        composition: submission.published ? total(submission.published.composition) : null,
-        submittedBy: submission.actor === "teacher" ? submission.submittedBy?.name || "教师" : "",
-        example: !!submission.example,
-      });
-    }
-    return [...groups.values()].map(group => {
-      group.versions.sort((a,b) => b.version - a.version || b.submittedAt.localeCompare(a.submittedAt));
-      const scored = group.versions.filter(item => item.published);
-      return { ...group, latest: group.versions[0], latestScore: scored[0] || null,
-        points: [...scored].reverse().map(item => ({ id: item.id, label: `第 ${item.version} 版`, note: item.date, detail: `第 ${item.version} 版 · 已发布反馈`, handwriting: item.handwriting, composition: item.composition })) };
-    }).sort((a,b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
-  });
+export function submissionRecordsModel(state, studentId) {
+  return cachedModel(state, "records", studentId, () => state.assignments
+    .map(assignment => ({ assignment, submission: latestSubmission(state, assignment.id, studentId) }))
+    .filter(item => item.submission)
+    .sort((a, b) => b.assignment.createdAt.localeCompare(a.assignment.createdAt) || b.assignment.id.localeCompare(a.assignment.id))
+    .map(({ assignment, submission }) => ({
+      id: submission.id, assignmentId: assignment.id, title: assignment.title,
+      submittedAt: submission.submittedAt, date: formatDate(submission.submittedAt, true),
+      pageCount: submission.photos.length, published: !!submission.published,
+      handwriting: submission.published ? total(submission.published.handwriting) : null,
+      composition: submission.published ? total(submission.published.composition) : null,
+      submittedBy: submission.actor === "teacher" ? submission.submittedBy?.name || "教师" : "",
+    })));
 }

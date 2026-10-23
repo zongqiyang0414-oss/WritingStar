@@ -51,17 +51,20 @@ test("教师可补交已截止作业，学生截止限制及本轮防重复提�
   advance();
   await assert.rejects(service.submit(assignment.id, samplePhotos, "", "student"), /已截止/);
   const first = await service.submitForStudent(assignment.id, "student-1", samplePhotos, "补交", "teacher");
-  await assert.rejects(service.submitForStudent(assignment.id, "student-1", samplePhotos, "", "teacher"), /本轮作品已提交/);
+  await assert.rejects(service.submitForStudent(assignment.id, "student-1", samplePhotos, "", "teacher"), /作品已提交/);
   await service.finishAnalysis(first.id);
   await service.publish(first.id, sampleReview(), "teacher");
   await service.setExcellent(first.id, true, "teacher");
   const original = service.latest(assignment.id, "student-1");
-  const revision = await service.submitForStudent(assignment.id, "student-1", samplePhotos, "订正", "teacher");
-  assert.equal(revision.version, 2);
-  assert.equal(revision.excellent, undefined);
-  assert.deepEqual(service.read().submissions.find((item: any) => item.id === first.id), original);
-  assert.equal(service.excellentWorks("class-1", "student")[0].id, first.id);
+  await service.setResubmissionAllowed(first.id, true, "teacher");
+  await assert.rejects(service.submitForStudent(assignment.id, "student-1", samplePhotos, "", "teacher"), /作品已提交/);
+  const replacement = await service.submit(assignment.id, samplePhotos, "学生重新提交", "student");
+  assert.equal(replacement.version, 2);
+  assert.equal(replacement.excellent, undefined);
+  assert.deepEqual(service.read().submissions.find((item: any) => item.id === first.id).published, original.published);
+  assert.equal(service.excellentWorks("class-1", "student").length, 0);
   assert.equal(assignmentCounts(service.read(), assignment).pending, 1);
+
 });
 
 test("代交只允许已绑定的任教教师和本班在班学生", async () => {
@@ -144,7 +147,7 @@ test("优秀作业的管理和阅读均按任教或当前学生班级隔离", as
   assert.throws(() => service.excellentWork(submission.id, "teacher"), /任教范围/);
 });
 
-test("优秀标记存储失败不假成功，刷新、重复操作和订正不改写作品与反馈", async () => {
+test("优秀标记存储失败不假成功，刷新及重复操作不改写作品与反馈", async () => {
   const { service, assignment, storage, fail } = await setup();
   const submission = await service.submit(assignment.id, samplePhotos, "原说明", "student");
   await service.finishAnalysis(submission.id);

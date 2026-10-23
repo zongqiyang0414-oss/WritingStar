@@ -9,7 +9,6 @@ function submissionIndex(state) {
     return submissionIndexes.get(submissions);
   const index = {
     latest: new Map(),
-    published: new Map(),
     byStudent: new Map(),
   };
   const addLatest = (target, submission) => {
@@ -22,7 +21,6 @@ function submissionIndex(state) {
   };
   for (const submission of submissions) {
     addLatest(index.latest, submission);
-    if (submission.published) addLatest(index.published, submission);
     let history = index.byStudent.get(submission.studentId);
     if (!history) index.byStudent.set(submission.studentId, (history = []));
     history.push(submission);
@@ -45,7 +43,8 @@ export function latestSubmission(state, assignmentId, studentId) {
   return submissionIndex(state).latest.get(assignmentId)?.get(studentId) || null;
 }
 export function latestPublishedSubmission(state, assignmentId, studentId) {
-  return submissionIndex(state).published.get(assignmentId)?.get(studentId) || null;
+  const latest = latestSubmission(state, assignmentId, studentId);
+  return latest?.published ? latest : null;
 }
 export function studentSubmissions(state, studentId) {
   return [...(submissionIndex(state).byStudent.get(studentId) || [])];
@@ -100,7 +99,7 @@ export function studentReports(state, classId) {
       composition = [];
     for (const assignment of assignments) {
       const submission = index.latest.get(assignment.id)?.get(student.id),
-        published = index.published.get(assignment.id)?.get(student.id)?.published;
+        published = submission?.published;
       if (!submission) missing++;
       else if (submission.status === "published") completed++;
       else pending++;

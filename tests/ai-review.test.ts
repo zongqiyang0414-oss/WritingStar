@@ -160,7 +160,7 @@ test('批量入队和进度存储失败均不留下部分状态，重试后保�
   env.fail(false); service.advanceAiReviews(); assert.equal(service.aiResult('submission-1', 'teacher').attempt, 1);
 });
 
-test('人工批阅或已发布作品不会被迟到的AI完成回写；订正保留前一版AI及老师反馈', async () => {
+test('人工批阅或已发布作品不会被迟到的AI完成回写；教师允许重新提交后保留原AI及反馈', async () => {
   const env = setup(), { service } = env; await bind(service, 'student', 'XS2026'); await bind(service, 'teacher', 'JS2026');
   const first = await service.submit('assignment-plan-1', samplePhotos, '', 'student');
   service.advanceAiReviews(); await service.manualReview(first.id, 'teacher');
@@ -170,9 +170,10 @@ test('人工批阅或已发布作品不会被迟到的AI完成回写；订正保
   assert.deepEqual(service.read().submissions.find(item => item.id === first.id).draft, manual);
   await service.publish(first.id, manual, 'teacher');
   const original = service.read().submissions.find(item => item.id === first.id);
+  await service.setResubmissionAllowed(first.id, true, 'teacher');
   const second = await service.submit('assignment-plan-1', samplePhotos, '', 'student'); finishWorker(env);
   assert.equal(second.version, 2);
-  assert.deepEqual(service.read().submissions.find(item => item.id === first.id), original);
+  assert.deepEqual(service.read().submissions.find(item => item.id === first.id).published, original.published);
   const seedDraft = sampleReview(); seedDraft.nextSteps = '发布时仍在等待AI';
   await service.startAiReview('submission-1', 'teacher'); await service.publish('submission-1', seedDraft, 'teacher');
   env.advance(6000); service.advanceAiReviews();

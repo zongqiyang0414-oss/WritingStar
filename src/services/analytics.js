@@ -1,4 +1,4 @@
-import { classAssignments, studentReports, studentSubmissions } from "./school.js";
+import { classAssignments, studentReports, latestSubmission } from "./school.js";
 import { total } from "./rubric.js";
 
 export function mean(values) {
@@ -49,34 +49,22 @@ export function rankedStudents(state, classId, category, query = "") {
 export function studentHistory(state, classId, studentId) {
   if (!state.students.some((e) => e.id === studentId && e.classId === classId))
     return [];
-  const assignments = new Map(
-    classAssignments(state, classId).map((assignment) => [assignment.id, assignment]),
-  );
-  return studentSubmissions(state, studentId)
-    .filter((e) => assignments.has(e.assignmentId))
-    .sort(
-      (e, a) =>
-        e.submittedAt.localeCompare(a.submittedAt) ||
-        e.version - a.version ||
-        e.id.localeCompare(a.id),
-    )
-    .map((e) => ({
-      ...e,
-      assignment: assignments.get(e.assignmentId),
-      handwriting: e.published ? total(e.published.handwriting) : null,
-      composition: e.published ? total(e.published.composition) : null,
+  return classAssignments(state, classId)
+    .map(assignment => ({ assignment, submission: latestSubmission(state, assignment.id, studentId) }))
+    .filter(item => item.submission)
+    .map(({ assignment, submission }) => ({
+      ...submission,
+      assignment,
+      handwriting: submission.published ? total(submission.published.handwriting) : null,
+      composition: submission.published ? total(submission.published.composition) : null,
     }));
 }
+
 export function studentSummary(state, classId, studentId) {
   if (!state.students.find((e) => e.id === studentId && e.classId === classId))
     return null;
-  const s = studentHistory(state, classId, studentId),
-    l = new Map();
-  for (const i of s)
-    i.published &&
-      (!l.has(i.assignmentId) || l.get(i.assignmentId).version < i.version) &&
-      l.set(i.assignmentId, i);
-  const n = [...l.values()];
+  const s = studentHistory(state, classId, studentId);
+  const n = s.filter(item => item.published);
   return {
     studentId,
     classId,
@@ -84,6 +72,5 @@ export function studentSummary(state, classId, studentId) {
     composition: mean(n.map((e) => e.composition)),
     feedbackCount: n.length,
     submissionCount: s.length,
-    revisionCount: s.filter((e) => e.version > 1).length,
   };
 }

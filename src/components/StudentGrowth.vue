@@ -28,7 +28,7 @@ function formatSubmittedAt(e) {
         </view>
         <view class="small subtle">
           {{ model.organizationName }} ·
-          {{ model.student.className }} · {{ model.history.length }} 次提交
+          {{ model.student.className }} · {{ model.history.length }} 份作业
         </view>
       </view>
       <template v-if="'teacher' === audience && model.rankEntry">
@@ -53,17 +53,17 @@ function formatSubmittedAt(e) {
         </view>
         <view>
           <view class="strong">
-            {{ model.summary.revisionCount }}
+            {{ model.summary.submissionCount - model.summary.feedbackCount }}
             <text class="small subtle"> 次 </text>
           </view>
-          <view class="tiny subtle"> 认真完成的订正 </view>
+          <view class="tiny subtle"> 等待反馈的作业 </view>
         </view>
       </view>
     </template>
     <ScoreTrend
       :points="model.trend"
       title="个人成长趋势"
-      subtitle="按提交时间，查看每一轮作品的成绩变化"
+      subtitle="按作业顺序，查看每份作业最新的成绩"
     />
     <view class="student-score-pair growth-averages card">
       <view>
@@ -82,8 +82,8 @@ function formatSubmittedAt(e) {
       </view>
     </view>
     <view class="section-heading">
-      <view class="section-title"> 历次提交成绩 </view>
-      <text class="small subtle"> {{ model.history.length }} 次提交 </text>
+      <view class="section-title"> 作业成绩 </view>
+      <text class="small subtle"> {{ model.history.length }} 份作业 </text>
     </view>
     <template v-for="item1 in recentHistory" :key="item1.id">
       <view class="attempt-score card">
@@ -96,8 +96,7 @@ function formatSubmittedAt(e) {
           </text>
         </view>
         <view class="small subtle attempt-date">
-          {{ formatSubmittedAt(item1.submittedAt) }} · 第
-          {{ item1.version }} 版{{ item1.version > 1 ? " · 订正" : "" }}
+          {{ formatSubmittedAt(item1.submittedAt) }}
         </view>
         <view class="attempt-score-pair">
           <view>
@@ -122,7 +121,7 @@ function formatSubmittedAt(e) {
               class="text-button spaced-small growth-feedback-link"
               @click="(e) => emit('feedback', item1)"
             >
-              阅读这一版反馈 ›
+              阅读老师反馈 ›
             </button>
           </template>
           <template v-else>
@@ -138,14 +137,7 @@ function formatSubmittedAt(e) {
       <view :key="1" class="empty-state card"> 这位学生还没有提交作品。 </view>
     </template>
     <view class="small subtle statistics-note">
-      成长图保留每一轮已发布成绩，包括订正；未发布成绩留空。平均分{{
-        "teacher" === audience ? "与排名" : ""
-      }}按每份作业最近一次已发布成绩计算。
-    </view>
-  </template>
-  <template v-else>
-    <view :key="1" class="empty-state card">
-      未找到这位学生，请返回班级列表。
+      每份作业只显示最新提交的成绩；最新反馈未发布时暂不计入均分。
     </view>
   </template>
 </template>

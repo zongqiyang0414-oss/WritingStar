@@ -138,6 +138,7 @@ export interface Submission {
   id: string;
   assignmentId: string;
   studentId: string;
+  /** Internal upload order; no correction/version workflow in the UI. */
   version: number;
   photos: Photo[];
   note: string;
@@ -155,6 +156,7 @@ export interface Submission {
   publishedBy?: TeacherSummary;
   draftRevision?: number;
   example?: boolean;
+  resubmission?: { allowedAt: string; allowedBy: TeacherSummary; consumedAt?: string } | null;
   aiReview?: AiReviewTask;
 }
 export interface AiReviewTask {
@@ -183,7 +185,6 @@ export interface PrototypeState {
   administrators: Administrator[];
   administrationEvents: AdministrationEvent[];
   classPracticeVersion?: number;
-  revisionPracticeVersion?: 1;
   accounts: { student: StudentAccount };
   teacherAccount: TeacherAccount;
   legacyParentAccount?: StudentAccount;
