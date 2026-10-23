@@ -305,9 +305,9 @@ export class MockService extends AiReviewService {
     const s = validateReview(review);
     if (s) throw new Error(s);
     const n = this.get(this.state, submissionId);
-    if (this.latest(n.assignmentId, n.studentId)?.id !== n.id || canResubmit(n)) throw new Error("请等待学生重新提交，或先取消重新提交许可。");
+    if (this.latest(n.assignmentId, n.studentId)?.id !== n.id || canResubmit(n)) throw new Error("已同意学生重新提交，请等待新的作品。");
     if ("pending" !== n.status)
-      throw new Error("反馈已经发布或作品仍在处理中，请刷新查看。");
+      throw new Error("作品已完成审核或作品仍在处理中，请刷新查看。");
     this.updateSubmission(submissionId, {
       draft: clone(review),
       published: clone(review),
@@ -339,23 +339,22 @@ export class MockService extends AiReviewService {
       throw new Error("请选择本班在班学生，不能为已调班或归档的学生代交。");
     return saveSubmission(this, assignmentId, student, photos, note, role, fail, failAnalysis);
   }
-  async setResubmissionAllowed(submissionId, enabled, role) {
+  async agreeResubmission(submissionId, role) {
     this.teachingSubmission(submissionId, role);
-    if (typeof enabled !== "boolean") throw new Error("请选择是否允许重新提交。");
     const current = this.get(this.state, submissionId);
     const assignment = this.state.assignments.find(item => item.id === current.assignmentId);
     const student = this.state.students.find(item => item.id === current.studentId);
-    if (!student || student.archived || student.classId !== assignment.classId) throw new Error("只能允许本班在班学生重新提交。");
+    if (!student || student.archived || student.classId !== assignment.classId) throw new Error("只能同意本班在班学生重新提交。");
     if (this.latest(current.assignmentId, current.studentId)?.id !== current.id) throw new Error("作品已更新，请查看最新提交。");
-    if (canResubmit(current) === enabled) return;
-    this.updateSubmission(submissionId, { resubmission: enabled ? { allowedAt: this.clock().toISOString(), allowedBy: teacherSummary(this.teacher(role)) } : null });
+    if (canResubmit(current)) return;
+    this.updateSubmission(submissionId, { resubmission: { allowedAt: this.clock().toISOString(), allowedBy: teacherSummary(this.teacher(role)) } });
   }
   async setExcellent(submissionId, enabled, role) {
     this.teachingSubmission(submissionId, role);
     if (typeof enabled !== "boolean") throw new Error("请选择是否设为优秀作业。");
     const submission = this.get(this.state, submissionId);
     if (enabled && (this.latest(submission.assignmentId, submission.studentId)?.id !== submission.id || submission.status !== "published" || !submission.published))
-      throw new Error("请先完成批阅，再设为优秀作业。");
+      throw new Error("请先完成审核，再设为优秀作业。");
     if (Boolean(submission.excellent) === enabled) return;
     this.updateSubmission(submissionId, {
       excellent: enabled
@@ -513,7 +512,7 @@ function saveSubmission(service, assignmentId, student, photos, note, role, fail
       throw new Error("图片重复，请重新选择。");
     const u = latestSubmission(service.state, assignmentId, student.id);
     if (u && (role !== "student" || !canResubmit(u)))
-      throw new Error("作品已提交，需老师允许后才能重新提交。");
+      throw new Error("作品已提交，需老师同意后才能重新提交。");
     if (fail) throw new Error("提交失败，图片已保留，请重试。");
     const o = service.clock().toISOString(),
       c = {

@@ -128,7 +128,7 @@ test("仅旧家长已绑定时迁入学生端，原图、评分、反馈与订�
     api.total(service.feedback("submission-1", "student").handwriting),
     82,
   );
-  await service.setResubmissionAllowed("submission-1", true, "teacher");
+  await service.agreeResubmission("submission-1", "teacher");
   const revision = await service.submit(
     "assignment-1",
     api.photos,

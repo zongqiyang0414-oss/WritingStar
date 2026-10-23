@@ -120,9 +120,9 @@ test("班级统计只取最新提交及其已发布成绩，排除离班学生�
   assert.deepEqual(model.trend.map(({ id, handwriting, composition, note }) => ({
     id, handwriting, composition, note,
   })), [
-    { id: "first", handwriting: 77.5, composition: 85, note: "已发布 2 / 4 人" },
-    { id: "second", handwriting: 75, composition: 76, note: "已发布 2 / 4 人" },
-    { id: "empty", handwriting: null, composition: null, note: "已发布 0 / 4 人" },
+    { id: "first", handwriting: 77.5, composition: 85, note: "已审核 2 / 4 人" },
+    { id: "second", handwriting: 75, composition: 76, note: "已审核 2 / 4 人" },
+    { id: "empty", handwriting: null, composition: null, note: "已审核 0 / 4 人" },
   ]);
 });
 
@@ -161,7 +161,7 @@ test("个人成长每份作业只取最新提交，最新反馈未发布不沿�
   ]);
   assert.deepEqual(model.trend.map(({ id, handwriting, composition }) => ({ id, handwriting, composition })),
     model.history.map(({ id, handwriting, composition }) => ({ id, handwriting, composition })));
-  assert.equal(model.trend[0].note, "待发布成绩");
+  assert.equal(model.trend[0].note, "待审核成绩");
   assert.equal(model.organizationName, "甲秀小学");
   const learner = studentGrowthModel(state, "class-1", "student-1", "composition", "learner");
   assert.equal(learner.rankEntry, null);

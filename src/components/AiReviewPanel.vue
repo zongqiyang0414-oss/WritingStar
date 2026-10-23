@@ -53,7 +53,7 @@ function preview() {
       <text class="ai-type-tag">双写 AI</text>
     </view>
 
-    <view v-if="resubmissionOpen(submission)" class="notice">{{ teacher ? '已允许学生重新提交一次，等待新的作品。' : '老师已允许你重新提交一次。' }}</view>
+    <view v-if="resubmissionOpen(submission)" class="notice">{{ teacher ? '已同意学生重新提交一次，等待新的作品。' : '老师已同意你重新提交一次。' }}</view>
     <view v-if="running" class="card ai-progress-card" role="status" aria-live="polite">
       <view class="card-top"><view class="strong">{{ phase === 'queued' ? '等待开始批阅' : '正在双写批阅' }}</view><text class="small subtle">{{ Math.max(0, step) }} / 3 步</text></view>
       <view class="ai-progress-track"><view class="ai-progress-fill" :style="{ width: progress + '%' }" /></view>
@@ -101,7 +101,7 @@ function preview() {
         <view v-if="task?.reportedAt" class="tiny subtle spaced-small">问题已报告学校管理员</view>
       </template>
     </view>
-    <view v-if="!teacher && wrongPhoto && !canResubmit" class="small subtle spaced-small">需要更换照片时，请联系老师允许重新提交。</view>
+    <view v-if="!teacher && wrongPhoto && !canResubmit" class="small subtle spaced-small">需要更换照片时，请联系老师同意重新提交。</view>
     <button v-if="!teacher && canResubmit" class="primary full-width spaced" :disabled="busy" @click="emit('resubmit')">重新提交本次作业</button>
 
     <view class="card ai-original-work">
@@ -112,8 +112,8 @@ function preview() {
         <view v-if="submission.note" class="paragraph small subtle">{{ submission.note }}</view>
       </template>
     </view>
-    <button v-if="teacher && canAllowResubmission" class="secondary full-width spaced" :disabled="busy" @click="emit('allow-resubmission')">{{ resubmissionOpen(submission) ? '取消重新提交许可' : '允许学生重新提交' }}</button>
-    <view v-if="teacher && !submission.published && !resubmissionOpen(submission) && result" class="ai-teacher-actions"><button class="primary full-width" :disabled="busy" @click="completeReview">完成批阅</button></view>
+    <view v-if="teacher && canAllowResubmission" class="spaced"><view v-if="resubmissionOpen(submission)" class="small subtle resubmission-agreed">已同意重新提交，等待学生上传。</view><button v-else class="secondary full-width" :disabled="busy" @click="emit('allow-resubmission')">同意重新提交</button></view>
+    <view v-if="teacher && !submission.published && !resubmissionOpen(submission) && result" class="ai-teacher-actions"><button class="primary full-width" :disabled="busy" @click="completeReview">完成审核</button></view>
     <button v-if="submission.published" class="primary full-width spaced" :disabled="busy" @click="emit('feedback')">查看老师正式反馈</button>
   </view>
 </template>

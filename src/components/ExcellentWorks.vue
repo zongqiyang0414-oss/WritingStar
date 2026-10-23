@@ -99,7 +99,7 @@ function preview() {
       <view v-if="!works.length" class="card empty-state">
         <view class="excellent-symbol">★</view>
         <view class="strong">还没有优秀作业</view>
-        <view class="paragraph small">{{ teacher ? '在已完成批阅的作业详情页，将作品设为优秀作业。' : '老师选出优秀作品后，会展示在这里。' }}</view>
+        <view class="paragraph small">{{ teacher ? '在已完成审核的作业详情页，将作品设为优秀作业。' : '老师选出优秀作品后，会展示在这里。' }}</view>
       </view>
       <view v-for="item in works" :key="item.id" class="card excellent-card">
         <view class="card-top">

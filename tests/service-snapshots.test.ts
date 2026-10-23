@@ -85,7 +85,7 @@ test("冻结快照中提交、分析和人工批阅按新作品更新，原反�
   await service.signIn("student");
   await service.bindInvitation("XS2026", "student");
   await service.publish("submission-1", sampleReview(), "teacher");
-  await service.setResubmissionAllowed("submission-1", true, "teacher");
+  await service.agreeResubmission("submission-1", "teacher");
   const original = service.snapshot();
   const revision = await service.submit("assignment-1", [{
     ...samplePhotos[0], id: "own-photo", sample: false,

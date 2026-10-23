@@ -62,12 +62,12 @@ const emit = defineEmits(["assignment", "students", "update:panel"]);
       <text class="entry-arrow"> › </text>
     </button>
     <view class="small subtle statistics-note">
-      每份作业按每名学生最近一次已发布成绩计算班级均分。未提交和未发布的成绩不参与，点击图下作业可查看参与人数。
+      每份作业仅采用每名学生最新提交的已审核成绩计算班级均分。未提交或待审核的成绩不参与，点击图下作业可查看参与人数。
     </view>
   </template>
   <template v-else>
     <view class="small subtle statistics-note">
-      每项作业按学生最新一次提交统计；重新提交的作品计入待批阅。
+      每项作业按学生最新一次提交统计；重新提交的作品计入待审核。
     </view>
     <template v-for="item1 in model.assignments" :key="item1.id">
       <view class="assignment-report card">
@@ -86,7 +86,7 @@ const emit = defineEmits(["assignment", "students", "update:panel"]);
         </view>
         <view class="assignment-report-counts">
           <view><text class="metric-number">{{ item1.counts.missing }}</text><view class="small subtle">未提交</view></view>
-          <view><text class="metric-number">{{ item1.counts.pending }}</text><view class="small subtle">待批阅</view></view>
+          <view><text class="metric-number">{{ item1.counts.pending }}</text><view class="small subtle">待审核</view></view>
           <view><text class="metric-number">{{ item1.counts.completed }}</text><view class="small subtle">已完成</view></view>
         </view>
         <view class="card-bottom">

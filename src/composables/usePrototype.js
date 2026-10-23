@@ -70,6 +70,7 @@ export function usePrototype() {
     assignmentPeriod = ref("ongoing"),
     detailReturn = ref("home"),
     feedbackReturn = ref("assignment"),
+    recordsOrigin = ref(null),
     excellentReturn = ref("home"),
     excellentAssignmentId = ref(""),
     excellentSubmissionId = ref(""),
@@ -357,7 +358,7 @@ export function usePrototype() {
           statisticsStudents: "全班学生学情",
           statisticsStudent: "学生成长",
           assignment: "作业详情",
-          review: "双写批阅",
+          review: "双写审核",
           aiReview: "AI双写批阅",
           aiBatch: "全班AI批阅",
           submit: isTeacher.value ? "代学生提交作业" : "提交作品",
@@ -464,7 +465,7 @@ export function usePrototype() {
       (dirty.value
         ? (modal.value = {
             title: "还有未保存的修改",
-            body: adminDirty.value ? "离开后，未保存的管理信息会丢失。你可以取消并先保存。" : screen.value === "submit" ? "离开后，本次选择的照片和提交说明将丢弃。你可以取消并继续提交。" : "离开后，未保存的评分和评语会丢失。你可以取消并完成批阅。",
+            body: adminDirty.value ? "离开后，未保存的管理信息会丢失。你可以取消并先保存。" : screen.value === "submit" ? "离开后，本次选择的照片和提交说明将丢弃。你可以取消并继续提交。" : "离开后，未保存的评分和评语会丢失。你可以取消并完成审核。",
             confirm: "放弃修改",
             action: () => {
               if (screen.value === "submit") { photos.value = []; note.value = ""; }
@@ -472,6 +473,37 @@ export function usePrototype() {
             },
           })
         : e());
+  }
+  function comesFromRecords() {
+    const parents = { feedback: feedbackReturn.value, aiReview: aiReviewReturn.value, review: reviewReturn.value };
+    const visited = new Set();
+    let current = screen.value;
+    while (parents[current] && !visited.has(current)) {
+      visited.add(current);
+      current = parents[current];
+      if (current === "records") return true;
+    }
+    return false;
+  }
+  function rememberRecordsOrigin() {
+    if (screen.value === "records" || comesFromRecords()) return;
+    recordsOrigin.value = {
+      screen: screen.value, assignmentId: assignmentId.value, submissionId: submissionId.value,
+      feedbackReturn: feedbackReturn.value, aiReviewReturn: aiReviewReturn.value,
+      reviewReturn: reviewReturn.value, detailReturn: detailReturn.value,
+    };
+  }
+  function leaveRecords() {
+    const origin = recordsOrigin.value;
+    recordsOrigin.value = null;
+    if (!origin || origin.screen === "records") { navigate("home"); return; }
+    assignmentId.value = origin.assignmentId;
+    submissionId.value = origin.submissionId;
+    feedbackReturn.value = origin.feedbackReturn;
+    aiReviewReturn.value = origin.aiReviewReturn;
+    reviewReturn.value = origin.reviewReturn;
+    detailReturn.value = origin.detailReturn;
+    navigate(origin.screen);
   }
   function go(e) {
     if (isAdmin.value) {
@@ -485,6 +517,7 @@ export function usePrototype() {
       (!isTeacher.value && rosterScreens.includes(e)) ||
       (("create" !== e || teachingClassOptions.value.length) &&
         guard(() => {
+          if (e === "records") rememberRecordsOrigin();
           "create" === e && (newClassId.value = currentClass.value.id, newClassIds.value = [currentClass.value.id]);
           navigate(e);
         }));
@@ -517,7 +550,7 @@ export function usePrototype() {
   }
   function openReview(e) {
     guard(() => {
-      reviewReturn.value = ["aiReview", "aiBatch"].includes(screen.value) ? screen.value : "assignment";
+      reviewReturn.value = ["aiReview", "aiBatch", "records"].includes(screen.value) ? screen.value : "assignment";
       submissionId.value = e.id;
       assignmentId.value = e.assignmentId;
       review.value = presentReview(e.draft);
@@ -536,14 +569,8 @@ export function usePrototype() {
     if (!e) return;
     (isTeacher.value || e.studentId === boundStudent.value?.id) &&
       guard(() => {
-        feedbackReturn.value =
-          ["aiReview", "aiBatch"].includes(screen.value) ? screen.value : "growth" === screen.value
-            ? "growth"
-            : "records" === screen.value
-              ? "records"
-              : "home" === screen.value
-                ? "home"
-                : "assignment";
+        const source = screen.value === "review" ? reviewReturn.value : screen.value;
+        if (source !== "feedback") feedbackReturn.value = ["aiReview", "aiBatch", "growth", "records", "home", "assignment"].includes(source) ? source : "assignment";
         submissionId.value = e.id;
         assignmentId.value = e.assignmentId;
         category.value = "handwriting";
@@ -599,8 +626,8 @@ export function usePrototype() {
       const publishedCount = result.published.length;
       const pendingCount = result.requiresReview.length;
       notify(publishedCount
-        ? `已完成 ${publishedCount} 份批阅${pendingCount ? `，${pendingCount} 份需逐份审核` : ""}`
-        : pendingCount ? `${pendingCount} 份需逐份审核` : "暂无可批阅作业");
+        ? `已完成 ${publishedCount} 份审核${pendingCount ? `，${pendingCount} 份需逐份审核` : ""}`
+        : pendingCount ? `${pendingCount} 份需逐份审核` : "暂无可审核作业");
     });
   }
   function openExcellentWorks(assignment = null) {
@@ -737,7 +764,7 @@ export function usePrototype() {
         if (invalid) throw new Error(invalid);
         if (["processing", "failed"].includes(item.status)) await service.manualReview(item.id, role.value);
         await service.publish(item.id, completedReview, role.value);
-        notify("已完成批阅");
+        notify("已完成审核");
       });
       if (!error.value) openFeedback(state.value.submissions.find(row => row.id === item.id));
     },
@@ -783,10 +810,9 @@ export function usePrototype() {
     submissionRecords,
     canResubmit,
     canAllowResubmission: (item) => isTeacher.value && item && !studentFor(item)?.archived && studentFor(item)?.classId === state.value.assignments.find(assignment => assignment.id === item.assignmentId)?.classId && latest(item.assignmentId, item.studentId)?.id === item.id,
-    toggleResubmission: async (item) => {
-      if (!item || busy.value || !isTeacher.value) return;
-      const allow = !canResubmit(item);
-      await runAction(async () => { await service.setResubmissionAllowed(item.id, allow, role.value); notify(allow ? "已允许学生重新提交一次" : "已取消重新提交许可"); });
+    agreeResubmission: async (item) => {
+      if (!item || busy.value || !isTeacher.value || canResubmit(item)) return;
+      await runAction(async () => { await service.agreeResubmission(item.id, role.value); notify("已同意学生重新提交一次"); });
     },
     feedback,
     canSubmit,
@@ -808,7 +834,7 @@ export function usePrototype() {
           ? {
               processing: "处理中",
               failed: "处理失败",
-              pending: "待批阅",
+              pending: "待审核",
               published: "已完成",
             }[e.status]
           : "未提交";
@@ -879,7 +905,7 @@ export function usePrototype() {
       await runAction(async () => {
         await service.saveDraft(submissionId.value, review.value, role.value);
         reviewBaseline.value = JSON.stringify(review.value);
-        notify("草稿已保存，发布后学生可见");
+        notify("草稿已保存，完成审核后学生可见");
       });
     },
     publish: async function () {
@@ -889,7 +915,7 @@ export function usePrototype() {
       await runAction(async () => {
         await service.publish(submissionId.value, review.value, role.value);
         reviewBaseline.value = JSON.stringify(review.value);
-        notify("已完成批阅");
+        notify("已完成审核");
       });
       if (!error.value) openFeedback(state.value.submissions.find(item => item.id === submissionId.value));
     },
@@ -1031,6 +1057,7 @@ export function usePrototype() {
     isRoot,
     activeTab,
     back: function () {
+      if (screen.value === "records") { guard(leaveRecords); return; }
       go(
         screen.value === "excellentWork" ? "excellentWorks"
           : screen.value === "excellentWorks" ? excellentReturn.value
@@ -1049,9 +1076,7 @@ export function usePrototype() {
                   ? "assignment"
                   : "feedback" === screen.value
                     ? feedbackReturn.value
-                    : "records" === screen.value && isTeacher.value
-                      ? "feedback"
-                      : "assignment" === screen.value
+                    : "assignment" === screen.value
                         ? detailReturn.value
                         : "home",
       );

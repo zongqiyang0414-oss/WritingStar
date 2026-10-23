@@ -85,8 +85,8 @@ function updateQuery(e) {
         <view class="tiny subtle">
           {{
             item1.feedbackCount
-              ? item1.feedbackCount + " 份作业已发布成绩"
-              : "暂无已发布成绩"
+              ? item1.feedbackCount + " 份作业已审核成绩"
+              : "暂无已审核成绩"
           }}
         </view>
       </view>
@@ -110,6 +110,6 @@ function updateQuery(e) {
     </view>
   </template>
   <view class="small subtle statistics-note">
-    均分覆盖学生全部作业，每份作业只取最近一次已发布成绩。相同均分并列；暂无成绩的学生不参与排名。点击姓名查看个人成长。
+    均分覆盖学生全部作业，每份作业只取最新提交的已审核成绩，最新作品待审核时不沿用旧成绩。相同均分并列；暂无成绩的学生不参与排名。点击姓名查看个人成长。
   </view>
 </template>

@@ -1,6 +1,6 @@
 import { total } from "./rubric.js";
 
-export const taskStatuses = ["未提交", "待批阅", "已完成"];
+export const taskStatuses = ["未提交", "待审核", "已完成"];
 const submissionIndexes = new WeakMap();
 function submissionIndex(state) {
   const submissions = state.submissions,
@@ -36,7 +36,7 @@ export function taskStatus(submission) {
   return submission
     ? "published" === submission.status
       ? "已完成"
-      : "待批阅"
+      : "待审核"
     : "未提交";
 }
 export function latestSubmission(state, assignmentId, studentId) {
@@ -77,7 +77,7 @@ export function assignmentCounts(state, assignment) {
     };
   for (const l of t) {
     const t = taskStatus(latest?.get(l.id));
-    "未提交" === t ? s.missing++ : "待批阅" === t ? s.pending++ : s.completed++;
+    "未提交" === t ? s.missing++ : "待审核" === t ? s.pending++ : s.completed++;
   }
   return s;
 }

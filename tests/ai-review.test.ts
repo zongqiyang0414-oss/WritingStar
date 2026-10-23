@@ -72,7 +72,7 @@ test('教师改分、应用和发布不改写AI快照，未发布草稿不出现
   assert.deepEqual(service.aiResult('submission-1', 'student'), original);
   assert.equal(total(service.feedback('submission-1', 'student').handwriting), 76);
   assert.equal(total(service.aiResult('submission-1', 'student').result.handwriting), 81);
-  await assert.rejects(service.applyAiReview('submission-1', 'teacher'), /已发布/);
+  await assert.rejects(service.applyAiReview('submission-1', 'teacher'), /完成审核/);
 });
 
 test('一键批阅仅取每名学生最新提交，跳过未提交和已发布，并且重复点击不重复入队', async () => {
@@ -170,7 +170,7 @@ test('人工批阅或已发布作品不会被迟到的AI完成回写；教师允
   assert.deepEqual(service.read().submissions.find(item => item.id === first.id).draft, manual);
   await service.publish(first.id, manual, 'teacher');
   const original = service.read().submissions.find(item => item.id === first.id);
-  await service.setResubmissionAllowed(first.id, true, 'teacher');
+  await service.agreeResubmission(first.id, 'teacher');
   const second = await service.submit('assignment-plan-1', samplePhotos, '', 'student'); finishWorker(env);
   assert.equal(second.version, 2);
   assert.deepEqual(service.read().submissions.find(item => item.id === first.id).published, original.published);

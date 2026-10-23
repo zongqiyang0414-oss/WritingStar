@@ -318,7 +318,7 @@ test('全班AI一键发布刷新统计并显示成功提示，不弹出确认且
   assert.ok(service.feedback(submission.id, 'student'));
 });
 
-test('教师许可后学生只能重新提交一次，代交名单始终排除已提交学生', async () => {
+test('教师同意后学生只能重新提交一次，代交名单始终排除已提交学生', async () => {
   const { page, service, show } = await setup();
   const assignment = service.read().assignments.find(item => item.id === 'assignment-1');
   page.openAssignment(assignment);
@@ -328,8 +328,8 @@ test('教师许可后学生只能重新提交一次，代交名单始终排除�
   page.switchRole('student'); page.openAssignment(assignment);
   assert.equal(page.canSubmit.value, false); page.openSubmit(assignment); assert.equal(page.screen.value, 'assignment');
   page.switchRole('teacher'); page.openAssignment(assignment);
-  await page.toggleResubmission(first);
-  assert.ok(page.toast.value.includes('允许学生重新提交'));
+  await page.agreeResubmission(first);
+  assert.ok(page.toast.value.includes('同意学生重新提交'));
   assert.ok(!page.submissionStudents.value.some(item => item.id === 'student-1'));
   page.switchRole('student'); page.openAssignment(assignment); assert.equal(page.canSubmit.value, true);
   page.openSubmit(assignment); await page.submit();
@@ -338,4 +338,38 @@ test('教师许可后学生只能重新提交一次，代交名单始终排除�
   page.back(); assert.equal(page.canSubmit.value, false);
   assert.equal(page.submissionRecords.value.filter(item => item.assignmentId === assignment.id).length, 1);
   assert.equal(page.submissionRecords.value.find(item => item.assignmentId === assignment.id).id, service.latest(assignment.id, 'student-1').id);
+});
+
+test('教师记录页逐层返回时恢复原作品和来源，重复查看不同反馈不会往返循环', async () => {
+  const { page, service, show } = await setup();
+  await service.publish('submission-1', seed.sampleReview(), 'teacher');
+  const assignment = await service.createAssignment({classId:'class-1',title:'记录返回验证',requirements:'',dueAt:''},'teacher');
+  const another = await service.submit(assignment.id, seed.samplePhotos, '', 'student');
+  await service.finishAnalysis(another.id); await service.publish(another.id, seed.sampleReview(), 'teacher'); show();
+  const first = service.latest('assignment-1', 'student-1');
+  const originalAssignment = service.read().assignments.find(item=>item.id==='assignment-1');
+  page.openAssignment(originalAssignment); page.openFeedback(first); page.go('records');
+  for (const id of [another.id, first.id, another.id]) {
+    page.openFeedback(page.submissionRecords.value.find(item=>item.id===id));
+    page.back(); assert.equal(page.screen.value,'records');
+  }
+  page.back(); assert.equal(page.screen.value,'feedback');
+  assert.equal(page.selectedSubmission.value.id, first.id);
+  page.back(); assert.equal(page.screen.value,'assignment');
+  assert.equal(page.selectedAssignment.value.id, originalAssignment.id);
+  page.back(); assert.equal(page.screen.value,'home');
+});
+
+test('记录页保留任务或个人页来源，AI建议和正式反馈之间返回不产生循环', async () => {
+  const { page, service, show } = await setup();
+  await service.publish('submission-1',seed.sampleReview(),'teacher'); show();
+  const assignment = service.read().assignments.find(item=>item.id==='assignment-1');
+  page.openAssignment(assignment); page.go('records'); page.back();
+  assert.equal(page.screen.value,'assignment');
+  page.switchRole('student'); page.go('profile'); page.go('records');
+  page.openAiReview(service.latest(assignment.id,'student-1'));
+  page.openFeedback(service.latest(assignment.id,'student-1'));
+  page.back(); assert.equal(page.screen.value,'aiReview');
+  page.back(); assert.equal(page.screen.value,'records');
+  page.back(); assert.equal(page.screen.value,'profile');
 });

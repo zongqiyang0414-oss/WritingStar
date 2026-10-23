@@ -43,7 +43,7 @@ export function classStatisticsModel(state, classId, now) {
         return {
           id: assignment.id,
           label: assignment.title,
-          note: `已发布 ${published.length} / ${students.length} 人`,
+          note: `已审核 ${published.length} / ${students.length} 人`,
           detail: `布置：${formatDate(assignment.createdAt)} · 截止：${formatDate(assignment.dueAt)}`,
           handwriting: mean(published.map((review) => total(review.handwriting))),
           composition: mean(published.map((review) => total(review.composition))),
@@ -134,7 +134,7 @@ export function studentGrowthModel(
       trend: history.map((submission) => ({
         id: submission.id,
         label: submission.assignment.title,
-        note: submission.published ? "已发布成绩" : "待发布成绩",
+        note: submission.published ? "已审核成绩" : "待审核成绩",
         detail: `提交：${formatDate(submission.submittedAt, true)}`,
         handwriting: submission.handwriting,
         composition: submission.composition,

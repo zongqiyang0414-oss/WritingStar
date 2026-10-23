@@ -56,7 +56,7 @@ test("教师可补交已截止作业，学生截止限制及本轮防重复提�
   await service.publish(first.id, sampleReview(), "teacher");
   await service.setExcellent(first.id, true, "teacher");
   const original = service.latest(assignment.id, "student-1");
-  await service.setResubmissionAllowed(first.id, true, "teacher");
+  await service.agreeResubmission(first.id, "teacher");
   await assert.rejects(service.submitForStudent(assignment.id, "student-1", samplePhotos, "", "teacher"), /作品已提交/);
   const replacement = await service.submit(assignment.id, samplePhotos, "学生重新提交", "student");
   assert.equal(replacement.version, 2);
@@ -102,7 +102,7 @@ test("优秀作品须先完成批阅，全班取得原图和正式评价，不�
   const { service, assignment } = await setup();
   const own = await service.submit(assignment.id, samplePhotos, "私密提交说明", "student");
   const another = await service.submitForStudent(assignment.id, "student-2", samplePhotos, "不向全班展示", "teacher");
-  await assert.rejects(service.setExcellent(own.id, true, "teacher"), /先完成批阅/);
+  await assert.rejects(service.setExcellent(own.id, true, "teacher"), /先完成审核/);
   for (const submission of [own, another]) {
     await service.finishAnalysis(submission.id);
     await service.publish(submission.id, sampleReview(), "teacher");
