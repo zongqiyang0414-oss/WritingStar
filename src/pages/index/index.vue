@@ -1,5 +1,7 @@
 <script setup>
 import AssignmentComposer from "../../components/AssignmentComposer.vue";
+import SlideDownPanel from "../../components/SlideDownPanel.vue";
+import SubmissionHistory from "../../components/SubmissionHistory.vue";
 import ClassSelector from "../../components/ClassSelector.vue";
 import ClassStatistics from "../../components/ClassStatistics.vue";
 import InvitationBinding from "../../components/InvitationBinding.vue";
@@ -78,6 +80,7 @@ const { bottomInset: bottomInset } = {
     publishAiBatch,
     startSingleAi,
     refreshAi,
+    reportAiIssue,
     applyAiSuggestions,
     reviewAiSubmission,
     mine: mine,
@@ -85,9 +88,11 @@ const { bottomInset: bottomInset } = {
     isAdmin,
     adminIdentity,
     adminDirty,
+    adminAiIssues,
     adminAction,
     identity: identity,
     myHistory: myHistory,
+    groupedHistory,
     feedback: feedback,
     canSubmit: canSubmit,
     title: title,
@@ -276,6 +281,7 @@ function toggleFeedbackDimension(id) {
             :administrator="adminIdentity"
             :section="screen"
             :busy="busy"
+            :ai-issues="adminAiIssues"
             @navigate="go"
             @action="adminAction"
             @confirm="modal = $event"
@@ -361,6 +367,8 @@ function toggleFeedbackDimension(id) {
                 :busy="busy"
                 @start="startSingleAi"
                 @refresh="refreshAi"
+                @report="reportAiIssue"
+                @resubmit="openSubmit(selectedAssignment)"
                 @review="reviewAiSubmission"
                 @apply="applyAiSuggestions"
                 @feedback="openFeedback(selectedSubmission)"
@@ -374,8 +382,6 @@ function toggleFeedbackDimension(id) {
                 :rows="aiRows"
                 :summary="aiSummary"
                 :busy="busy"
-                @start="beginAiBatch(false)"
-                @retry="beginAiBatch(true)"
                 @publish="publishAiBatch"
                 @view="openAiReview"
                 @review="openReview"
@@ -740,8 +746,8 @@ function toggleFeedbackDimension(id) {
                             </view>
                             <template v-if="isTeacher">
                               <view class="card ai-assignment-entry">
-                                <view class="ai-entry-heading"><view class="ai-entry-symbol">✧</view><view class="grow"><view class="section-title">全班AI批阅结果</view><view class="tiny subtle">学生提交后自动批阅，核对结果后发布</view></view></view>
-                                <view class="ai-entry-counts"><text>处理中 {{ aiSummary.running }}</text><text>待发布 {{ aiSummary.readyToPublish }}</text><text>已发布 {{ aiSummary.published }}</text></view>
+                                <view class="ai-entry-heading"><view class="ai-entry-symbol">✧</view><view class="grow"><view class="section-title">全班AI批阅结果</view></view></view>
+                                <view class="ai-entry-counts"><text>处理中 {{ aiSummary.running + aiSummary.waiting }}</text><text>待发布 {{ aiSummary.readyToPublish }}</text><text>已发布 {{ aiSummary.published }}</text></view>
                                 <button class="primary full-width" :disabled="busy || !aiSummary.readyToPublish" @click="publishAiBatch">{{ busy ? '发布中…' : aiSummary.readyToPublish ? '一键发布 · ' + aiSummary.readyToPublish + ' 份' : aiSummary.running ? 'AI批阅进行中' : '暂无可发布结果' }}</button>
                                 <button class="text-button full-width spaced-small" :disabled="busy" @click="openAiBatch">查看全班进度与结果 ›</button>
                               </view>
@@ -805,8 +811,8 @@ function toggleFeedbackDimension(id) {
                                           {{
                                             "processing" ===
                                             item4.submission.status
-                                              ? "作品处理中"
-                                              : "处理失败，可人工批阅"
+                                              ? "结果待就绪"
+                                              : "结果待就绪"
                                           }}
                                         </view>
                                       </template>
@@ -893,7 +899,7 @@ function toggleFeedbackDimension(id) {
                                       "published" === mine.status
                                         ? "老师已发布反馈，读完建议后可以提交订正。"
                                         : "failed" === mine.status
-                                          ? "处理失败，作品已保留。请重试，或联系老师进行人工批阅。"
+                                          ? "作品已保留，系统会自动重试。仍未完成时可用原图再次分析或报告管理员。"
                                           : "processing" === mine.status
                                             ? "作品已接收，正在处理。你可以稍后回来查看。"
                                             : "作品已提交，可以先查看AI学习建议。老师正式反馈将在复核后单独发布。"
@@ -919,12 +925,12 @@ function toggleFeedbackDimension(id) {
                                         :key="1"
                                         class="secondary"
                                         :disabled="busy"
-                                        @click="(e) => retry(mine)"
+                                        @click="(e) => openAiReview(mine)"
                                       >
                                         {{
                                           "failed" === mine.status
-                                            ? "重新处理"
-                                            : "刷新处理状态"
+                                            ? "查看批阅进度"
+                                            : "查看批阅进度"
                                         }}
                                       </button>
                                     </template>
@@ -1005,41 +1011,7 @@ function toggleFeedbackDimension(id) {
                                   'failed' === selectedSubmission.status
                                 "
                               >
-                                <view :key="0" class="card">
-                                  <view class="empty-state">
-                                    <view class="empty-symbol">
-                                      {{
-                                        "failed" === selectedSubmission.status
-                                          ? "!"
-                                          : "◌"
-                                      }}
-                                    </view>
-                                    <view class="strong">
-                                      {{
-                                        "failed" === selectedSubmission.status
-                                          ? "作品处理失败"
-                                          : "作品正在处理"
-                                      }}
-                                    </view>
-                                    <view class="paragraph small">
-                                      作品已保留。可以重新处理，或直接进行人工批阅。
-                                    </view>
-                                    <button
-                                      class="primary"
-                                      :disabled="busy"
-                                      @click="(e) => retry(selectedSubmission)"
-                                    >
-                                      重新处理
-                                    </button>
-                                    <button
-                                      class="secondary spaced"
-                                      :disabled="busy"
-                                      @click="(e) => manual(selectedSubmission)"
-                                    >
-                                      转入人工批阅
-                                    </button>
-                                  </view>
-                                </view>
+                                <view :key="0" class="card empty-state"><view class="strong">批阅结果待就绪</view><view class="paragraph small subtle">作品已保存，系统正在准备结果。</view><button class="text-button" @click="openAiReview(selectedSubmission)">查看作品与进度 ›</button></view>
                               </template>
                               <template v-else>
                                 <view class="segmented">
@@ -1161,6 +1133,7 @@ function toggleFeedbackDimension(id) {
                                   <view v-if="submissionStudent" class="teacher-submit-selection">本次将为{{ submissionStudent.name }}提交第 {{ (previousSubmission?.version || 0) + 1 }} 版{{ previousSubmission ? '订正作品' : '作品' }}，并标明{{ teacherIdentity.name }}代交。</view>
                                 </view>
                                 <view class="ai-submit-preview"><view class="ai-entry-symbol">✧</view><view class="grow"><view class="strong">提交后，开始AI双写批阅</view><view class="tiny subtle">识别作品 → 分析书写与写作 → 生成学习建议</view><view class="tiny subtle spaced-small">你可以先看AI建议，老师正式反馈单独发布。</view></view></view>
+                                <view v-if="photos.length && photos.every(photo => photo.sample)" class="small subtle spaced-small">已预置示例作品，可直接提交体验。AI评分会标注“示例结果”；自选照片不会套用示例分数。</view>
                                 <view class="upload-area">
                                   <view class="upload-icon"> ＋ </view>
                                   <view class="strong"> 添加作品照片 </view>
@@ -1475,98 +1448,7 @@ function toggleFeedbackDimension(id) {
                               </template>
                               <template v-else>
                                 <template v-if="'records' === screen">
-                                  <view :key="11">
-                                    <view class="section-heading">
-                                      <view class="section-title">
-                                        每一次，都是进步的足迹
-                                      </view>
-                                    </view>
-                                    <view class="small subtle">
-                                      {{ historyStudent?.name }} ·
-                                      {{ myHistory.length }} 次提交
-                                    </view>
-                                    <template
-                                      v-for="item7 in myHistory"
-                                      :key="item7.id"
-                                    >
-                                      <view class="history-card card">
-                                        <view class="card-top">
-                                          <view class="strong">
-                                            {{ assignmentFor(item7).title }}
-                                          </view>
-                                          <text
-                                            :class="[
-                                              'badge',
-                                              statusClass(item7),
-                                            ]"
-                                          >
-                                            {{ statusLabel(item7) }}
-                                          </text>
-                                        </view>
-                                        <view class="small subtle">
-                                          第 {{ item7.version }} 版 ·
-                                          {{ date(item7.submittedAt) }} ·
-                                          {{ item7.photos.length }} 页
-                                          {{ item7.actor === 'teacher' ? ' · ' + (item7.submittedBy?.name || '教师') + '代交' : '' }}
-                                        </view>
-                                        <view v-if="item7.excellent" class="spaced-small"><text class="badge excellent-badge">★ 优秀作业</text></view>
-                                        <view class="history-thumbs">
-                                          <template
-                                            v-for="item8 in item7.photos"
-                                            :key="item8.id"
-                                          >
-                                            <image
-                                              :src="displayPhoto(item8.url)"
-                                              mode="aspectFill"
-                                              lazy-load
-                                            />
-                                          </template>
-                                        </view>
-                                        <template v-if="item7.published">
-                                          <view
-                                            :key="0"
-                                            class="history-score small"
-                                          >
-                                            书写
-                                            {{
-                                              total(item7.published.handwriting)
-                                            }}
-                                            / 100
-                                            <text> · </text>
-                                            写作
-                                            {{
-                                              total(item7.published.composition)
-                                            }}
-                                            / 100
-                                          </view>
-                                        </template>
-                                        <template v-if="item7.published">
-                                          <button
-                                            :key="1"
-                                            class="text-button"
-                                            @click="(a) => openFeedback(item7)"
-                                          >
-                                            查看这一版反馈 ›
-                                          </button>
-                                        </template>
-                                        <template v-else>
-                                          <view
-                                            :key="2"
-                                            class="small subtle spaced-small"
-                                          >
-                                            {{ item7.aiReview ? '老师反馈尚未发布，AI建议单独查看。' : '反馈尚未发布，本轮暂不显示评分。' }}
-                                          </view>
-                                        </template>
-                                        <button v-if="item7.aiReview" class="text-button spaced-small ai-history-entry" :disabled="busy" @click="openAiReview(item7)">{{ item7.aiReview.result ? '查看这一版AI建议' : '查看这一版AI批阅进度' }} ›</button>
-                                      </view>
-                                    </template>
-                                    <template v-if="myHistory.length" />
-                                    <template v-else>
-                                      <view :key="0" class="empty-state">
-                                        还没有提交记录。写好后，来这里看看自己的进步。
-                                      </view>
-                                    </template>
-                                  </view>
+                                  <SubmissionHistory :key="11" :groups="groupedHistory" :student-name="historyStudent?.name" :busy="busy" @feedback="openFeedback" @ai="openAiReview" />
                                 </template>
                                 <template v-else>
                                   <template v-if="'profile' === screen">
@@ -1927,14 +1809,9 @@ function toggleFeedbackDimension(id) {
       />
     </view>
     <!-- #endif -->
-    <template v-if="toast || error">
-      <view :key="0" :class="['notification-toast', { error: !!error }]" :role="error ? 'alert' : 'status'">
-        {{ error || toast }}
-      </view>
-    </template>
+    <SlideDownPanel v-if="toast || error" :key="error || toast" :error="!!error" @dismiss="() => { error = ''; toast = ''; }">{{ error || toast }}</SlideDownPanel>
     <template v-if="modal">
-      <view :key="1" class="modal-overlay" @touchmove.stop.prevent="() => {}">
-        <view class="modal-card">
+      <SlideDownPanel :key="1" modal @dismiss="modal = null">
           <view class="section-title">
             {{ modal.title }}
           </view>
@@ -1949,8 +1826,7 @@ function toggleFeedbackDimension(id) {
               {{ modal.confirm }}
             </button>
           </view>
-        </view>
-      </view>
+      </SlideDownPanel>
     </template>
   </view>
 </template>

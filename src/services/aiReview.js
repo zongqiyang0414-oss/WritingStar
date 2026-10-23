@@ -1,6 +1,6 @@
 import { AdministrationService } from "./administration.js";
 import { sampleReview } from "./seed.js";
-import { DIMENSION_IDS, validateReview } from "./rubric.js";
+import { DIMENSION_IDS, validateReview, total } from "./rubric.js";
 import { activeStudents, formerAssignmentStudents, latestSubmission } from "./school.js";
 import { teacherSummary } from "./identity.js";
 
@@ -20,6 +20,8 @@ export function createAiTask(submission, source, now, fail = false) {
     state: "queued", source, queuedAt: now.toISOString(), startedAt: null,
     completedAt: null, result: null, resultSource: null, error: "",
     simulateFailure: fail,
+    autoRetryCount: 0,
+    reportedAt: null,
     initializeDraft: submission.status === "processing" && !submission.draftRevision,
   };
 }
@@ -69,10 +71,26 @@ function hasDraftContent(review) {
   });
 }
 
+export function aiQualityAttention(submission) {
+  if (!submission || submission.status === "published") return [];
+  const task = submission.aiReview;
+  const reasons = [];
+  if (task?.qualityFlags?.includes("wrongImage")) reasons.push("疑似传错图片");
+  if (task?.qualityFlags?.includes("unreadable")) reasons.push("内容无法有效识别");
+  const review = task?.result;
+  for (const [category, label] of [["handwriting", "书写"], ["composition", "写作"]]) {
+    const score = review?.[category]?.scores ? total(review[category]) : null;
+    if (score !== null && score < 60) reasons.push(`${label}低于60分`);
+  }
+  return reasons;
+}
+
 /** Use the same candidate for the displayed count and the atomic publication. */
 export function aiPublishStatus(submission) {
   const unavailable = { publishable: false, publishSource: null, publishIssue: "" };
   if (!submission || submission.status === "published" || submission.aiReview?.state !== "completed") return unavailable;
+  const attention = aiQualityAttention(submission);
+  if (attention.length) return { ...unavailable, publishIssue: "需逐份审核：" + attention.join("、") };
   const aiError = publicationError(submission.aiReview.result);
   if (aiError) return { ...unavailable, publishIssue: aiError };
   if (submission.status !== "pending") return { ...unavailable, publishIssue: "作品状态待核对，请先单份查看。" };
@@ -98,6 +116,8 @@ export function aiAssignmentRows(state, assignmentId) {
       former: student.archived || student.classId !== assignment.classId,
       eligible: !!submission && submission.status !== "published" && (!submission.aiReview || AI_RETRYABLE.includes(phase)),
       ...aiPublishStatus(submission),
+      qualityReasons: aiQualityAttention(submission),
+      needsAttention: aiQualityAttention(submission).length > 0,
     };
   });
 }
@@ -111,6 +131,8 @@ export function aiAssignmentSummary(rows) {
     running: count(AI_RUNNING), completed: count(["completed"]),
     failed: count(["failed"]), unavailable: count(["unavailable"]),
     published: count(["published"]), notStarted: count(["notStarted"]),
+    attention: rows.filter(item => item.needsAttention).length,
+    waiting: rows.filter(item => ["notStarted", "failed", "unavailable", "cancelled"].includes(item.phase)).length,
     readyToPublish: rows.filter((item) => item.publishable).length,
     requiresReview: rows.filter((item) => item.phase === "completed" && !item.publishable).length,
   };
@@ -134,7 +156,44 @@ export class AiReviewService extends AdministrationService {
       id: task.id, attempt: task.attempt, state: task.state,
       queuedAt: task.queuedAt, startedAt: task.startedAt, completedAt: task.completedAt,
       result: task.result, resultSource: task.resultSource, error: task.error,
+      autoRetryCount: task.autoRetryCount || 0, reportedAt: task.reportedAt || null, qualityFlags: task.qualityFlags || [],
     });
+  }
+  prepareAutoAi() {
+    const candidates = this.state.submissions.filter(item => item.status !== "published" && !item.aiReview && this.latest(item.assignmentId, item.studentId)?.id === item.id);
+    if (!candidates.length) return;
+    const next = this.read();
+    for (const candidate of candidates) {
+      const item = this.get(next, candidate.id);
+      item.aiReview = createAiTask(item, item.actor === "teacher" ? "teacher" : "student", this.clock());
+    }
+    this.commit(next);
+  }
+  async reportAiIssue(submissionId, role) {
+    if (role !== "student") throw new Error("此入口仅供学生报告问题。");
+    const current = this.authorizeAiSubmission(submissionId, role);
+    if (!AI_RETRYABLE.includes(current.aiReview?.state)) throw new Error("当前没有需要报告的AI服务问题。");
+    if (current.aiReview.reportedAt) return;
+    const next = this.read(); this.get(next, submissionId).aiReview.reportedAt = this.clock().toISOString(); this.commit(next);
+  }
+  technicalAiIssues(organizationId, role) {
+    this.managedOrganization(organizationId, role);
+    const classIds = new Set(this.state.classes.filter(item => item.organizationId === organizationId).map(item => item.id));
+    return this.state.submissions.filter(item => {
+      const assignment = this.state.assignments.find(a => a.id === item.assignmentId);
+      return classIds.has(assignment?.classId) && this.latest(item.assignmentId, item.studentId)?.id === item.id && item.status !== "published" && item.aiReview?.reportedAt && AI_RETRYABLE.includes(item.aiReview.state);
+    }).map(item => ({ id: item.id, assignmentTitle: this.state.assignments.find(a => a.id === item.assignmentId)?.title, studentName: this.state.students.find(s => s.id === item.studentId)?.name, reportedAt: item.aiReview.reportedAt, reason: item.aiReview.state === "failed" ? "AI服务处理失败" : "暂未取得分析结果" }));
+  }
+  async retryAiIssue(input, role) {
+    const current = this.get(this.state, input.submissionId);
+    const assignment = this.state.assignments.find(item => item.id === current.assignmentId);
+    const schoolClass = this.managedClass(assignment?.classId || "", role);
+    if (current.status === "published" || !AI_RETRYABLE.includes(current.aiReview?.state) || this.latest(current.assignmentId, current.studentId)?.id !== current.id) throw new Error("当前问题已处理或作品已更新。");
+    const next = this.read(), item = this.get(next, current.id);
+    item.aiReview = createAiTask(item, "admin", this.clock());
+    if (item.status === "failed") item.status = "processing";
+    this.recordAdministration(next, schoolClass.organizationId, "处理AI服务问题并重新分析", role);
+    this.commit(next);
   }
   async startAiReview(submissionId, role, fail = false) {
     const submission = this.authorizeAiSubmission(submissionId, role);
@@ -215,6 +274,14 @@ export class AiReviewService extends AdministrationService {
       const elapsed = now.getTime() - Date.parse(task.startedAt);
       if (elapsed >= 2600) settleAiTask(item, now, task.simulateFailure);
       else if (elapsed >= 1100) task.state = "reviewing";
+      if (AI_RETRYABLE.includes(task.state)) {
+        if ((task.autoRetryCount || 0) < 1) {
+          const retry = createAiTask(item, task.source, now, task.simulateFailure);
+          retry.autoRetryCount = 1;
+          item.aiReview = retry;
+          if (item.status === "failed") item.status = "processing";
+        } else task.reportedAt ||= now.toISOString();
+      }
     }
     const working = next.submissions.filter((item) => ["reading", "reviewing"].includes(item.aiReview?.state)).length;
     const waiting = next.submissions.filter((item) => item.aiReview?.state === "queued")

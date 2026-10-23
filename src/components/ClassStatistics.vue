@@ -84,20 +84,10 @@ const emit = defineEmits(["assignment", "students", "update:panel"]);
             {{ item1.ongoing ? "进行中" : "已截止" }}
           </text>
         </view>
-        <view class="assignment-progress">
-          <view
-            :style="{
-              width:
-                (item1.counts.total
-                  ? (item1.counts.completed / item1.counts.total) * 100
-                  : 0) + '%',
-            }"
-          />
-        </view>
-        <view class="task-counts">
-          <text> 未提交 {{ item1.counts.missing }} </text>
-          <text> 待批阅 {{ item1.counts.pending }} </text>
-          <text> 已完成 {{ item1.counts.completed }} </text>
+        <view class="assignment-report-counts">
+          <view><text class="metric-number">{{ item1.counts.missing }}</text><view class="small subtle">未提交</view></view>
+          <view><text class="metric-number">{{ item1.counts.pending }}</text><view class="small subtle">待批阅</view></view>
+          <view><text class="metric-number">{{ item1.counts.completed }}</text><view class="small subtle">已完成</view></view>
         </view>
         <view class="card-bottom">
           <text class="small subtle">

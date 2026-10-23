@@ -1,17 +1,19 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import ReviewEditor from "./ReviewEditor.vue";
-import { AI_RUNNING, AI_RETRYABLE } from "../services/aiReview.js";
+import { AI_RUNNING, AI_RETRYABLE, aiQualityAttention } from "../services/aiReview.js";
 import { displayPhoto, presentReview } from "../services/presentation.js";
 import { rubric, total } from "../services/rubric.js";
 
 const props = defineProps({ submission: {}, assignment: {}, student: {}, task: {}, teacher: Boolean, busy: Boolean });
-const emit = defineEmits(["start", "refresh", "review", "apply", "feedback", "back"]);
+const emit = defineEmits(["start", "refresh", "review", "apply", "feedback", "report", "resubmit", "back"]);
 const category = ref("handwriting"), collapsedDimensions = ref([]), photoIndex = ref(0), showWork = ref(false);
 const editedReview = ref(null), editing = ref(false);
 const phase = computed(() => props.task?.state || "notStarted");
 const running = computed(() => AI_RUNNING.includes(phase.value));
 const result = computed(() => editedReview.value);
+const attention = computed(() => aiQualityAttention(props.submission));
+const wrongPhoto = computed(() => props.task?.qualityFlags?.some(flag => ["wrongImage", "unreadable"].includes(flag)));
 // Polling replaces task snapshots. Reset edits only when the actual result changes.
 watch(() => JSON.stringify([props.submission?.id, props.task?.id, props.task?.result || null]), () => {
   editedReview.value = props.task?.result ? presentReview(props.task.result) : null;
@@ -58,6 +60,7 @@ function preview() {
     </view>
 
     <template v-else-if="result">
+      <view v-if="attention.length" class="notice">{{ attention.join('、') }}{{ teacher ? '，请逐份审核' : '，请核对本次作品' }}</view>
       <view class="ai-result-source"><view class="section-title">AI批阅结果</view><text v-if="task.resultSource === 'sample'" class="ai-example-tag">示例结果</text></view>
       <view class="ai-score-grid">
         <view class="ai-score-card"><view class="small">书写评价</view><view class="ai-score-value">{{ total(result.handwriting) ?? '—' }}<text> / 100</text></view><view class="tiny subtle">笔画 · 结构 · 章法</view></view>
@@ -87,10 +90,16 @@ function preview() {
     </template>
 
     <view v-else class="card ai-empty-result">
-      <view class="section-title">{{ phase === 'notStarted' ? '开始这份作品的AI批阅' : phase === 'cancelled' ? '等待老师的建议' : '作品和提交记录都已保留' }}</view>
-      <view v-if="task?.error" class="paragraph small subtle">{{ task.error }}</view>
-      <button v-if="!submission.published && (phase === 'notStarted' || AI_RETRYABLE.includes(phase))" class="primary full-width spaced" :disabled="busy" @click="emit('start')">{{ busy ? '提交中…' : phase === 'notStarted' ? '开始AI批阅' : '重试AI批阅' }}</button>
+      <view class="section-title">{{ teacher ? (wrongPhoto ? '作品需要核对' : '批阅结果待就绪') : wrongPhoto ? '请重新上传清晰、正确的作品' : '作品已保存，AI结果正在准备' }}</view>
+      <view v-if="teacher && wrongPhoto" class="paragraph small">{{ attention.join('、') }}</view>
+      <template v-if="!teacher && !submission.published">
+        <view v-if="AI_RETRYABLE.includes(phase)" class="paragraph small subtle">系统已自动重试，仍未取得结果。原作品和提交记录保留，可直接用原图再次分析。</view>
+        <button v-if="AI_RETRYABLE.includes(phase) && !wrongPhoto" class="primary full-width spaced" :disabled="busy" @click="emit('start')">使用原图重新分析</button>
+        <button v-if="AI_RETRYABLE.includes(phase) && !task.reportedAt" class="text-button full-width spaced-small" :disabled="busy" @click="emit('report')">报告学校管理员</button>
+        <view v-if="task?.reportedAt" class="tiny subtle spaced-small">问题已报告学校管理员</view>
+      </template>
     </view>
+    <button v-if="!teacher && wrongPhoto && !submission.published" class="primary full-width spaced" :disabled="busy" @click="emit('resubmit')">重新上传作品</button>
 
     <view class="card ai-original-work">
       <button class="ai-original-toggle" :aria-expanded="showWork" @click="showWork = !showWork"><view><view class="strong">作业详情</view><view class="tiny subtle">第 {{ submission.version }} 版 · {{ submission.photos.length }} 页 · 原作品保留</view></view><text>{{ showWork ? '收起 ⌃' : '展开 ⌄' }}</text></button>

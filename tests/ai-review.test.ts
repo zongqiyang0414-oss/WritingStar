@@ -27,6 +27,7 @@ function batchSeed() {
 }
 function finishWorker(env) {
   env.service.advanceAiReviews(); env.advance(1200); env.service.advanceAiReviews(); env.advance(1800); env.service.advanceAiReviews();
+  env.advance(3000); env.service.advanceAiReviews();
 }
 
 test('学生提交与AI任务原子保存，逐步展示进度，AI结果可见而教师草稿仍隐藏', async () => {
@@ -103,7 +104,7 @@ test('AI批阅不覆盖教师已有草稿，单独批量重试失败项不会重
   const complete = service.aiResult('submission-1', 'teacher');
   assert.deepEqual((await service.startAiBatch('assignment-1', 'teacher', true)).queued, ['s2-latest']);
   finishWorker(env);
-  assert.equal(service.aiResult('s2-latest', 'teacher').attempt, 2);
+  assert.equal(service.aiResult('s2-latest', 'teacher').attempt, 3);
   assert.equal(service.aiResult('s2-latest', 'teacher').state, 'completed');
   assert.deepEqual(service.aiResult('submission-1', 'teacher'), complete);
 });
@@ -127,7 +128,7 @@ test('失败后重试保留原作品，结果完成后重复请求保持同一�
   assert.equal(service.aiResult(submission.id, 'student').state, 'failed');
   await service.startAiReview(submission.id, 'student'); finishWorker(env);
   const complete = service.aiResult(submission.id, 'student');
-  assert.equal(complete.attempt, 2); assert.equal(complete.state, 'completed');
+  assert.equal(complete.attempt, 3); assert.equal(complete.state, 'completed');
   await service.startAiReview(submission.id, 'student');
   assert.deepEqual(service.aiResult(submission.id, 'student'), complete);
   assert.equal(service.read().submissions.filter(item => item.id === submission.id).length, 1);

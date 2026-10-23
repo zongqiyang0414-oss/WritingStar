@@ -14,6 +14,7 @@ import {
   prepareTeacherState,
   sampleReview,
 } from "./seed.js";
+import { withRevisionPractice } from "./revisionPractice.js";
 import { emptyReview, validateReview } from "./rubric.js";
 import { migrateStudentEntry } from "./migration.js";
 import { withClassPractice } from "./classPractice.js";
@@ -478,6 +479,10 @@ export class MockService extends AiReviewService {
       assignmentTemplates: templates.filter((item) => item.id !== id),
     });
   }
+  prepareRevisionPractice() {
+    const next = withRevisionPractice(this.state, this.clock());
+    if (next !== this.state) this.commit(next);
+  }
   prepareClassPractice() {
     const e = withClassPractice(this.state, this.clock());
     e !== this.state && this.commit(e);
@@ -496,7 +501,7 @@ function saveSubmission(service, assignmentId, student, photos, note, role, fail
     if (new Set(photos.map((e) => e.id)).size !== photos.length)
       throw new Error("图片重复，请重新选择。");
     const u = latestSubmission(service.state, assignmentId, student.id);
-    if (u && "published" !== u.status)
+    if (u && "published" !== u.status && !u.aiReview?.qualityFlags?.some(flag => ["wrongImage", "unreadable"].includes(flag)))
       throw new Error("本轮作品已提交，请等待老师发布反馈后再订正。");
     if (fail) throw new Error("提交失败，图片已保留，请重试。");
     const o = service.clock().toISOString(),

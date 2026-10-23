@@ -23,6 +23,7 @@ export type Screen =
   | "classMembers"
   | "adminClasses"
   | "adminTeachers"
+  | "adminAiIssues"
   | "adminStudents"
   | "aiReview"
   | "aiBatch"
@@ -30,7 +31,7 @@ export type Screen =
   | "excellentWork"
   | "growth";
 // Administration uses separate navigation and does not grant teaching or feedback access.
-export type AdminScreen = "home" | "adminClasses" | "adminTeachers" | "adminStudents" | "profile";
+export type AdminScreen = "home" | "adminClasses" | "adminTeachers" | "adminStudents" | "adminAiIssues" | "profile";
 
 export interface Administrator {
   id: string;
@@ -153,13 +154,14 @@ export interface Submission {
   publishedAt: string | null;
   publishedBy?: TeacherSummary;
   draftRevision?: number;
+  example?: boolean;
   aiReview?: AiReviewTask;
 }
 export interface AiReviewTask {
   id: string;
   attempt: number;
   state: "queued" | "reading" | "reviewing" | "completed" | "failed" | "unavailable" | "cancelled";
-  source: "student" | "teacher" | "teacher-batch";
+  source: "student" | "teacher" | "teacher-batch" | "admin";
   queuedAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -169,6 +171,9 @@ export interface AiReviewTask {
   /** Local-only simulation flags, not an agreed backend contract. */
   simulateFailure?: boolean;
   initializeDraft?: boolean;
+  autoRetryCount?: number;
+  reportedAt?: string | null;
+  qualityFlags?: Array<"wrongImage" | "unreadable">;
 }
 export interface PrototypeState {
   schemaVersion: 6;
@@ -178,6 +183,7 @@ export interface PrototypeState {
   administrators: Administrator[];
   administrationEvents: AdministrationEvent[];
   classPracticeVersion?: number;
+  revisionPracticeVersion?: 1;
   accounts: { student: StudentAccount };
   teacherAccount: TeacherAccount;
   legacyParentAccount?: StudentAccount;

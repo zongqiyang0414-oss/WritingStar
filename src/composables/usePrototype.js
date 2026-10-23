@@ -36,6 +36,7 @@ import {
   studentRankingModel,
   studentGrowthModel,
   teachingClassesModel,
+  submissionHistoryGroups,
 } from "../services/pageModels.js";
 
 export function usePrototype() {
@@ -111,7 +112,7 @@ export function usePrototype() {
   let toastTimer, errorTimer;
   watch(error, (message) => {
     clearTimeout(errorTimer);
-    if (message) errorTimer = setTimeout(() => { error.value = ""; }, 3600);
+    if (message) errorTimer = setTimeout(() => { error.value = ""; }, 2200);
   });
   const photos = ref([]),
     note = ref(""),
@@ -206,7 +207,7 @@ export function usePrototype() {
         ).length,
     ),
     scopedAssignments = computed(() =>
-      classAssignments(state.value, currentClass.value.id),
+      classAssignments(state.value, currentClass.value.id).reverse(),
     ),
     assignmentCountsById = computed(() =>
       new Map(scopedAssignments.value.map((assignment) => [
@@ -318,6 +319,7 @@ export function usePrototype() {
         })
         .sort((e, a) => a.submittedAt.localeCompare(e.submittedAt)),
     ),
+    groupedHistory = computed(() => submissionHistoryGroups(state.value, historyStudent.value?.id || "")),
     feedback = computed(() => {
       var e, a;
       return selectedSubmission.value?.published &&
@@ -340,7 +342,7 @@ export function usePrototype() {
           !boundStudent.value ||
           boundStudent.value.archived ||
           !selectedAssignment.value ||
-          (mine.value && "published" !== mine.value.status) ||
+          (mine.value && "published" !== mine.value.status && !mine.value.aiReview?.qualityFlags?.some(flag => ["wrongImage", "unreadable"].includes(flag))) ||
           expired(selectedAssignment.value)
         ),
     ),
@@ -351,6 +353,7 @@ export function usePrototype() {
           adminClasses: "班级管理",
           adminTeachers: "教师管理",
           adminStudents: "学生管理",
+          adminAiIssues: "AI服务问题",
           statistics: "学情",
           statisticsStudents: "全班学生学情",
           statisticsStudent: "学生成长",
@@ -446,7 +449,7 @@ export function usePrototype() {
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => {
       toast.value = "";
-    }, 3200);
+    }, 1800);
   }
   function navigate(e) {
     screen.value = e;
@@ -473,7 +476,7 @@ export function usePrototype() {
   }
   function go(e) {
     if (isAdmin.value) {
-      if (["home", "adminClasses", "adminTeachers", "adminStudents", "profile"].includes(e) && screen.value !== e)
+      if (["home", "adminClasses", "adminTeachers", "adminStudents", "adminAiIssues", "profile"].includes(e) && screen.value !== e)
         guard(() => { adminDirty.value = false; navigate(e); });
       return;
     }
@@ -597,8 +600,8 @@ export function usePrototype() {
       const publishedCount = result.published.length;
       const pendingCount = result.requiresReview.length;
       notify(publishedCount
-        ? `已发布 ${publishedCount} 份反馈${pendingCount ? `，${pendingCount} 份评价待补全` : ""}`
-        : pendingCount ? `${pendingCount} 份评价待补全，请逐份核对` : "暂无可发布结果");
+        ? `已发布 ${publishedCount} 份反馈${pendingCount ? `，${pendingCount} 份需逐份审核` : ""}`
+        : pendingCount ? `${pendingCount} 份需逐份审核` : "暂无可发布结果");
     });
   }
   function openExcellentWorks(assignment = null) {
@@ -709,7 +712,7 @@ export function usePrototype() {
     aiTask,
     aiRows,
     aiSummary,
-    aiStateLabel: (submission) => AI_LABELS[submission?.aiReview?.state || "notStarted"],
+    aiStateLabel: (submission) => isTeacher.value && ["failed", "unavailable", "notStarted", "cancelled"].includes(submission?.aiReview?.state || "notStarted") ? "结果待就绪" : AI_LABELS[submission?.aiReview?.state || "notStarted"],
     openAiReview,
     beginAiBatch,
     publishAiBatch,
@@ -717,10 +720,14 @@ export function usePrototype() {
       if (isTeacher.value && selectedAssignment.value) guard(() => navigate("aiBatch"));
     },
     startSingleAi: async () => {
-      if (!selectedSubmission.value) return;
+      if (role.value !== "student" || !selectedSubmission.value) return;
       await runAction(async () => {
         await service.startAiReview(submissionId.value, role.value, failAnalysis.value);
       });
+    },
+    reportAiIssue: async () => {
+      if (role.value !== "student" || !selectedSubmission.value) return;
+      await runAction(async () => { await service.reportAiIssue(submissionId.value, role.value); notify("已报告学校管理员"); });
     },
     refreshAi: advanceAiQueue,
     applyAiSuggestions: async (editedReview) => {
@@ -749,8 +756,13 @@ export function usePrototype() {
     isAdmin,
     adminIdentity,
     adminDirty,
+    adminAiIssues: computed(() => {
+      state.value;
+      return isAdmin.value && adminIdentity.value && currentOrganization.value ? service.technicalAiIssues(currentOrganization.value.id, role.value) : [];
+    }),
     adminAction: async function ({ kind, data, success, message }) {
       const handlers = {
+        retryAiIssue: service?.retryAiIssue,
         saveClass: service?.saveClass,
         createTeacher: service?.createTeacher,
         setClassTeachers: service?.setClassTeachers,
@@ -770,6 +782,7 @@ export function usePrototype() {
     },
     identity,
     myHistory,
+    groupedHistory,
     feedback,
     canSubmit,
     title,
@@ -833,7 +846,7 @@ export function usePrototype() {
         scopedAssignments.value.some((a) => a.id === e.id) &&
         guard(() => {
           assignmentId.value = e.id;
-          photos.value = [];
+          photos.value = clone(samplePhotos);
           note.value = "";
           failSubmit.value = false;
           failAnalysis.value = false;

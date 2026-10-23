@@ -123,7 +123,7 @@ test("学生与教师代交在提交时自动入AI队列，完成后即可批量
   const teacher = await service.submitForStudent(assignment.id, "student-2", samplePhotos, "", "teacher");
   const uploaded = await service.submitForStudent(assignment.id, "student-3", [{ id: "uploaded", url: "data:image/png;base64,fixture", name: "照片" }], "", "teacher");
   assert.ok([student, teacher, uploaded].every((item: any) => item.aiReview.state === "queued"));
-  service.advanceAiReviews(); env.advance(1200); service.advanceAiReviews(); env.advance(1800); service.advanceAiReviews();
+  service.advanceAiReviews(); env.advance(1200); service.advanceAiReviews(); env.advance(1800); service.advanceAiReviews(); env.advance(3000); service.advanceAiReviews();
   const summary = aiAssignmentSummary(aiAssignmentRows(service.read(), assignment.id));
   assert.equal(summary.readyToPublish, 2); assert.equal(summary.unavailable, 1);
   assert.deepEqual((await service.publishAiBatch(assignment.id, "teacher")).published, [student.id, teacher.id]);

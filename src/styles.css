@@ -2100,7 +2100,7 @@ textarea:focus {
   margin-bottom: 18px;
   padding: 10px 12px;
   border: 1px solid #e8eee8;
-  background: #f7faf6;
+  background: #ffffff;
   border-radius: 10px;
 }
 .organization-current {
@@ -2171,3 +2171,7 @@ textarea:focus {
   }
 }
 /* #endif */
+
+.assignment-report-counts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 20px 0 16px; text-align: center; }
+.assignment-report-counts .metric-number { font-size: 29px; font-family: Georgia, serif; line-height: 1.4; color: #254b3e; }
+.assignment-report-counts > view + view { border-left: 1px solid #e4ece4; }

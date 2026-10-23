@@ -23,5 +23,7 @@ export function createPrototypeService() {
     },
   });
   e.prepareClassPractice();
+  e.prepareRevisionPractice();
+  e.prepareAutoAi();
   return e;
 }

@@ -2,7 +2,7 @@
 import { computed, onUnmounted, ref, watch } from "vue";
 import { activeStudents } from "../services/school.js";
 
-const props = defineProps({ state: {}, organization: {}, administrator: {}, section: {}, busy: Boolean });
+const props = defineProps({ state: {}, organization: {}, administrator: {}, section: {}, aiIssues: { default: () => [] }, busy: Boolean });
 const emit = defineEmits(["navigate", "action", "confirm", "dirty"]);
 const mode = ref("list"), classId = ref(""), query = ref(""), status = ref("active");
 const form = ref({}), baseline = ref(""), selectedTeachers = ref([]);
@@ -217,6 +217,7 @@ function time(value) { const date = new Date(value); return `${date.getMonth() +
     </template>
 
     <template v-else-if="mode === 'list' && section === 'home'">
+      <button class="card full-width" :disabled="busy" @click="emit('navigate', 'adminAiIssues')"><view class="card-top"><view class="strong">AI服务问题</view><text>{{ aiIssues.length }} 项待处理 ›</text></view></button>
       <view class="greeting-row"><view><view class="eyebrow">学校管理 / ADMINISTRATION</view><view class="greeting">{{ administrator.name }}，你好<text class="greeting-dot">。</text></view></view><view class="admin-seal">管</view></view>
       <view class="admin-hero"><view class="tiny">{{ organization.name }}</view><view class="admin-hero-title">让每个孩子<br />找到自己的班级</view><view class="small">维护班级与师生档案，让日常教学有序开展。</view><view class="admin-hero-orbit">✧</view></view>
       <view class="admin-stats"><view><view class="admin-stat-number">{{ classes.length }}</view><view class="tiny subtle">班级</view></view><view><view class="admin-stat-number">{{ students.filter(item => !item.archived).length }}</view><view class="tiny subtle">在班学生</view></view><view><view class="admin-stat-number">{{ teachers.length }}</view><view class="tiny subtle">本校教师</view></view></view>
@@ -230,6 +231,15 @@ function time(value) { const date = new Date(value); return `${date.getMonth() +
       <view v-if="waitingClasses.length" class="notice">{{ waitingClasses.length }} 个班级尚未分配任教老师，请在班级管理中完善。</view>
       <view class="section-heading"><view class="section-title">最近管理记录</view><text class="tiny subtle">本校动态</text></view>
       <view class="card admin-events"><view v-for="event in events" :key="event.id" class="admin-event"><view class="tiny-dot" /><view class="grow"><view class="small">{{ event.description }}</view><view class="tiny subtle">{{ event.administratorName }} · {{ time(event.createdAt) }}</view></view></view><view v-if="!events.length" class="small subtle">还没有管理记录。添加教师、建班、分配和调班操作会记录在这里。</view></view>
+    </template>
+
+    <template v-else-if="mode === 'list' && section === 'adminAiIssues'">
+      <view class="section-heading"><view class="section-title">AI服务问题</view><button class="text-button" @click="emit('navigate', 'home')">返回管理台 ›</button></view>
+      <view v-for="issue in aiIssues" :key="issue.id" class="card">
+        <view class="strong">{{ issue.studentName }} · {{ issue.assignmentTitle }}</view><view class="paragraph small subtle">{{ issue.reason }} · {{ time(issue.reportedAt) }}</view>
+        <button class="secondary" :disabled="busy" @click="save('retryAiIssue', { submissionId: issue.id }, '已安排重新分析', () => {})">安排重新分析</button>
+      </view>
+      <view v-if="!aiIssues.length" class="card empty-state">暂无待处理的AI服务问题</view>
     </template>
 
     <template v-else-if="mode === 'list' && section === 'profile'">

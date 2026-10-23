@@ -28,7 +28,7 @@ export function classStatisticsModel(state, classId, now) {
     const assignments = classAssignments(state, classId);
     return {
       studentCount: students.length,
-      assignments: assignments.map((assignment) => ({
+      assignments: [...assignments].reverse().map((assignment) => ({
         id: assignment.id,
         title: assignment.title,
         dueAt: assignment.dueAt,
@@ -193,4 +193,32 @@ export function teachingClassesModel(state, classes, classId, query = "") {
         student.studentNumber?.toLowerCase().includes(normalizedQuery),
     ),
   };
+}
+
+
+export function submissionHistoryGroups(state, studentId) {
+  return cachedModel(state, "records", studentId, () => {
+    const assignments = new Map(state.assignments.map(item => [item.id, item]));
+    const groups = new Map();
+    for (const submission of state.submissions) {
+      if (submission.studentId !== studentId || !assignments.has(submission.assignmentId)) continue;
+      const assignment = assignments.get(submission.assignmentId);
+      if (!groups.has(assignment.id)) groups.set(assignment.id, { id: assignment.id, title: assignment.title, createdAt: assignment.createdAt, versions: [] });
+      groups.get(assignment.id).versions.push({
+        id: submission.id, assignmentId: assignment.id, version: submission.version,
+        submittedAt: submission.submittedAt, date: formatDate(submission.submittedAt, true),
+        pageCount: submission.photos.length, published: !!submission.published,
+        handwriting: submission.published ? total(submission.published.handwriting) : null,
+        composition: submission.published ? total(submission.published.composition) : null,
+        submittedBy: submission.actor === "teacher" ? submission.submittedBy?.name || "教师" : "",
+        example: !!submission.example,
+      });
+    }
+    return [...groups.values()].map(group => {
+      group.versions.sort((a,b) => b.version - a.version || b.submittedAt.localeCompare(a.submittedAt));
+      const scored = group.versions.filter(item => item.published);
+      return { ...group, latest: group.versions[0], latestScore: scored[0] || null,
+        points: [...scored].reverse().map(item => ({ id: item.id, label: `第 ${item.version} 版`, note: item.date, detail: `第 ${item.version} 版 · 已发布反馈`, handwriting: item.handwriting, composition: item.composition })) };
+    }).sort((a,b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+  });
 }

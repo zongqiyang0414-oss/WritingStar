@@ -116,7 +116,7 @@ test("班级统计分别保留最新提交状态与最近已发布成绩，排�
     { id: "first", ongoing: true, counts: { total: 4, missing: 1, pending: 1, completed: 2 } },
     { id: "second", ongoing: false, counts: { total: 4, missing: 2, pending: 0, completed: 2 } },
     { id: "empty", ongoing: false, counts: { total: 4, missing: 4, pending: 0, completed: 0 } },
-  ]);
+  ].reverse());
   assert.deepEqual(model.trend.map(({ id, handwriting, composition, note }) => ({
     id, handwriting, composition, note,
   })), [
