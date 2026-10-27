@@ -3,9 +3,10 @@ import { canResubmit } from "../services/submissionPolicy.js";
 import { computed, ref } from "vue";
 import { AI_RUNNING } from "../services/aiReview.js";
 
-const props = defineProps({ assignment: {}, rows: {}, summary: {}, busy: Boolean });
+const props = defineProps({ assignment: {}, rows: {}, summary: {}, busy: Boolean, viewState: Object });
 const emit = defineEmits(["publish", "view", "review", "feedback", "allow-resubmission"]);
-const filter = ref("all"), query = ref("");
+const filter = computed({ get: () => props.viewState.filter, set: value => { props.viewState.filter = value; } });
+const query = computed({ get: () => props.viewState.query, set: value => { props.viewState.query = value; } });
 const filters = [
   { id: "all", label: "全部" },
   { id: "running", label: "处理中" },
@@ -82,7 +83,7 @@ function rowDescription(row) {
     <view v-if="filter === 'attention'" class="small subtle ai-batch-filter-note">展示任一项低于60分、疑似传错图片或无法有效识别的作品；需逐份审核，不参与一键审核。</view>
     <view v-for="row in visibleRows" :key="row.student.id" class="card ai-batch-row">
       <view class="ai-batch-row-top"><view class="avatar pale">{{ row.student.initial }}</view><view class="grow"><view class="strong">{{ row.student.name }}<text v-if="row.former" class="tiny subtle"> · 已离班</text></view><view class="tiny subtle">{{ row.submission ? row.submission.photos.length + ' 页' : row.student.studentNumber ? '学号 ' + row.student.studentNumber : '还没有提交作品' }}</view></view><text :class="['ai-row-status', tone(row)]">{{ rowStatus(row) }}</text></view>
-      <view v-if="row.submission && !row.former" class="ai-batch-row-bottom"><text class="tiny subtle">{{ canResubmit(row.submission) ? '等待学生更新作品' : '提交后锁定' }}</text><text v-if="canResubmit(row.submission)" class="tiny subtle resubmission-agreed">已同意重新提交</text><button v-else class="text-button" :disabled="busy" @click="emit('allow-resubmission', row.submission)">同意重新提交</button></view>
+      <view v-if="row.submission && !row.former" class="ai-batch-row-bottom ai-resubmission-row"><text class="tiny subtle">{{ canResubmit(row.submission) ? '等待学生更新作品' : '若需要学生订正/重新提交作业，请点击右侧“同意学生重新提交作业”' }}</text><text v-if="canResubmit(row.submission)" class="tiny subtle resubmission-agreed">已同意重新提交</text><button v-else class="text-button" :disabled="busy" @click="emit('allow-resubmission', row.submission)">同意学生重新提交作业</button></view>
       <view v-if="row.submission" class="ai-batch-row-bottom"><text class="tiny subtle">{{ rowDescription(row) }}</text><button class="text-button" :disabled="busy" @click="openRow(row)">查看详情 ›</button></view>
     </view>
     <view v-if="!visibleRows.length" class="card empty-state">{{ query ? '没有找到对应学生。' : '当前筛选下暂无学生。' }}</view>

@@ -65,17 +65,41 @@ export function downloadAnswerCard(assignment, card, page) {
   const link = document.createElement("a"); link.href = answerCardImage(assignment, card, page, 2);
   link.download = `${assignment.title}-${card.studentName}-第${page}页.png`; link.click();
 }
-export function printAnswerCards(assignment, cards) {
-  const popup = window.open("", "_blank");
-  if (!popup) throw new Error("浏览器阻止了打印窗口，请允许弹出窗口后重试。");
-  const doc = popup.document; doc.title = "写字星 · 答题卡打印";
-  const style = doc.createElement("style");
-  style.textContent = "@page{size:A4;margin:0}body{margin:0;background:#e6ece7;font-family:sans-serif}img{display:block;width:210mm;height:297mm;margin:8mm auto;break-after:page}button{display:block;margin:24px auto;padding:12px 28px;background:#257b61;color:white;border:0;border-radius:10px;cursor:pointer}@media print{body{background:white}img{margin:0}button{display:none}}";
-  doc.head.append(style);
-  const button = doc.createElement("button"); button.textContent = "打印 / 另存为 PDF（A4，缩放 100%）"; button.onclick = () => popup.print(); doc.body.append(button);
-  for (const card of cards) for (let page = 1; page <= assignment.paperPacket.pages; page++) {
-    const img = doc.createElement("img"); img.alt = `${card.studentName} 第${page}页`; img.src = answerCardImage(assignment, card, page); doc.body.append(img);
-  }
-  popup.focus();
+export async function printAnswerCards(assignment, cards, onProgress = () => {}) {
+  if (!cards.length) throw new Error("暂无可打印的答题卡。");
+  // A same-page frame avoids popup blockers. Generate one page at a time so a
+  // whole class does not allocate a hundred large canvases/data URLs at once.
+  const frame = document.createElement("iframe");
+  frame.title = `${assignment.title} · 答题卡打印`;
+  frame.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0";
+  document.body.append(frame);
+  const urls = [], doc = frame.contentDocument;
+  let cleanupTimer;
+  const cleanup = () => { clearTimeout(cleanupTimer); frame.remove(); for (const url of urls) URL.revokeObjectURL(url); };
+  try {
+    doc.title = frame.title;
+    const style = doc.createElement("style");
+    style.textContent = "@page{size:A4;margin:0}html,body{margin:0;padding:0}img{display:block;width:210mm;height:297mm;break-after:page;page-break-after:always}img:last-child{break-after:auto;page-break-after:auto}";
+    doc.head.append(style);
+    const total = cards.length * assignment.paperPacket.pages;
+    let completed = 0;
+    for (const card of cards) for (let page = 1; page <= assignment.paperPacket.pages; page++) {
+      const canvas = document.createElement("canvas"); canvas.width = CARD_WIDTH * 1.5; canvas.height = CARD_HEIGHT * 1.5;
+      const ctx = canvas.getContext("2d"); ctx.scale(1.5, 1.5); drawAnswerCard(ctx, assignment, card, page);
+      const blob = await new Promise((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("答题卡生成失败，请重试。")), "image/png"));
+      canvas.width = canvas.height = 0;
+      const url = URL.createObjectURL(blob); urls.push(url);
+      const img = doc.createElement("img"); img.alt = `${card.studentName} 第${page}页`;
+      const loaded = new Promise((resolve, reject) => { img.onload = resolve; img.onerror = () => reject(new Error("打印图片加载失败，请重试。")); });
+      img.src = url; doc.body.append(img); await loaded;
+      onProgress(++completed, total);
+      if (completed % 4 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    if (doc.fonts?.ready) await doc.fonts.ready;
+    frame.contentWindow.addEventListener("afterprint", cleanup, { once: true });
+    // Fallback for browsers without afterprint, including a cancelled dialog.
+    cleanupTimer = setTimeout(cleanup, 5 * 60 * 1000);
+    frame.contentWindow.focus(); frame.contentWindow.print();
+  } catch (failure) { cleanup(); throw failure; }
 }
 // #endif

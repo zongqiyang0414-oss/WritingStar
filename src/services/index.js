@@ -23,6 +23,7 @@ export function createPrototypeService() {
     },
   });
   e.prepareClassPractice();
+  e.preparePaperCards();
   e.prepareAutoAi();
   return e;
 }

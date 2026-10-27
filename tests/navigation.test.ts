@@ -28,7 +28,8 @@ async function setup() {
   await service.bindInvitation('JS2026', 'teacher');
   await service.signIn('student');
   await service.bindInvitation('XS2026', 'student');
-  const shows = [], hides = [], disposals = [];
+  const shows = [], hides = [], disposals = [], scrolls = [];
+  let pageScroll;
   const modules = {
     '../platform/photos.js': photos,
     '../services/identity.js': identity,
@@ -47,6 +48,7 @@ async function setup() {
     '@dcloudio/uni-app': {
       onShow: callback => shows.push(callback),
       onHide: callback => hides.push(callback),
+      onPageScroll: callback => { pageScroll = callback; },
     },
   };
   const ast = parse(fs.readFileSync(new URL('../src/composables/usePrototype.js', import.meta.url), 'utf8'), { sourceType: 'module' });
@@ -54,7 +56,7 @@ async function setup() {
     Date, console,
     setTimeout: () => 1, clearTimeout: () => {},
     setInterval: () => 1, clearInterval: () => {},
-    uni: { pageScrollTo: () => {} },
+    uni: { pageScrollTo: options => scrolls.push(options.scrollTop) },
   };
   const statements = [];
   for (const statement of ast.program.body) {
@@ -68,7 +70,7 @@ async function setup() {
   ast.program.body = statements;
   vm.createContext(sandbox);
   vm.runInContext(generate(ast).code + ';globalThis.usePage = usePrototype;', sandbox);
-  return { page: sandbox.usePage(), service, show: () => shows.forEach(callback => callback()) };
+  return { page: sandbox.usePage(), service, scrolls, scroll: top => pageScroll({ scrollTop: top }), show: () => shows.forEach(callback => callback()) };
 }
 
 test('切页和返回前台复用只读状态，保存后才刷新快照', async () => {
@@ -139,70 +141,7 @@ test('学生从成长摘要打开原版反馈，不能打开其他学生作品',
   assert.equal(page.screen.value, 'growth');
 });
 
-test('教师选择学生代交，失败保留照片，成功后进入该学生的AI批阅', async () => {
-  const { page, service, show } = await setup();
-  const assignment = await service.createAssignment({
-    classId: 'class-1', title: '代交体验', requirements: '写清经过', dueAt: new Date(Date.now() + 86400000).toISOString(),
-  }, 'teacher');
-  show();
-  page.openAssignment(assignment);
-  page.openTeacherSubmit(assignment);
-  assert.equal(page.screen.value, 'submit');
-  await page.submit();
-  assert.match(page.error.value, /选择代交的学生/);
-  const index = page.submissionStudents.value.findIndex(item => item.id === 'student-1');
-  page.selectSubmissionStudent(index);
-  page.addSamples();
-  page.failSubmit.value = true;
-  await page.submit();
-  assert.equal(page.modal.value, null);
-  assert.equal(page.screen.value, 'submit');
-  assert.match(page.error.value, /提交失败/);
-  assert.equal(page.photos.value.length, 2);
-  page.failSubmit.value = false;
-  await page.submit();
-  assert.equal(page.error.value, '');
-  assert.equal(page.screen.value, 'aiReview');
-  assert.equal(page.selectedSubmission.value.studentId, 'student-1');
-  assert.equal(page.selectedSubmission.value.actor, 'teacher');
-  assert.equal(page.photos.value.length, 0);
-  page.back();
-  assert.equal(page.screen.value, 'assignment');
-  assert.equal(page.submissionStudents.value.some(item => item.id === 'student-1'), false);
-  page.switchRole('student');
-  page.openAssignment(assignment);
-  assert.equal(page.mine.value.submittedBy.name, '陈老师');
-  assert.equal(page.canSubmit.value, false);
-});
 
-test('更换代交学生和离开提交页会提示，取消保留照片，确认更换清空照片', async () => {
-  const { page, service, show } = await setup();
-  const assignment = await service.createAssignment({
-    classId: 'class-1', title: '匹配学生', requirements: '写清经过', dueAt: new Date(Date.now() + 86400000).toISOString(),
-  }, 'teacher');
-  show();
-  page.openTeacherSubmit(assignment, page.state.value.students.find(item => item.id === 'student-1'));
-  page.addSamples();
-  page.note.value = '小禾的照片';
-  const index = page.submissionStudents.value.findIndex(item => item.id === 'student-2');
-  page.selectSubmissionStudent(index);
-  assert.match(page.modal.value.title, /更换代交学生/);
-  page.modal.value = null;
-  assert.equal(page.submissionStudent.value.id, 'student-1');
-  assert.equal(page.photos.value.length, 2);
-  page.selectSubmissionStudent(index);
-  await page.confirmModal();
-  assert.equal(page.submissionStudent.value.id, 'student-2');
-  assert.equal(page.photos.value.length, 0);
-  assert.equal(page.note.value, '');
-  page.addSamples();
-  page.back();
-  assert.equal(page.screen.value, 'submit');
-  assert.match(page.modal.value.body, /照片/);
-  await page.confirmModal();
-  assert.equal(page.screen.value, 'assignment');
-  assert.equal(page.photos.value.length, 0);
-});
 
 test('同班学生可读优秀作品并逐级返回，普通反馈入口仍不能打开同学作品', async () => {
   const { page, service, show } = await setup();
@@ -275,27 +214,6 @@ test('点击登录直接建立当前身份登录状态，绑定仍独立完成�
   assert.equal(page.error.value, '');
 });
 
-test('教师核对修改AI结果后直接完成批阅并进入反馈，原AI结果不被改写', async () => {
-  const { page, service, show } = await setup();
-  await service.startAiReview('submission-1', 'teacher');
-  await service.finishAnalysis('submission-1');
-  show();
-  const submission = page.state.value.submissions.find(item => item.id === 'submission-1');
-  const originalAi = mock.clone(submission.aiReview);
-  const edited = mock.clone(submission.aiReview.result);
-  edited.handwriting.scores.intuitive = 9;
-  edited.handwriting.summary = '教师核对后的总体评价';
-  edited.nextSteps = '先调整字的间距。';
-  page.openAiReview(submission);
-  await page.applyAiSuggestions(edited);
-  assert.equal(page.error.value, '');
-  assert.equal(page.modal.value, null);
-  assert.equal(page.screen.value, 'feedback');
-  assert.equal(page.selectedSubmission.value.status, 'published');
-  assert.deepEqual(service.feedback('submission-1', 'student'), edited);
-  assert.deepEqual(service.read().submissions.find(item => item.id === 'submission-1').aiReview, originalAi);
-  assert.equal(page.feedback.value.handwriting.summary, '教师核对后的总体评价');
-});
 
 
 test('全班AI一键发布刷新统计并显示成功提示，不弹出确认且跳过未完成作品', async () => {
@@ -372,4 +290,40 @@ test('记录页保留任务或个人页来源，AI建议和正式反馈之间返
   page.back(); assert.equal(page.screen.value,'aiReview');
   page.back(); assert.equal(page.screen.value,'records');
   page.back(); assert.equal(page.screen.value,'profile');
+});
+
+
+test('返回真实来源并恢复学生搜索、筛选、作品、照片页和滚动位置', async () => {
+  const { page, service, show, scroll, scrolls } = await setup();
+  await service.publish('submission-1', seed.sampleReview(), 'teacher'); show();
+  page.openAssignment(service.read().assignments.find(item => item.id === 'assignment-1'));
+  page.studentSearch.value = '小禾'; page.filter.value = '已完成'; scroll(670);
+  assert.equal(page.studentsInAssignment.value.length, 1);
+  page.openFeedback(service.latest('assignment-1', 'student-1'));
+  scroll(120); page.photoIndex.value = 1;
+  page.openAiReview(service.latest('assignment-1', 'student-1'));
+  page.back(); await vue.nextTick();
+  assert.equal(page.screen.value, 'feedback'); assert.equal(page.photoIndex.value, 1);
+  assert.equal(scrolls.at(-1), 120);
+  page.back(); await vue.nextTick();
+  assert.equal(page.screen.value, 'assignment'); assert.equal(scrolls.at(-1), 670);
+  assert.equal(page.studentSearch.value, '小禾'); assert.equal(page.filter.value, '已完成');
+  page.openPaperCards(); page.openPaperScan(); page.back();
+  assert.equal(page.screen.value, 'paperCards'); page.back();
+  assert.equal(page.screen.value, 'assignment');
+});
+
+test('全班结果返回保留搜索筛选，退出登录保留数据及绑定且不能返回学生作品', async () => {
+  const { page, service, show, scroll, scrolls } = await setup();
+  page.openAssignment(service.read().assignments.find(item => item.id === 'assignment-1'));
+  page.openAiBatch(); page.aiBatchView.value = { query: '小禾', filter: 'ready' }; scroll(456);
+  page.openAiReview(service.latest('assignment-1', 'student-1')); page.back(); await vue.nextTick();
+  assert.equal(page.screen.value, 'aiBatch'); assert.equal(page.aiBatchView.value.query, '小禾');
+  assert.equal(page.aiBatchView.value.filter, 'ready'); assert.equal(scrolls.at(-1), 456);
+  const before = service.read(); page.go('profile'); await page.logout();
+  assert.equal(page.needsBinding.value, true); assert.equal(page.accountSignedIn.value, false);
+  assert.equal(service.read().teacherAccount.teacherId, before.teacherAccount.teacherId);
+  assert.deepEqual(service.read().submissions, before.submissions);
+  page.back(); assert.equal(page.screen.value, 'home');
+  await page.loginForBinding(); assert.equal(page.needsBinding.value, false);
 });

@@ -30,7 +30,7 @@ test('新作业为在班学生生成独立学生码；学生只取得本人卡�
   assert.throws(() => service.paperCards(assignment.id, 'admin'), /学生|教师/);
   await assert.rejects(service.issuePaperCards(assignment.id, 'student'), /教师/);
   const state = service.read(); state.students.push({...state.students[0], id:'new-student', name:'新同学'}); service.commit(state);
-  await service.issuePaperCards(assignment.id, 'teacher');
+  // New students receive cards in the same roster commit, without a button.
   assert.equal(service.paperCards(assignment.id, 'teacher').length, 4);
   assert.deepEqual(service.paperCards(assignment.id, 'teacher').slice(0,3), cards);
   const archived = service.read(); archived.students[0].archived = true; service.commit(archived);

@@ -114,3 +114,8 @@
   padding-bottom: 10px;
   line-height: 1.8;
 }
+
+.excellent-action-button { padding: 10px 16px; font-size: 13px; flex-shrink: 0; }
+.homework-selection-bar { flex-wrap: wrap; gap: 12px; }
+.review-edit-hint { margin-top: 8px; line-height: 1.7; }
+.logout-button { margin-bottom: 20px; }

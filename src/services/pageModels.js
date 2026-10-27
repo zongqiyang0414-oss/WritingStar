@@ -1,6 +1,7 @@
 import {
   activeStudents,
   assignmentCounts,
+  assignmentCompleted,
   classAssignments,
   latestSubmission,
 } from "./school.js";
@@ -53,7 +54,7 @@ export function classStatisticsModel(state, classId, now) {
   });
   const rows = model.assignments.map((assignment) => ({
     ...assignment,
-    ongoing: !assignment.dueAt || Date.parse(assignment.dueAt) > now,
+    ongoing: !assignmentCompleted(state, { ...assignment, classId }, now, assignment.counts),
   }));
   const ongoing = rows.filter((assignment) => assignment.ongoing).length;
   return {

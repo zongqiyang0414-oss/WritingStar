@@ -53,3 +53,7 @@
 /* #ifdef H5 */
 .scan-camera-viewport video { width: 100%; height: 100%; object-fit: contain; }
 /* #endif */
+
+.paper-actions { display: flex; flex-direction: column; gap: 14px; }
+.paper-actions .spaced-small { margin-top: 0; }
+.paper-print-progress { margin-top: 12px; line-height: 1.7; }

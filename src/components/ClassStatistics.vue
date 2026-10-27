@@ -29,7 +29,7 @@ const emit = defineEmits(["assignment", "students", "update:panel"]);
         {{ model.closed }}
         <text class="stat-unit"> 项 </text>
       </view>
-      <view class="small subtle"> 已截止作业 </view>
+      <view class="small subtle"> 已完成作业 </view>
     </view>
   </view>
   <view class="segmented">
@@ -81,7 +81,7 @@ const emit = defineEmits(["assignment", "students", "update:panel"]);
               item1.ongoing ? 'green' : 'neutral',
             ]"
           >
-            {{ item1.ongoing ? "进行中" : "已截止" }}
+            {{ item1.ongoing ? "进行中" : "已完成" }}
           </text>
         </view>
         <view class="assignment-report-counts">

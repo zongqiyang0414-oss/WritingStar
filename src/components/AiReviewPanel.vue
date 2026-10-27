@@ -1,25 +1,17 @@
 <script setup>
 import { canResubmit as resubmissionOpen } from "../services/submissionPolicy.js";
 import { computed, ref, watch } from "vue";
-import ReviewEditor from "./ReviewEditor.vue";
-import { AI_RUNNING, AI_RETRYABLE, aiQualityAttention } from "../services/aiReview.js";
+import { AI_RUNNING, aiQualityAttention } from "../services/aiReview.js";
 import { displayPhoto, presentReview } from "../services/presentation.js";
 import { rubric, total } from "../services/rubric.js";
 
 const props = defineProps({ submission: {}, assignment: {}, student: {}, task: {}, teacher: Boolean, busy: Boolean, canResubmit: Boolean, canAllowResubmission: Boolean });
-const emit = defineEmits(["start", "refresh", "review", "apply", "feedback", "report", "resubmit", "allow-resubmission", "back"]);
 const category = ref("handwriting"), collapsedDimensions = ref([]), photoIndex = ref(0), showWork = ref(false);
-const editedReview = ref(null), editing = ref(false);
 const phase = computed(() => props.task?.state || "notStarted");
 const running = computed(() => AI_RUNNING.includes(phase.value));
-const result = computed(() => editedReview.value);
+const result = computed(() => props.task?.result ? presentReview(props.task.result) : null);
 const attention = computed(() => aiQualityAttention(props.submission));
 const wrongPhoto = computed(() => props.task?.qualityFlags?.some(flag => ["wrongImage", "unreadable"].includes(flag)));
-// Polling replaces task snapshots. Reset edits only when the actual result changes.
-watch(() => JSON.stringify([props.submission?.id, props.task?.id, props.task?.result || null]), () => {
-  editedReview.value = props.task?.result ? presentReview(props.task.result) : null;
-  editing.value = false;
-}, { immediate: true });
 const progress = computed(() => ({ queued: 8, reading: 33, reviewing: 72, completed: 100 })[phase.value] || 0);
 const step = computed(() => ({ queued: 0, reading: 1, reviewing: 2, completed: 3 })[phase.value] || 0);
 const steps = ["识别作品与页序", "分析书写与写作", "整理评分和建议"];
@@ -29,16 +21,6 @@ function toggleDimension(id) {
   collapsedDimensions.value = collapsedDimensions.value.includes(id)
     ? collapsedDimensions.value.filter(item => item !== id)
     : [...collapsedDimensions.value, id];
-}
-function editScore(id, event) {
-  if (props.busy || !editedReview.value || props.submission?.published) return;
-  const value = String(event.detail.value).trim();
-  editedReview.value[category.value].scores[id] = value === "" ? null : Number(value);
-}
-function completeReview() {
-  if (!props.busy && props.teacher && !props.submission?.published && editedReview.value) {
-    emit("apply", JSON.parse(JSON.stringify(editedReview.value)));
-  }
 }
 function preview() {
   uni.previewImage({ urls: props.submission.photos.map(photo => displayPhoto(photo.url)), current: photoIndex.value });
@@ -58,7 +40,6 @@ function preview() {
       <view class="card-top"><view class="strong">{{ phase === 'queued' ? '等待开始批阅' : '正在双写批阅' }}</view><text class="small subtle">{{ Math.max(0, step) }} / 3 步</text></view>
       <view class="ai-progress-track"><view class="ai-progress-fill" :style="{ width: progress + '%' }" /></view>
       <view v-for="(label, index) in steps" :key="label" :class="['ai-progress-step', { done: step > index + 1, current: step === index + 1 }]"><view class="ai-step-mark">{{ step > index + 1 ? '✓' : index + 1 }}</view><view class="grow">{{ label }}</view><text class="tiny">{{ step > index + 1 ? '已完成' : step === index + 1 ? '进行中' : '等待中' }}</text></view>
-      <button class="text-button full-width spaced" :disabled="busy" @click="emit('refresh')">刷新批阅进度</button>
     </view>
 
     <template v-else-if="result">
@@ -68,16 +49,7 @@ function preview() {
         <view class="ai-score-card"><view class="small">书写评价</view><view class="ai-score-value">{{ total(result.handwriting) ?? '—' }}<text> / 100</text></view><view class="tiny subtle">笔画 · 结构 · 章法</view></view>
         <view class="ai-score-card ai-score-writing"><view class="small">写作评价</view><view class="ai-score-value">{{ total(result.composition) ?? '—' }}<text> / 100</text></view><view class="tiny subtle">内容 · 情感 · 表达</view></view>
       </view>
-      <button v-if="teacher && !submission.published && !resubmissionOpen(submission)" class="secondary full-width ai-edit-toggle" :disabled="busy" :aria-expanded="editing" @click="editing = !editing">{{ editing ? '收起修改' : '修改评价' }}</button>
-      <ReviewEditor
-        v-if="teacher && !submission.published && !resubmissionOpen(submission) && editing"
-        :review="editedReview"
-        :category="category"
-        :readonly="busy"
-        @category="(value) => { if (!busy) category = value; }"
-        @score="editScore"
-      />
-      <template v-else>
+
         <view class="card ai-next-steps"><view class="section-title">批阅建议</view><view class="paragraph small ai-preserve-lines">{{ result.nextSteps }}</view></view>
         <view class="section-heading"><view class="section-title">五大思维</view></view>
         <view class="category-switch ai-category-switch"><button :class="{ active: category === 'handwriting' }" @click="category = 'handwriting'">书写评价</button><button :class="{ active: category === 'composition' }" @click="category = 'composition'">写作评价</button></view>
@@ -87,22 +59,14 @@ function preview() {
             <view v-if="!collapsedDimensions.includes(item.id)" class="ai-dimension-comment small subtle ai-preserve-lines">{{ result[category].comments[item.id] || '本项暂无具体建议。' }}</view>
           </view>
         </view>
-      </template>
+
       <view class="ai-learning-note small">AI可能出错，请核查重要信息。</view>
     </template>
 
     <view v-else class="card ai-empty-result">
       <view class="section-title">{{ teacher ? (wrongPhoto ? '作品需要核对' : '批阅结果待就绪') : wrongPhoto ? '请核对本次作品，等待老师处理' : '作品已保存，AI结果正在准备' }}</view>
       <view v-if="teacher && wrongPhoto" class="paragraph small">{{ attention.join('、') }}</view>
-      <template v-if="!teacher && !submission.published && !resubmissionOpen(submission)">
-        <view v-if="AI_RETRYABLE.includes(phase)" class="paragraph small subtle">系统已自动重试，仍未取得结果。原作品和提交记录保留，可直接用原图再次分析。</view>
-        <button v-if="AI_RETRYABLE.includes(phase) && !wrongPhoto" class="primary full-width spaced" :disabled="busy" @click="emit('start')">使用原图重新分析</button>
-        <button v-if="AI_RETRYABLE.includes(phase) && !task.reportedAt" class="text-button full-width spaced-small" :disabled="busy" @click="emit('report')">报告学校管理员</button>
-        <view v-if="task?.reportedAt" class="tiny subtle spaced-small">问题已报告学校管理员</view>
-      </template>
     </view>
-    <view v-if="!teacher && wrongPhoto && !canResubmit" class="small subtle spaced-small">需要更换照片时，请联系老师同意重新提交。</view>
-    <button v-if="!teacher && canResubmit" class="primary full-width spaced" :disabled="busy" @click="emit('resubmit')">重新提交本次作业</button>
 
     <view class="card ai-original-work">
       <button class="ai-original-toggle" :aria-expanded="showWork" @click="showWork = !showWork"><view><view class="strong">作业详情</view><view class="tiny subtle">{{ submission.photos.length }} 页 · {{ submission.submittedBy?.name ? submission.submittedBy.name + '代交' : '学生提交' }}</view></view><text>{{ showWork ? '收起 ⌃' : '展开 ⌄' }}</text></button>
@@ -112,8 +76,5 @@ function preview() {
         <view v-if="submission.note" class="paragraph small subtle">{{ submission.note }}</view>
       </template>
     </view>
-    <view v-if="teacher && canAllowResubmission" class="spaced"><view v-if="resubmissionOpen(submission)" class="small subtle resubmission-agreed">已同意重新提交，等待学生上传。</view><button v-else class="secondary full-width" :disabled="busy" @click="emit('allow-resubmission')">同意重新提交</button></view>
-    <view v-if="teacher && !submission.published && !resubmissionOpen(submission) && result" class="ai-teacher-actions"><button class="primary full-width" :disabled="busy" @click="completeReview">完成审核</button></view>
-    <button v-if="submission.published" class="primary full-width spaced" :disabled="busy" @click="emit('feedback')">查看老师正式反馈</button>
   </view>
 </template>

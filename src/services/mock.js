@@ -145,6 +145,12 @@ export class MockService extends AiReviewService {
     return freezeSnapshot(this.state);
   }
   commit(state) {
+    // Roster changes and their cards are saved atomically. Never rotate issued IDs.
+    if (state.students !== this.state.students || state.classes !== this.state.classes) {
+      state = { ...state, assignments: state.assignments.map(assignment => assignment.paperPacket
+        ? { ...assignment, paperPacket: createPaperPacket(state, assignment, assignment.paperPacket.pages, assignment.paperPacket) }
+        : assignment) };
+    }
     this.storage.write(state);
     this.state = state;
   }
@@ -153,6 +159,26 @@ export class MockService extends AiReviewService {
       submissions = [...this.state.submissions];
     submissions[submissions.indexOf(current)] = { ...current, ...changes };
     this.commit({ ...this.state, submissions });
+  }
+  preparePaperCards() {
+    let changed = false;
+    const assignments = this.state.assignments.map(assignment => {
+      const packet = assignment.paperPacket;
+      if (!packet) return assignment;
+      const missing = this.state.students.some(student => student.classId === assignment.classId && !student.archived && !packet.cards.some(card => card.studentId === student.id));
+      if (!missing) return assignment;
+      changed = true;
+      return { ...assignment, paperPacket: createPaperPacket(this.state, assignment, packet.pages, packet) };
+    });
+    if (changed) this.commit({ ...this.state, assignments });
+  }
+  async signOut(role) {
+    assertActiveRole(role);
+    const next = { ...this.state };
+    if (role === "teacher") next.teacherAccount = { ...next.teacherAccount, signedIn: false };
+    else if (role === "admin") next.adminAccount = { ...next.adminAccount, signedIn: false };
+    else next.accounts = { ...next.accounts, [role]: { ...next.accounts[role], signedIn: false } };
+    this.commit(next);
   }
   async signIn(role) {
     assertActiveRole(role);

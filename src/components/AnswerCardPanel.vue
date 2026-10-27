@@ -2,12 +2,12 @@
 import { computed, getCurrentInstance, nextTick, ref, watch } from "vue";
 import { drawAnswerCard, CARD_WIDTH, CARD_HEIGHT } from "../platform/answerCards.js";
 // #ifdef H5
-import { answerCardImage, downloadAnswerCard, printAnswerCards } from "../platform/answerCards.js";
+import { answerCardImage, printAnswerCards } from "../platform/answerCards.js";
 // #endif
 import { encodePaperCode } from "../services/paperWorkflow.js";
 const props = defineProps({ assignment: Object, cards: Array, teacher: Boolean, busy: Boolean });
 const emit = defineEmits(["issue", "scan"]);
-const studentIndex = ref(0), page = ref(1), preview = ref(""), error = ref(""), working = ref(false);
+const studentIndex = ref(0), page = ref(1), preview = ref(""), error = ref(""), working = ref(false), printProgress = ref("");
 const selected = computed(() => props.cards?.[studentIndex.value]);
 const code = computed(() => selected.value ? encodePaperCode(selected.value, page.value, props.assignment.paperPacket.pages) : "");
 const instance = getCurrentInstance();
@@ -26,19 +26,19 @@ watch(() => [selected.value?.id, page.value], async () => {
     success: result => { preview.value = result.tempFilePath; }, fail: () => { error.value = "答题卡生成失败，请返回重试。"; } }, instance.proxy));
   // #endif
 }, { immediate: true });
-function print(all = false) {
+async function print(all = false) {
+  if (working.value) return;
+  error.value = ""; working.value = true;
   try {
     // #ifdef H5
-    printAnswerCards(props.assignment, all ? props.cards : [selected.value]);
+    await printAnswerCards(props.assignment, all ? props.cards : [selected.value], (done, total) => { printProgress.value = `正在准备打印 ${done} / ${total} 页`; });
     // #endif
   } catch (failure) { error.value = failure.message; }
+  finally { working.value = false; printProgress.value = ""; }
 }
 async function save() {
   error.value = "";
   try {
-    // #ifdef H5
-    downloadAnswerCard(props.assignment, selected.value, page.value);
-    // #endif
     // #ifndef H5
     if (!preview.value) throw new Error("答题卡尚未生成，请稍后再试。");
     uni.saveImageToPhotosAlbum({ filePath: preview.value, success: () => uni.showToast({title: "已保存，可交由打印店打印", icon: "none"}),
@@ -50,7 +50,7 @@ function zoom() { if (preview.value) uni.previewImage({urls: [preview.value]}); 
 </script>
 <template>
   <view class="paper-workspace">
-    <view class="paper-heading"><view class="paper-overline">PAPER TO PROGRESS</view><view class="paper-title">一人一码，写在纸上的成长</view><view class="small subtle">{{ assignment.title }}</view></view>
+    <view class="paper-heading"><view class="paper-overline">PAPER TO PROGRESS</view><view class="paper-title">{{ assignment.title }}</view><view class="small subtle">作业布置流程</view></view>
     <view class="paper-steps"><view><text>01</text> 打印专属卡</view><view><text>02</text> 纸上完成</view><view><text>03</text> 上传批阅</view></view>
     <view v-if="!assignment.paperPacket || !cards.length" class="card paper-empty">
       <view class="section-title">{{ teacher ? '生成学生专属答题卡' : '老师尚未生成你的答题卡' }}</view>
@@ -67,16 +67,18 @@ function zoom() { if (preview.value) uni.previewImage({urls: [preview.value]}); 
       <view class="paper-code-caption">学生码与作业、学生及页码绑定。请勿裁切二维码和四角。</view>
       <view class="card paper-actions">
         <!-- #ifdef H5 -->
-        <button class="primary full-width" :disabled="busy || !selected" @click="print(false)">打印 / 下载此生 PDF</button>
+        <button class="primary full-width" :disabled="busy || working || !selected" @click="print(false)">打印 / 下载此生 PDF</button>
         <!-- #endif -->
-        <button class="secondary full-width spaced-small" :disabled="!preview" @click="save">保存第 {{ page }} 页图片</button>
+        <!-- #ifndef H5 -->
+        <button class="primary full-width" :disabled="!preview" @click="save">保存第 {{ page }} 页答题卡供打印</button>
+        <!-- #endif -->
         <!-- #ifdef H5 -->
-        <button v-if="teacher" class="text-button full-width spaced-small" :disabled="busy" @click="print(true)">打印全班 · {{ cards.length * assignment.paperPacket.pages }} 页</button>
+        <button v-if="teacher" class="text-button full-width spaced-small" :disabled="busy || working" @click="print(true)">打印全班 · {{ cards.length * assignment.paperPacket.pages }} 页</button>
         <!-- #endif -->
         <button class="text-button full-width spaced-small" :disabled="busy" @click="emit('scan')">{{ teacher ? '去批量扫描收件箱' : '已完成，上传答题卡' }} ›</button>
       </view>
-      <view class="notice">{{ teacher ? '学生和家长可在学生端下载本人的专属答题卡；补充新入班学生时，原有学生码保持不变。' : '家长可协助打印：A4 纸、原比例 100%，完成后逐页上传，系统自动对应学生信息。' }}</view>
-      <button v-if="teacher" class="text-button full-width spaced" :disabled="busy" @click="emit('issue')">为新入班学生补充答题卡</button>
+      <view v-if="!teacher" class="notice">家长可协助打印：A4 纸、原比例 100%，完成后逐页上传，系统自动对应学生信息。</view>
+      <view v-if="printProgress" class="small subtle paper-print-progress" role="status" aria-live="polite">{{ printProgress }}</view>
     </template>
     <view v-if="error" class="paper-error" role="alert">{{ error }}</view>
     <!-- #ifndef H5 -->

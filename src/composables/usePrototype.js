@@ -11,6 +11,7 @@ import { STORAGE_KEY, createPrototypeService } from "../services/index.js";
 import {
   activeStudents,
   assignmentCounts,
+  assignmentCompleted,
   classAssignments,
   formerAssignmentStudents,
   latestSubmission,
@@ -18,7 +19,7 @@ import {
   taskStatuses,
 } from "../services/school.js";
 import { clone } from "../services/mock.js";
-import { computed, onUnmounted, ref, shallowRef, watch } from "vue";
+import { computed, onUnmounted, ref, shallowRef, watch, nextTick } from "vue";
 import { createSeed, samplePhotos } from "../services/seed.js";
 import {
   emptyReview,
@@ -26,7 +27,7 @@ import {
   total,
   validateReview,
 } from "../services/rubric.js";
-import { onHide, onShow } from "@dcloudio/uni-app";
+import { onHide, onShow, onPageScroll } from "@dcloudio/uni-app";
 import { presentReview } from "../services/presentation.js";
 import { studentSummary } from "../services/analytics.js";
 import { getBoundAdministrator } from "../services/administration.js";
@@ -108,6 +109,8 @@ export function usePrototype() {
     photoIndex = ref(0),
     openDimension = ref(null),
     filter = ref("全部"),
+    studentSearch = ref(""),
+    aiBatchView = ref({ filter: "all", query: "" }),
     busy = ref(false),
     error = ref(""),
     toast = ref("");
@@ -222,10 +225,10 @@ export function usePrototype() {
       activeStudents(state.value, currentClass.value.id),
     ),
     ongoingAssignments = computed(() =>
-      scopedAssignments.value.filter((e) => !expired(e)),
+      scopedAssignments.value.filter((e) => !assignmentCompleted(state.value, e, now.value, assignmentCountsById.value.get(e.id))),
     ),
     closedAssignments = computed(() =>
-      scopedAssignments.value.filter((e) => expired(e)),
+      scopedAssignments.value.filter((e) => assignmentCompleted(state.value, e, now.value, assignmentCountsById.value.get(e.id))),
     ),
     visibleAssignments = computed(() =>
       isTeacher.value
@@ -396,7 +399,7 @@ export function usePrototype() {
     ),
     formerStudentsInAssignment = computed(() =>
       formerAssignmentStudents(state.value, selectedAssignment.value?.id || "")
-        .filter((student) => filter.value === "全部" || taskStatus(student.submission) === filter.value),
+        .filter((student) => (filter.value === "全部" || taskStatus(student.submission) === filter.value) && matchesStudent(student)),
     ),
     studentsInAssignment = computed(() => {
       var e;
@@ -410,10 +413,14 @@ export function usePrototype() {
         }))
         .filter(
           (e) =>
-            "全部" === filter.value ||
-            taskStatus(e.submission) === filter.value,
+            ("全部" === filter.value || taskStatus(e.submission) === filter.value) && matchesStudent(e),
         );
     });
+  watch(() => selectedSubmission.value?.draft, draft => {
+    if (screen.value === "review" && draft && JSON.stringify(review.value) === reviewBaseline.value) {
+      review.value = presentReview(draft); reviewBaseline.value = JSON.stringify(review.value);
+    }
+  });
   // These computed models survive screen changes. Components receive display
   // fields only; original records stay in the service.
   const statisticsModel = computed(() =>
@@ -454,28 +461,62 @@ export function usePrototype() {
       toast.value = "";
     }, 1800);
   }
-  function navigate(e) {
+  let currentScroll = 0, pendingOrigin = null;
+  const navigationHistory = [];
+  onPageScroll(event => { currentScroll = event.scrollTop; });
+  function matchesStudent(student) {
+    const query = studentSearch.value.trim().toLocaleLowerCase();
+    return !query || `${student.name} ${student.studentNumber || ""}`.toLocaleLowerCase().includes(query);
+  }
+  function capturePage() {
+    return {
+      screen: screen.value, assignmentId: assignmentId.value, submissionId: submissionId.value,
+      selectedClassId: selectedClassId.value, rosterClassId: rosterClassId.value,
+      excellentAssignmentId: excellentAssignmentId.value, excellentSubmissionId: excellentSubmissionId.value,
+      category: category.value, panel: panel.value, photoIndex: photoIndex.value,
+      filter: filter.value, studentSearch: studentSearch.value, scrollTop: currentScroll,
+      aiBatchView: clone(aiBatchView.value), review: clone(review.value), reviewBaseline: reviewBaseline.value,
+    };
+  }
+  function scrollTo(top) {
+    currentScroll = top;
+    nextTick(() => uni.pageScrollTo({ scrollTop: top, duration: 0 }));
+  }
+  function restorePage(origin) {
+    assignmentId.value = origin.assignmentId; submissionId.value = origin.submissionId;
+    selectedClassId.value = origin.selectedClassId; rosterClassId.value = origin.rosterClassId;
+    excellentAssignmentId.value = origin.excellentAssignmentId; excellentSubmissionId.value = origin.excellentSubmissionId;
+    category.value = origin.category; panel.value = origin.panel; photoIndex.value = origin.photoIndex;
+    filter.value = origin.filter; studentSearch.value = origin.studentSearch; aiBatchView.value = origin.aiBatchView;
+    review.value = origin.review; reviewBaseline.value = origin.reviewBaseline;
+    screen.value = origin.screen; error.value = "";
+    scrollTo(origin.scrollTop);
+  }
+  function navigate(e, options = {}) {
+    const origin = pendingOrigin || capturePage();
+    if (options.reset) navigationHistory.length = 0;
+    else if (!options.replace && (origin.screen !== e || origin.submissionId !== submissionId.value || origin.assignmentId !== assignmentId.value)) navigationHistory.push(origin);
     screen.value = e;
     error.value = "";
-    filter.value = "全部";
-    uni.pageScrollTo({
-      scrollTop: 0,
-      duration: 0,
-    });
+    if (origin.screen !== e) { filter.value = "全部"; studentSearch.value = ""; }
+    if (e === "aiBatch" && origin.screen !== "aiReview" && origin.screen !== "feedback" && origin.screen !== "review") aiBatchView.value = { filter: "all", query: "" };
+    scrollTo(0);
   }
-  function guard(e) {
-    busy.value ||
-      (dirty.value
-        ? (modal.value = {
-            title: "还有未保存的修改",
-            body: adminDirty.value ? "离开后，未保存的管理信息会丢失。你可以取消并先保存。" : screen.value === "submit" ? "离开后，本次选择的照片和提交说明将丢弃。你可以取消并继续提交。" : "离开后，未保存的评分和评语会丢失。你可以取消并完成审核。",
-            confirm: "放弃修改",
-            action: () => {
-              if (screen.value === "submit") { photos.value = []; note.value = ""; }
-              e();
-            },
-          })
-        : e());
+  function guard(action) {
+    if (busy.value) return;
+    const proceed = () => {
+      const previous = pendingOrigin;
+      pendingOrigin = capturePage();
+      try { return action(); } finally { pendingOrigin = previous; }
+    };
+    if (dirty.value) {
+      modal.value = {
+        title: "还有未保存的修改",
+        body: adminDirty.value ? "离开后，未保存的管理信息会丢失。你可以取消并先保存。" : screen.value === "submit" ? "离开后，本次选择的照片和提交说明将丢弃。你可以取消并继续提交。" : "离开后，未保存的评分和评语会丢失。你可以取消并完成审核。",
+        confirm: "放弃修改",
+        action: () => { if (screen.value === "submit") { photos.value = []; note.value = ""; } return proceed(); },
+      };
+    } else return proceed();
   }
   function comesFromRecords() {
     const parents = { feedback: feedbackReturn.value, aiReview: aiReviewReturn.value, review: reviewReturn.value };
@@ -606,7 +647,7 @@ export function usePrototype() {
       if (!isTeacher.value && result[0]) {
         submissionId.value = result[0].id;
         aiReviewReturn.value = "assignment";
-        navigate("aiReview");
+        navigate("aiReview", { replace: true });
       }
     });
   }
@@ -706,6 +747,17 @@ export function usePrototype() {
     photoIndex,
     openDimension,
     filter,
+    studentSearch,
+    aiBatchView,
+    logout: async () => {
+      return guard(async () => {
+        await runAction(async () => {
+          await service.signOut(role.value); refresh(); clearBindingDraft();
+          photos.value = []; note.value = ""; submissionId.value = "";
+          navigate("home", { reset: true }); notify("已退出登录");
+        });
+      });
+    },
     busy,
     error,
     toast,
@@ -720,19 +772,13 @@ export function usePrototype() {
     openExcellentWorks,
     openExcellentWork: (item) => {
       if (!excellentWorks.value.some((work) => work.id === item?.id)) return;
-      excellentSubmissionId.value = item.id;
-      photoIndex.value = 0;
-      navigate("excellentWork");
+      guard(() => {
+        excellentSubmissionId.value = item.id;
+        photoIndex.value = 0;
+        navigate("excellentWork");
+      });
     },
     toggleExcellent,
-    selectSubmissionStudent: (index) => {
-      const student = submissionStudents.value[Number(index)];
-      if (!student || busy.value || student.id === submissionStudentId.value) return;
-      const change = () => { submissionStudentId.value = student.id; photos.value = []; note.value = ""; };
-      if (photos.value.length || note.value.trim()) {
-        modal.value = { title: "更换代交学生？", body: "更换后将清空已选照片和提交说明，请为新选择的学生重新添加作品。", confirm: "更换学生", action: change };
-      } else change();
-    },
     failSubmit,
     failAnalysis,
     newTitle,
@@ -792,27 +838,6 @@ export function usePrototype() {
       await runAction(async () => { await service.reportAiIssue(submissionId.value, role.value); notify("已报告学校管理员"); });
     },
     refreshAi: advanceAiQueue,
-    applyAiSuggestions: async (editedReview) => {
-      const item = selectedSubmission.value;
-      if (busy.value || !isTeacher.value || !item || !item.aiReview?.result) return;
-      await runAction(async () => {
-        const completedReview = clone(editedReview || item.aiReview.result);
-        const invalid = validateReview(completedReview);
-        if (invalid) throw new Error(invalid);
-        if (["processing", "failed"].includes(item.status)) await service.manualReview(item.id, role.value);
-        await service.publish(item.id, completedReview, role.value);
-        notify("已完成审核");
-      });
-      if (!error.value) openFeedback(state.value.submissions.find(row => row.id === item.id));
-    },
-    reviewAiSubmission: async () => {
-      const item = selectedSubmission.value;
-      if (!isTeacher.value || !item) return;
-      if (["failed", "processing"].includes(item.status)) {
-        await runAction(async () => { await service.manualReview(item.id, role.value); });
-      }
-      if (!error.value) openReview(state.value.submissions.find(row => row.id === item.id));
-    },
     mine,
     isTeacher,
     isAdmin,
@@ -903,7 +928,7 @@ export function usePrototype() {
           note.value = "";
           submissionId.value = "";
           assignmentId.value = scopedAssignments.value[0]?.id || "";
-          navigate("home");
+          navigate("home", { reset: true });
         });
     },
     openAssignment,
@@ -920,19 +945,6 @@ export function usePrototype() {
           failAnalysis.value = false;
           navigate("submit");
         });
-    },
-    openTeacherSubmit: function (assignment, student = null) {
-      if (!isTeacher.value || !scopedAssignments.value.some((item) => item.id === assignment?.id)) return;
-      if (student && (student.archived || student.classId !== assignment.classId || latest(assignment.id, student.id))) return;
-      guard(() => {
-        assignmentId.value = assignment.id;
-        submissionStudentId.value = student?.id || "";
-        photos.value = [];
-        note.value = "";
-        failSubmit.value = false;
-        failAnalysis.value = false;
-        navigate("submit");
-      });
     },
     editScore: function (e, a) {
       const t = a.detail.value.trim();
@@ -984,20 +996,18 @@ export function usePrototype() {
       }
     },
     submit: function () {
-      if (!submissionStudent.value) { error.value = "请先选择代交的学生。"; return; }
+      if (!boundStudent.value || isTeacher.value) return;
       if (!isTeacher.value && !canSubmit.value) { error.value = "当前作业暂不能提交，请返回作业详情查看。"; return; }
       if (!photos.value.length) { error.value = "请先选择作品照片。"; return; }
       return runAction(async () => {
         const args = [photos.value, note.value, role.value, failSubmit.value, failAnalysis.value];
-        const result = isTeacher.value
-          ? await service.submitForStudent(assignmentId.value, submissionStudent.value.id, ...args)
-          : await service.submit(assignmentId.value, ...args);
+        const result = await service.submit(assignmentId.value, ...args);
         refresh();
         photos.value = [];
         note.value = "";
         submissionId.value = result.id;
         aiReviewReturn.value = "assignment";
-        navigate("aiReview");
+        navigate("aiReview", { replace: true });
         notify("作业已提交");
       });
     },
@@ -1095,30 +1105,11 @@ export function usePrototype() {
     isRoot,
     activeTab,
     back: function () {
-      if (screen.value === "records") { guard(leaveRecords); return; }
-      go(
-        screen.value === "excellentWork" ? "excellentWorks"
-          : screen.value === "excellentWorks" ? excellentReturn.value
-          : screen.value === "aiReview" ? aiReviewReturn.value
-          : screen.value === "aiBatch" ? "assignment"
-          : ["paperCards", "paperScan"].includes(screen.value) ? "assignment"
-          : screen.value === "review" ? reviewReturn.value
-          : "classMembers" === screen.value
-          ? "classes"
-          : "classes" === screen.value
-            ? "profile"
-            : "statisticsStudent" === screen.value
-              ? "statisticsStudents"
-              : "statisticsStudents" === screen.value
-                ? "statistics"
-                : "review" === screen.value || "submit" === screen.value
-                  ? "assignment"
-                  : "feedback" === screen.value
-                    ? feedbackReturn.value
-                    : "assignment" === screen.value
-                        ? detailReturn.value
-                        : "home",
-      );
+      guard(() => {
+        const origin = navigationHistory.pop();
+        if (origin) restorePage(origin);
+        else navigate(screen.value === "statisticsStudent" ? "statisticsStudents" : screen.value === "classMembers" ? "classes" : "home", { replace: true });
+      });
     },
     boundStudent,
     now,

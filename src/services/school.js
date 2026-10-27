@@ -120,3 +120,11 @@ export function studentReports(state, classId) {
     };
   });
 }
+
+export function assignmentCompleted(state, assignment, now = Date.now(), counts = assignmentCounts(state, assignment)) {
+  if (assignment.dueAt && Date.parse(assignment.dueAt) <= now) return true;
+  return counts.total > 0 && counts.completed === counts.total && activeStudents(state, assignment.classId).every(student => {
+    const submission = latestSubmission(state, assignment.id, student.id);
+    return !submission?.resubmission || !!submission.resubmission.consumedAt;
+  });
+}

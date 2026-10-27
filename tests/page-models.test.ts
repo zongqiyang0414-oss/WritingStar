@@ -256,3 +256,21 @@ test("不可变快照复用时，时间、搜索、量表、角色和下一份�
   mutable.students.find((entry) => entry.id === "student-quiet").name = "改名学生";
   assert.equal(studentRankingModel(mutable, "class-1", "handwriting", "改名").ranks.length, 1);
 });
+
+
+test('不限时作业全班审核后完成，重新提交待处理则进行中；截止优先归入完成', () => {
+  const state = fixture();
+  state.assignments = [{ id: 'lifecycle', classId: 'class-1', title: '不限时', dueAt: '', createdAt: now.toISOString() }];
+  const students = state.students.filter(student => student.classId === 'class-1' && !student.archived);
+  state.submissions = students.map(student => submission(`work-${student.id}`, student.id, 'lifecycle', 1, [81, 81], now.toISOString()));
+  assert.equal(classStatisticsModel(state, 'class-1', +now).ongoing, 0);
+  state.submissions[0].resubmission = { allowedAt: now.toISOString() };
+  assert.equal(classStatisticsModel(state, 'class-1', +now).ongoing, 1);
+  state.submissions[0].resubmission.consumedAt = now.toISOString();
+  state.submissions[0].status = 'pending'; state.submissions[0].published = null;
+  assert.equal(classStatisticsModel(state, 'class-1', +now).ongoing, 1);
+  state.assignments[0].dueAt = now.toISOString();
+  assert.equal(classStatisticsModel(state, 'class-1', +now).closed, 1);
+  state.assignments[0].dueAt = ''; state.submissions = [];
+  assert.equal(classStatisticsModel(state, 'class-1', +now).ongoing, 1);
+});
