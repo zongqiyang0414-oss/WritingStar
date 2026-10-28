@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { MockService, clone } from '../src/services/mock.js';
 import { samplePhotos, sampleReview } from '../src/services/seed.js';
 import { encodePaperCode, decodePaperCode, scanGroups } from '../src/services/paperWorkflow.js';
-import { detectPaperCorners, perspectivePoint, readStudentCode } from '../src/platform/documentScanner.js';
+import { detectPaperCorners, perspectivePoint, readStudentCode, paperOutputSize } from '../src/platform/documentScanner.js';
 import { qrMatrix } from '../src/platform/answerCards.js';
 import { chooseDeviceScanImages, processDeviceScan, preserveDeviceScan } from '../src/platform/devicePaperScanner.js';
 
@@ -131,4 +131,16 @@ test('微信扫描适配读取画布学生码并保存永久图片；失败可�
     const fallback=await preserveDeviceScan(photo);assert.equal(fallback.code,'');assert.equal(fallback.photo.url,'/saved/2');
     assert.deepEqual(await chooseDeviceScanImages(60),[]);
   }finally{globalThis.uni=previous;}
+});
+
+
+test('横向纸张四角可识别，横竖校正保留A系列方向，不将横版拉成竖版', () => {
+  for (const [width,height] of [[280,200],[200,280]]) {
+    const data = new Uint8ClampedArray(width*height*4).fill(255);
+    for (const [left,top] of [[12,12],[width-16,12],[width-16,height-16],[12,height-16]])
+      for(let y=top;y<top+4;y++)for(let x=left;x<left+4;x++){const i=(y*width+x)*4;data[i]=data[i+1]=data[i+2]=0;}
+    const corners=detectPaperCorners({data,width,height});assert.equal(corners?.length,4);
+    const target=paperOutputSize(corners,1000);
+    assert.deepEqual(target,width>height?{width:1414,height:1000}:{width:1000,height:1414});
+  }
 });

@@ -698,7 +698,7 @@ export function usePrototype() {
     const confirmedIds = JSON.stringify(reviewIds());
     modal.value = {
       title: "我已确定所有AI批阅结果无误",
-      body: `确认后将完成 ${aiSummary.value.readyToPublish} 份作业的审核，学生即可查看正式反馈。需逐份审核的作品不会计入本次操作。`,
+      body: `确认后将完成 ${aiSummary.value.readyToPublish} 份作业的审核，学生即可查看正式反馈。`,
       confirm: "确认一键审核",
       action: async () => {
         if (!isTeacher.value || selectedAssignment.value?.id !== targetAssignmentId) return;
@@ -884,8 +884,22 @@ export function usePrototype() {
     canResubmit,
     canAllowResubmission: (item) => isTeacher.value && item && !studentFor(item)?.archived && studentFor(item)?.classId === state.value.assignments.find(assignment => assignment.id === item.assignmentId)?.classId && latest(item.assignmentId, item.studentId)?.id === item.id,
     agreeResubmission: async (item) => {
-      if (!item || busy.value || !isTeacher.value || canResubmit(item)) return;
-      await runAction(async () => { await service.agreeResubmission(item.id, role.value); notify("作业已打回，待学生重新提交"); });
+      if (!item || busy.value || !isTeacher.value) return;
+      const current = state.value.submissions.find(submission => submission.id === item.id);
+      if (!current) return;
+      if (canResubmit(current)) {
+        modal.value = { title: "作业已打回", body: "作业已打回，待学生重新提交。学生本次可重新上传一次，无需重复打回。", confirm: "知道了", cancel: false };
+        return;
+      }
+      modal.value = {
+        title: "打回这份作业？",
+        body: "确认后，学生可重新提交本次作业一次。当前作品与已审核反馈会保留。",
+        confirm: "确认打回",
+        action: async () => {
+          if (!isTeacher.value) return;
+          await runAction(async () => { await service.agreeResubmission(current.id, role.value); notify("作业已打回，待学生重新提交"); });
+        },
+      };
     },
     feedback,
     canSubmit,

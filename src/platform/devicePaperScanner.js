@@ -1,4 +1,4 @@
-import { detectPaperCorners, readStudentCode, rectifyPaperPixels } from "./documentScanner.js";
+import { detectPaperCorners, readStudentCode, rectifyPaperPixels, paperOutputSize } from "./documentScanner.js";
 import { paperId } from "../services/paperWorkflow.js";
 function call(api, args, scope) {
   return new Promise((resolve, reject) => uni[api]({ ...args, success: resolve, fail: () => reject(new Error("扫描处理失败，请重新选图或使用人工确认。")) }, scope));
@@ -29,7 +29,7 @@ export async function processDeviceScan(photo, canvasId, scope, resize) {
   const corners = detectPaperCorners({data:small,width:sw,height:sh})?.map(p=>({x:p.x/scale,y:p.y/scale}));
   let outputWidth=width,outputHeight=height;
   if(corners) {
-    const output=rectifyPaperPixels(pixels,corners,1000,1414);outputWidth=output.width;outputHeight=output.height;
+    const size=paperOutputSize(corners,1000), output=rectifyPaperPixels(pixels,corners,size.width,size.height);outputWidth=output.width;outputHeight=output.height;
     await resize(outputWidth,outputHeight);
     await call("canvasPutImageData",{canvasId,x:0,y:0,width:outputWidth,height:outputHeight,data:output.data},scope);
     if(!code)code=readStudentCode(output);corrected=true;

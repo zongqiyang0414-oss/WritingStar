@@ -1,4 +1,5 @@
 <script setup>
+import WorkViewer from "../../components/WorkViewer.vue";
 import AssignmentComposer from "../../components/AssignmentComposer.vue";
 import SlideDownPanel from "../../components/SlideDownPanel.vue";
 import SubmissionRecords from "../../components/SubmissionRecords.vue";
@@ -190,9 +191,7 @@ function toggleFeedbackDimension(id) {
     ? feedbackCollapsed.value.filter(value => value !== id)
     : [...feedbackCollapsed.value, id];
 }
-function previewSubmittedWork(index) {
-  uni.previewImage({ urls: selectedSubmission.value.photos.map(photo => displayPhoto(photo.url)), current: index });
-}
+
 </script>
 
 <template>
@@ -1012,52 +1011,7 @@ function previewSubmittedWork(index) {
                               </view>
 
 
-                                  <view :key="0" class="card photo-reader">
-                                    <view class="small subtle">
-                                      第 {{ photoIndex + 1 }} 页 ·
-                                      {{
-                                        assignmentFor(selectedSubmission).title
-                                      }}
-                                    </view>
-                                    <image
-                                      class="essay-image"
-                                      :src="
-                                        displayPhoto(
-                                          selectedSubmission.photos[photoIndex]
-                                            .url,
-                                        )
-                                      "
-                                      mode="widthFix"
-                                    />
-                                    <view class="photo-pagination">
-                                      <button
-                                        class="secondary"
-                                        :disabled="0 === photoIndex"
-                                        @click="(e) => photoIndex--"
-                                      >
-                                        上一页
-                                      </button>
-                                      <text>
-                                        {{ photoIndex + 1 }} /
-                                        {{ selectedSubmission.photos.length }}
-                                      </text>
-                                      <button
-                                        class="secondary"
-                                        :disabled="
-                                          photoIndex ===
-                                          selectedSubmission.photos.length - 1
-                                        "
-                                        @click="(e) => photoIndex++"
-                                      >
-                                        下一页
-                                      </button>
-                                    </view>
-                                    <template v-if="selectedSubmission.note">
-                                      <view :key="0" class="paragraph small">
-                                        提交说明：{{ selectedSubmission.note }}
-                                      </view>
-                                    </template>
-                                  </view>
+                                  <view class="card photo-reader"><WorkViewer :photos="selectedSubmission.photos" v-model:page="photoIndex" /><view v-if="selectedSubmission.note" class="paragraph small">提交说明：{{ selectedSubmission.note }}</view></view>
 
 
                               <view class="ai-review-shortcut"><view><view class="strong">AI双写建议</view><view class="tiny subtle">{{ aiStateLabel(selectedSubmission) }}</view></view><button class="text-button" :disabled="busy" @click="openAiReview(selectedSubmission)">查看AI批阅 ›</button></view>
@@ -1247,13 +1201,7 @@ function previewSubmittedWork(index) {
                                         </view>
                                       </view>
                                     </view>
-                                    <view class="card feedback-original-work">
-                                      <view class="section-title">学生提交的作品</view>
-                                      <view v-for="(photo, index) in selectedSubmission.photos" :key="photo.id" class="feedback-work-page">
-                                        <view class="small subtle spaced">第 {{ index + 1 }} / {{ selectedSubmission.photos.length }} 页</view>
-                                        <image class="essay-image" :src="displayPhoto(photo.url)" mode="widthFix" @click="previewSubmittedWork(index)" />
-                                      </view>
-                                    </view>
+                                    <view class="card feedback-original-work"><WorkViewer :photos="selectedSubmission.photos" v-model:page="photoIndex" title="学生提交的作品" /></view>
                                     <view class="teacher-note card">
                                       <view class="teacher-note-header">
                                         <view class="avatar tiny-avatar">
@@ -1360,13 +1308,9 @@ function previewSubmittedWork(index) {
                                               :key="0"
                                               class="paragraph small"
                                             >
-                                              {{
-                                                feedback[category].comments[
-                                                  item6.id
-                                                ] || "本维度暂无单独评语。"
-                                              }}
+                                              <view class="feedback-comment-content">{{ feedback[category].comments[item6.id] || "本维度暂无单独评语。" }}</view>
                                               <view
-                                                class="small subtle spaced-small"
+                                                class="small subtle feedback-rule"
                                               >
                                                 评价规则：{{
                                                   item6.description
@@ -1788,7 +1732,7 @@ function previewSubmittedWork(index) {
             {{ modal.body }}
           </view>
           <view class="modal-actions">
-            <button class="secondary" @click="(e) => (modal = null)">
+            <button v-if="modal.cancel !== false" class="secondary" @click="(e) => (modal = null)">
               取消
             </button>
             <button class="primary" @click="confirmModal">

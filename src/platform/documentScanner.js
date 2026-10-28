@@ -48,9 +48,18 @@ export function detectPaperCorners({ data, width, height }) {
   }
   const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   const w = distance(corners[0], corners[1]), h = distance(corners[0], corners[3]);
-  if (w < width * .35 || h < height * .35 || w / h < .35 || w / h > 1.25) return null;
+  if (w < width * .35 || h < height * .35 || w / h < .35 || w / h > 2.86) return null;
   if (distance(corners[2], corners[3]) / w < .6 || distance(corners[2], corners[3]) / w > 1.6) return null;
   return corners;
+}
+
+// A-series paper keeps its physical proportions in either orientation.
+export function paperOutputSize(corners, shortSide = 1240) {
+  const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const horizontal = distance(corners[0], corners[1]) + distance(corners[3], corners[2]);
+  const vertical = distance(corners[0], corners[3]) + distance(corners[1], corners[2]);
+  const longSide = Math.round(shortSide * Math.SQRT2);
+  return horizontal > vertical ? { width: longSide, height: shortSide } : { width: shortSide, height: longSide };
 }
 
 // Maps normalized output coordinates onto the photographed quadrilateral.
@@ -104,7 +113,7 @@ export async function processScanSource(source, name = "扫描答题卡") {
   let code = readStudentCode(pixels);
   const inspect = inspectScanFrame(source), corners = inspect.corners?.map(p => ({ x: p.x * canvas.width / inspect.width, y: p.y * canvas.height / inspect.height }));
   if (corners) {
-    const output = document.createElement("canvas"); output.width = 1240; output.height = 1754;
+    const output = document.createElement("canvas"), size = paperOutputSize(corners); output.width = size.width; output.height = size.height;
     const out = output.getContext("2d"), target = out.createImageData(output.width, output.height);
     target.data.set(rectifyPaperPixels(pixels, corners, output.width, output.height).data);
     out.putImageData(target, 0, 0); canvas = output;

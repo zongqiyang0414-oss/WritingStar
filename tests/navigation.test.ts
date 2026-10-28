@@ -252,6 +252,10 @@ test('教师同意后学生只能重新提交一次，代交名单始终排除�
   assert.equal(page.canSubmit.value, false); page.openSubmit(assignment); assert.equal(page.screen.value, 'assignment');
   page.switchRole('teacher'); page.openAssignment(assignment);
   await page.agreeResubmission(first);
+  assert.equal(page.modal.value.title, '打回这份作业？');
+  assert.equal(service.latest(assignment.id, 'student-1').resubmission, undefined);
+  page.modal.value = null;
+  await page.agreeResubmission(first); await page.confirmModal();
   assert.equal(page.toast.value, '作业已打回，待学生重新提交');
   assert.ok(!page.submissionStudents.value.some(item => item.id === 'student-1'));
   page.switchRole('student'); page.openAssignment(assignment); assert.equal(page.canSubmit.value, true);
@@ -358,4 +362,14 @@ test('一键审核确认期间新结果就绪时不扩大审核范围，要求�
   await service.finishAnalysis(another.id);show();
   await page.confirmModal();assert.match(page.error.value,/已变化/);
   assert.equal(service.read().submissions.find(item => item.id === first.id).status,'pending');
+});
+
+
+test('点击已打回只展示说明，确认关闭不重复写入许可', async () => {
+  const { page, service, show } = await setup();
+  const first = service.read().submissions.find(item => item.id === 'submission-1');
+  await service.agreeResubmission(first.id,'teacher');show();const before=service.snapshot();
+  await page.agreeResubmission(first);
+  assert.equal(page.modal.value.title,'作业已打回');assert.equal(page.modal.value.cancel,false);
+  await page.confirmModal();assert.equal(service.snapshot(),before);assert.equal(page.modal.value,null);
 });

@@ -122,3 +122,6 @@
 
 .feedback-original-work { margin: 20px 0; }
 .feedback-original-work .essay-image { display: block; }
+
+.feedback-comment-content { background: #eff5ee; color: #2f4d3f; padding: 13px 14px; border-radius: 9px; white-space: pre-line; line-height: 1.9; }
+.feedback-rule { margin: 12px 0 16px; line-height: 1.9; }
