@@ -50,7 +50,7 @@ function zoom() { if (preview.value) uni.previewImage({urls: [preview.value]}); 
 </script>
 <template>
   <view class="paper-workspace">
-    <view class="paper-heading"><view class="paper-overline">PAPER TO PROGRESS</view><view class="paper-title">{{ assignment.title }}</view><view class="small subtle">作业布置流程</view></view>
+    <view class="paper-heading"><view class="paper-overline">题目</view><view class="paper-title">{{ assignment.title }}</view><view class="small subtle">作业布置流程</view></view>
     <view class="paper-steps"><view><text>01</text> 打印专属卡</view><view><text>02</text> 纸上完成</view><view><text>03</text> 上传批阅</view></view>
     <view v-if="!assignment.paperPacket || !cards.length" class="card paper-empty">
       <view class="section-title">{{ teacher ? '生成学生专属答题卡' : '老师尚未生成你的答题卡' }}</view>

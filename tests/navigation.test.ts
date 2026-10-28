@@ -216,7 +216,7 @@ test('点击登录直接建立当前身份登录状态，绑定仍独立完成�
 
 
 
-test('全班AI一键发布刷新统计并显示成功提示，不弹出确认且跳过未完成作品', async () => {
+test('全班一键审核先确认，取消不发布，确认后刷新统计并跳过未完成作品', async () => {
   const { page, service, show } = await setup();
   await service.startAiReview('submission-1', 'teacher');
   await service.finishAnalysis('submission-1');
@@ -227,6 +227,11 @@ test('全班AI一键发布刷新统计并显示成功提示，不弹出确认且
   const ready = page.aiSummary.value.readyToPublish;
   assert.ok(ready > 0);
   await page.publishAiBatch();
+  assert.equal(page.modal.value.title, '我已确定所有AI批阅结果无误');
+  assert.equal(page.state.value.submissions.find(item => item.id === submission.id).status, 'pending');
+  page.modal.value = null; // Cancel leaves results and drafts untouched.
+  assert.equal(page.aiSummary.value.readyToPublish, ready);
+  await page.publishAiBatch(); await page.confirmModal();
   assert.equal(page.screen.value, 'aiBatch');
   assert.equal(page.aiSummary.value.readyToPublish, 0);
   assert.equal(page.state.value.submissions.find(item => item.id === submission.id).status, 'published');
@@ -247,7 +252,7 @@ test('教师同意后学生只能重新提交一次，代交名单始终排除�
   assert.equal(page.canSubmit.value, false); page.openSubmit(assignment); assert.equal(page.screen.value, 'assignment');
   page.switchRole('teacher'); page.openAssignment(assignment);
   await page.agreeResubmission(first);
-  assert.ok(page.toast.value.includes('同意学生重新提交'));
+  assert.equal(page.toast.value, '作业已打回，待学生重新提交');
   assert.ok(!page.submissionStudents.value.some(item => item.id === 'student-1'));
   page.switchRole('student'); page.openAssignment(assignment); assert.equal(page.canSubmit.value, true);
   page.openSubmit(assignment); await page.submit();
@@ -326,4 +331,31 @@ test('全班结果返回保留搜索筛选，退出登录保留数据及绑定�
   assert.deepEqual(service.read().submissions, before.submissions);
   page.back(); assert.equal(page.screen.value, 'home');
   await page.loginForBinding(); assert.equal(page.needsBinding.value, false);
+});
+
+
+test('一键审核确认后仍校验当前作业，空队列不弹确认也不改数据', async () => {
+  const { page, service, show } = await setup();
+  await service.startAiReview('submission-1', 'teacher'); await service.finishAnalysis('submission-1'); show();
+  page.openAssignment(service.read().assignments.find(item => item.id === 'assignment-1'));
+  page.openAiBatch(); page.publishAiBatch();
+  const pendingAction = page.modal.value.action; page.modal.value = null;
+  const other = await service.createAssignment({ classId:'class-1',title:'新的作业',requirements:'',dueAt:'' },'teacher'); show();
+  page.openAssignment(other); await pendingAction();
+  assert.equal(service.read().submissions.find(item => item.id === 'submission-1').status, 'pending');
+  const before = service.snapshot(); page.publishAiBatch();
+  assert.equal(page.modal.value, null); assert.equal(service.snapshot(), before);
+});
+
+
+test('一键审核确认期间新结果就绪时不扩大审核范围，要求重新核对', async () => {
+  const { page, service, show } = await setup();
+  const assignment = await service.createAssignment({classId:'class-1',title:'确认期间新结果',requirements:'',dueAt:''},'teacher');
+  const first = await service.submitForStudent(assignment.id,'student-1',seed.samplePhotos,'','teacher');
+  const another = await service.submitForStudent(assignment.id,'student-2',seed.samplePhotos,'','teacher');
+  await service.finishAnalysis(first.id);show();
+  page.openAssignment(assignment);page.openAiBatch();page.publishAiBatch();assert.ok(page.modal.value);
+  await service.finishAnalysis(another.id);show();
+  await page.confirmModal();assert.match(page.error.value,/已变化/);
+  assert.equal(service.read().submissions.find(item => item.id === first.id).status,'pending');
 });

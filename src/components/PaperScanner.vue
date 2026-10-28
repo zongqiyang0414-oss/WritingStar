@@ -194,7 +194,7 @@ onUnmounted(() => {
 </script>
 <template>
   <view class="paper-workspace paper-scanner">
-    <view class="paper-heading"><view class="paper-overline">SCAN · MATCH · REVIEW</view><view class="paper-title">{{ teacher ? '把一叠作业，变成有序的反馈' : '纸上完成，拍照交作业' }}</view><view class="small subtle">{{ assignment.title }}</view></view>
+    <view class="paper-heading"><view class="paper-overline">题目</view><view class="paper-title">{{ assignment.title }}</view></view>
     <view v-if="!assignment.paperPacket || !cards.length" class="card paper-empty"><view class="strong">请先生成专属答题卡</view><button class="primary full-width spaced" @click="emit('cards')">前往答题卡</button></view>
     <template v-else>
       <view class="scan-summary"><view><text>{{ rows.length }}</text>已收页面</view><view><text>{{ ready.length }}</text>可提交学生</view><view><text>{{ summary.unresolved.length }}</text>待确认页面</view></view>
@@ -213,7 +213,7 @@ onUnmounted(() => {
       </view>
       <!-- #endif -->
       <view v-if="error" class="paper-error" role="alert">{{ error }}</view>
-      <view v-if="!rows.length" class="card scan-empty"><view class="scan-empty-symbol">▤</view><view class="strong">把完成的答题卡放到这里</view><view class="small subtle spaced-small">连续扫描时保持纸张稳定，保存后移走当前页再放下一页。学生码模糊时可人工确认。</view><button class="text-button spaced" @click="emit('cards')">查看 / 打印答题卡 ›</button></view>
+      <view v-if="!rows.length" class="card scan-empty"><view class="scan-empty-symbol">▤</view><view class="strong">暂无扫描或导入的答题卡</view><view class="small subtle spaced-small">请点击上方“开启相机扫描”或“批量导入照片”添加作业。添加成功后，扫描结果会在这里按学生和页码归档；学生码模糊时可人工确认。</view><button class="text-button spaced" @click="emit('cards')">查看 / 打印答题卡 ›</button></view>
       <view v-if="summary.groups.length" class="section-heading"><view class="section-title">按学生归档</view><text class="tiny subtle">自动按页码排序</text></view>
       <view v-for="group in summary.groups" :key="group.student.id" class="card scan-student-group">
         <view class="paper-inline"><view><view class="strong">{{ group.student.name }}</view><view class="tiny subtle">{{ group.rows.length }} / {{ group.total }} 页 · {{ group.rows.some(r => r.manual) ? '含人工确认' : '学生码已对应' }}</view></view><text :class="['badge', group.ready ? 'complete' : 'pending']">{{ group.ready ? '可提交' : '需处理' }}</text></view>

@@ -102,3 +102,9 @@
 .ai-resubmission-row .tiny { flex: 1; line-height: 1.7; font-size: 11px; }
 .ai-resubmission-row .text-button { width: 108px; white-space: normal; text-align: right; line-height: 1.7; }
 .ai-batch-row-bottom + .ai-batch-row-bottom { margin-top: 8px; }
+
+.ai-submission-counts { display: flex; margin: 16px 0; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.ai-submission-counts > view { flex: 1; text-align: center; font-size: 12px; color: var(--muted); }
+.ai-submission-counts text { display: block; font-size: 28px; color: var(--green); margin-bottom: 5px; }
+.ai-review-count-title { margin-top: 16px; font-size: 13px; }
+.ai-resubmission-row .text-button { width: auto; min-width: 44px; }

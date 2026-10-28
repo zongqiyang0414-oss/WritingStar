@@ -6,7 +6,7 @@ import { displayPhoto, presentReview } from "../services/presentation.js";
 import { rubric, total } from "../services/rubric.js";
 
 const props = defineProps({ submission: {}, assignment: {}, student: {}, task: {}, teacher: Boolean, busy: Boolean, canResubmit: Boolean, canAllowResubmission: Boolean });
-const category = ref("handwriting"), collapsedDimensions = ref([]), photoIndex = ref(0), showWork = ref(false);
+const category = ref("handwriting"), collapsedDimensions = ref([]), photoIndex = ref(0), showWork = ref(true);
 const phase = computed(() => props.task?.state || "notStarted");
 const running = computed(() => AI_RUNNING.includes(phase.value));
 const result = computed(() => props.task?.result ? presentReview(props.task.result) : null);
@@ -15,7 +15,7 @@ const wrongPhoto = computed(() => props.task?.qualityFlags?.some(flag => ["wrong
 const progress = computed(() => ({ queued: 8, reading: 33, reviewing: 72, completed: 100 })[phase.value] || 0);
 const step = computed(() => ({ queued: 0, reading: 1, reviewing: 2, completed: 3 })[phase.value] || 0);
 const steps = ["识别作品与页序", "分析书写与写作", "整理评分和建议"];
-watch(() => props.submission?.id, () => { category.value = "handwriting"; collapsedDimensions.value = []; photoIndex.value = 0; showWork.value = false; });
+watch(() => props.submission?.id, () => { category.value = "handwriting"; collapsedDimensions.value = []; photoIndex.value = 0; showWork.value = true; });
 watch(category, () => { collapsedDimensions.value = []; });
 function toggleDimension(id) {
   collapsedDimensions.value = collapsedDimensions.value.includes(id)
@@ -35,7 +35,16 @@ function preview() {
       <text class="ai-type-tag">双写 AI</text>
     </view>
 
-    <view v-if="resubmissionOpen(submission)" class="notice">{{ teacher ? '已同意学生重新提交一次，等待新的作品。' : '老师已同意你重新提交一次。' }}</view>
+    <view class="card ai-original-work">
+      <button class="ai-original-toggle" :aria-expanded="showWork" @click="showWork = !showWork"><view><view class="strong">作业详情</view><view class="tiny subtle">{{ submission.photos.length }} 页 · {{ submission.submittedBy?.name ? submission.submittedBy.name + '代交' : '学生提交' }}</view></view><text>{{ showWork ? '收起 ⌃' : '展开 ⌄' }}</text></button>
+      <template v-if="showWork">
+        <image v-if="submission.photos[photoIndex]" class="ai-work-photo" :src="displayPhoto(submission.photos[photoIndex].url)" mode="aspectFit" @click="preview" />
+        <view class="ai-photo-pages"><button v-for="(photo, index) in submission.photos" :key="photo.id" :class="{ active: photoIndex === index }" @click="photoIndex = index">第 {{ index + 1 }} 页</button></view>
+        <view v-if="submission.note" class="paragraph small subtle">{{ submission.note }}</view>
+      </template>
+    </view>
+
+    <view v-if="resubmissionOpen(submission)" class="notice">{{ teacher ? '作业已打回，待学生重新提交' : '老师已同意你重新提交一次。' }}</view>
     <view v-if="running" class="card ai-progress-card" role="status" aria-live="polite">
       <view class="card-top"><view class="strong">{{ phase === 'queued' ? '等待开始批阅' : '正在双写批阅' }}</view><text class="small subtle">{{ Math.max(0, step) }} / 3 步</text></view>
       <view class="ai-progress-track"><view class="ai-progress-fill" :style="{ width: progress + '%' }" /></view>
@@ -68,13 +77,6 @@ function preview() {
       <view v-if="teacher && wrongPhoto" class="paragraph small">{{ attention.join('、') }}</view>
     </view>
 
-    <view class="card ai-original-work">
-      <button class="ai-original-toggle" :aria-expanded="showWork" @click="showWork = !showWork"><view><view class="strong">作业详情</view><view class="tiny subtle">{{ submission.photos.length }} 页 · {{ submission.submittedBy?.name ? submission.submittedBy.name + '代交' : '学生提交' }}</view></view><text>{{ showWork ? '收起 ⌃' : '展开 ⌄' }}</text></button>
-      <template v-if="showWork">
-        <image v-if="submission.photos[photoIndex]" class="ai-work-photo" :src="displayPhoto(submission.photos[photoIndex].url)" mode="aspectFit" @click="preview" />
-        <view class="ai-photo-pages"><button v-for="(photo, index) in submission.photos" :key="photo.id" :class="{ active: photoIndex === index }" @click="photoIndex = index">第 {{ index + 1 }} 页</button></view>
-        <view v-if="submission.note" class="paragraph small subtle">{{ submission.note }}</view>
-      </template>
-    </view>
+
   </view>
 </template>

@@ -691,16 +691,27 @@ export function usePrototype() {
       if (!result.queued.length) notify("已有结果和正在批阅的作品已保留");
     });
   }
-  async function publishAiBatch() {
-    if (busy.value || !isTeacher.value || !selectedAssignment.value) return;
-    await runAction(async () => {
-      const result = await service.publishAiBatch(selectedAssignment.value.id, role.value);
-      const publishedCount = result.published.length;
-      const pendingCount = result.requiresReview.length;
-      notify(publishedCount
-        ? `已完成 ${publishedCount} 份审核${pendingCount ? `，${pendingCount} 份需逐份审核` : ""}`
-        : pendingCount ? `${pendingCount} 份需逐份审核` : "暂无可审核作业");
-    });
+  function publishAiBatch() {
+    if (busy.value || !isTeacher.value || !selectedAssignment.value || !aiSummary.value.readyToPublish) return;
+    const targetAssignmentId = selectedAssignment.value.id;
+    const reviewIds = () => aiRows.value.filter(row => row.publishable).map(row => row.submission.id).sort();
+    const confirmedIds = JSON.stringify(reviewIds());
+    modal.value = {
+      title: "我已确定所有AI批阅结果无误",
+      body: `确认后将完成 ${aiSummary.value.readyToPublish} 份作业的审核，学生即可查看正式反馈。需逐份审核的作品不会计入本次操作。`,
+      confirm: "确认一键审核",
+      action: async () => {
+        if (!isTeacher.value || selectedAssignment.value?.id !== targetAssignmentId) return;
+        if (JSON.stringify(reviewIds()) !== confirmedIds) { error.value = "可审核的作业已变化，请重新核对后再一键审核。"; return; }
+        await runAction(async () => {
+          const result = await service.publishAiBatch(targetAssignmentId, role.value);
+          const publishedCount = result.published.length, pendingCount = result.requiresReview.length;
+          notify(publishedCount
+            ? `已完成 ${publishedCount} 份审核${pendingCount ? `，${pendingCount} 份需逐份审核` : ""}`
+            : pendingCount ? `${pendingCount} 份需逐份审核` : "暂无可审核作业");
+        });
+      },
+    };
   }
   function openExcellentWorks(assignment = null) {
     if (needsBinding.value || isAdmin.value || boundStudent.value?.archived) return;
@@ -874,7 +885,7 @@ export function usePrototype() {
     canAllowResubmission: (item) => isTeacher.value && item && !studentFor(item)?.archived && studentFor(item)?.classId === state.value.assignments.find(assignment => assignment.id === item.assignmentId)?.classId && latest(item.assignmentId, item.studentId)?.id === item.id,
     agreeResubmission: async (item) => {
       if (!item || busy.value || !isTeacher.value || canResubmit(item)) return;
-      await runAction(async () => { await service.agreeResubmission(item.id, role.value); notify("已同意学生重新提交一次"); });
+      await runAction(async () => { await service.agreeResubmission(item.id, role.value); notify("作业已打回，待学生重新提交"); });
     },
     feedback,
     canSubmit,

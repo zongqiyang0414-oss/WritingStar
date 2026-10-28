@@ -50,7 +50,6 @@ const emit = defineEmits(["assignment", "students", "update:panel"]);
     <ScoreTrend
       :points="model.trend"
       title="班级平均分趋势"
-      subtitle="按作业顺序，查看全班书写与写作的变化"
     />
     <button class="students-entry card" @click="(e) => emit('students')">
       <view>

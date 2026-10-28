@@ -32,8 +32,6 @@ function openRow(row) {
   else if (row.needsAttention || row.publishSource === "teacher" || needsReview(row)) emit("review", row.submission);
   else emit("view", row.submission);
 }
-const done = computed(() => props.summary.completed + props.summary.published);
-const percent = computed(() => props.summary.submitted ? Math.round(done.value / props.summary.submitted * 100) : 0);
 const readyCount = computed(() => props.summary.readyToPublish || 0);
 const reviewCount = computed(() => props.rows.filter(needsReview).length);
 function rowStatus(row) {
@@ -51,7 +49,7 @@ function tone(row) {
   return AI_RUNNING.includes(row.phase) ? "working" : "neutral";
 }
 function rowDescription(row) {
-  if (canResubmit(row.submission)) return "已同意学生重新提交一次";
+  if (canResubmit(row.submission)) return "作业已打回，待学生重新提交";
   if (row.phase === "published") return "老师已完成审核，可查看正式反馈";
   if (row.needsAttention) return row.qualityReasons.join("、") + "，请逐份审核";
   if (needsReview(row)) return row.publishIssue;
@@ -66,9 +64,9 @@ function rowDescription(row) {
     <view class="ai-batch-title">{{ assignment.title }}</view>
     <view class="small subtle ai-batch-subtitle">学生提交后自动AI批阅，教师完成审核后学生即可查看反馈。</view>
     <view class="ai-batch-overview">
-      <view class="card-top"><view><view class="tiny subtle">本次作业</view><view class="section-title">AI智能批阅</view></view><view class="ai-batch-percent">{{ percent }}<text>%</text></view></view>
-      <view class="ai-progress-track"><view class="ai-progress-fill" :style="{ width: percent + '%' }" /></view>
-      <view class="tiny subtle">批阅已完成 {{ done }} / {{ summary.submitted }} 份</view>
+      <view class="card-top"><view><view class="tiny subtle">全班 {{ summary.total }} 位学生</view><view class="section-title">作业提交情况</view></view></view>
+      <view class="ai-submission-counts"><view><text>{{ summary.submitted }}</text><view>已提交</view></view><view><text>{{ summary.missing }}</text><view>未提交</view></view></view>
+      <view class="strong ai-review-count-title">已提交作业的批阅状态</view>
       <view class="ai-batch-counts"><view><text>{{ summary.running + summary.waiting }}</text><view>处理中</view></view><view><text>{{ readyCount }}</text><view>待审核</view></view><view><text>{{ summary.published }}</text><view>已审核</view></view></view>
       <view v-if="reviewCount || summary.attention" class="ai-batch-attention-summary small">
         <text v-if="reviewCount">{{ reviewCount }} 份评价待补全</text>
@@ -83,7 +81,7 @@ function rowDescription(row) {
     <view v-if="filter === 'attention'" class="small subtle ai-batch-filter-note">展示任一项低于60分、疑似传错图片或无法有效识别的作品；需逐份审核，不参与一键审核。</view>
     <view v-for="row in visibleRows" :key="row.student.id" class="card ai-batch-row">
       <view class="ai-batch-row-top"><view class="avatar pale">{{ row.student.initial }}</view><view class="grow"><view class="strong">{{ row.student.name }}<text v-if="row.former" class="tiny subtle"> · 已离班</text></view><view class="tiny subtle">{{ row.submission ? row.submission.photos.length + ' 页' : row.student.studentNumber ? '学号 ' + row.student.studentNumber : '还没有提交作品' }}</view></view><text :class="['ai-row-status', tone(row)]">{{ rowStatus(row) }}</text></view>
-      <view v-if="row.submission && !row.former" class="ai-batch-row-bottom ai-resubmission-row"><text class="tiny subtle">{{ canResubmit(row.submission) ? '等待学生更新作品' : '若需要学生订正/重新提交作业，请点击右侧“同意学生重新提交作业”' }}</text><text v-if="canResubmit(row.submission)" class="tiny subtle resubmission-agreed">已同意重新提交</text><button v-else class="text-button" :disabled="busy" @click="emit('allow-resubmission', row.submission)">同意学生重新提交作业</button></view>
+      <view v-if="row.submission && !row.former" class="ai-batch-row-bottom ai-resubmission-row"><text class="tiny subtle">{{ canResubmit(row.submission) ? '等待学生更新作品' : '若需要学生订正/重新提交作业，请点击右侧“打回”' }}</text><text v-if="canResubmit(row.submission)" class="tiny subtle resubmission-agreed">已打回</text><button v-else class="text-button" :disabled="busy" @click="emit('allow-resubmission', row.submission)">打回</button></view>
       <view v-if="row.submission" class="ai-batch-row-bottom"><text class="tiny subtle">{{ rowDescription(row) }}</text><button class="text-button" :disabled="busy" @click="openRow(row)">查看详情 ›</button></view>
     </view>
     <view v-if="!visibleRows.length" class="card empty-state">{{ query ? '没有找到对应学生。' : '当前筛选下暂无学生。' }}</view>

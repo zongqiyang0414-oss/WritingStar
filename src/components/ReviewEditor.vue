@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch } from "vue";
+import { ref, watch, nextTick, getCurrentInstance } from "vue";
 import { rubric, total } from "../services/rubric.js";
 
 const props = defineProps({
@@ -11,6 +11,7 @@ const props = defineProps({
   },
 });
 const emit = defineEmits(["category", "dimension", "score"]);
+const instance = getCurrentInstance();
 const collapsedDimensions = ref([]);
 watch(() => [props.category, props.review], () => { collapsedDimensions.value = []; });
 function toggleDimension(id) {
@@ -18,10 +19,21 @@ function toggleDimension(id) {
     ? collapsedDimensions.value.filter(item => item !== id)
     : [...collapsedDimensions.value, id];
 }
+async function goComposition() {
+  emit('category', 'composition');
+  await nextTick();
+  uni.createSelectorQuery().in(instance.proxy)
+    .select('.review-category-start').boundingClientRect()
+    .selectViewport().scrollOffset()
+    .exec(([rect, viewport]) => {
+      if (rect && viewport) uni.pageScrollTo({ scrollTop: Math.max(0, rect.top + viewport.scrollTop - 16), duration: 200 });
+    });
+}
 </script>
 
 <template>
-  <view class="category-switch">
+  <view class="review-editor">
+  <view class="category-switch review-category-start">
     <button
       :class="{ active: 'handwriting' === category }"
       @click="(e) => emit('category', 'handwriting')"
@@ -121,5 +133,6 @@ function toggleDimension(id) {
     />
   </view>
 
-  <button v-if="category === 'handwriting'" class="secondary full-width spaced" @click="emit('category', 'composition')">转到写作评价 ›</button>
+  <button v-if="category === 'handwriting'" class="secondary full-width spaced" @click="goComposition">转到写作评价 ›</button>
+  </view>
 </template>

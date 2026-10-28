@@ -190,6 +190,9 @@ function toggleFeedbackDimension(id) {
     ? feedbackCollapsed.value.filter(value => value !== id)
     : [...feedbackCollapsed.value, id];
 }
+function previewSubmittedWork(index) {
+  uni.previewImage({ urls: selectedSubmission.value.photos.map(photo => displayPhoto(photo.url)), current: index });
+}
 </script>
 
 <template>
@@ -751,7 +754,7 @@ function toggleFeedbackDimension(id) {
                               <view class="scan-import-actions"><button class="secondary" :disabled="busy" @click="openPaperCards">{{ isTeacher ? '查看 / 打印答题卡' : '下载 / 打印答题卡' }}</button><button class="primary" :disabled="busy" @click="openPaperScan">{{ isTeacher ? '批量扫描上传' : '上传答题卡' }}</button></view>
                               <view v-if="!isTeacher" class="tiny subtle spaced-small">家长可协助打印和拍照，提交后可查看本人的AI学习建议。</view>
                             </view>
-                            <view v-if="!boundStudent?.archived" class="card excellent-entry">
+                            <view v-if="!isTeacher && !boundStudent?.archived" class="card excellent-entry">
                               <view class="excellent-symbol">★</view>
                               <view class="grow"><view class="strong">本次优秀作业</view><view class="tiny subtle">{{ classExcellentWorks.filter((item) => item.assignmentId === selectedAssignment.id).length }} 份作品供全班参考</view></view>
                               <button class="text-button" :disabled="busy" @click="openExcellentWorks(selectedAssignment)">查看作品 ›</button>
@@ -762,6 +765,11 @@ function toggleFeedbackDimension(id) {
                                 <view class="ai-entry-counts"><text>处理中 {{ aiSummary.running + aiSummary.waiting }}</text><text>待审核 {{ aiSummary.readyToPublish }}</text><text>已审核 {{ aiSummary.published }}</text></view>
                                 <button class="primary full-width" :disabled="busy" @click="openAiBatch">查看全班AI批阅详情</button>
                               </view>
+                            <view v-if="!boundStudent?.archived" class="card excellent-entry">
+                              <view class="excellent-symbol">★</view>
+                              <view class="grow"><view class="strong">本次优秀作业</view><view class="tiny subtle">{{ classExcellentWorks.filter((item) => item.assignmentId === selectedAssignment.id).length }} 份作品供全班参考</view></view>
+                              <button class="text-button" :disabled="busy" @click="openExcellentWorks(selectedAssignment)">查看作品 ›</button>
+                            </view>
                               <view class="section-heading">
                                 <view class="section-title"> 提交名单 </view>
                                 <text class="small subtle">
@@ -1002,7 +1010,6 @@ function toggleFeedbackDimension(id) {
                                   {{ statusLabel(selectedSubmission) }}
                                 </text>
                               </view>
-                              <view class="ai-review-shortcut"><view><view class="strong">AI双写建议</view><view class="tiny subtle">{{ aiStateLabel(selectedSubmission) }}</view></view><button class="text-button" :disabled="busy" @click="openAiReview(selectedSubmission)">查看AI批阅 ›</button></view>
 
 
                                   <view :key="0" class="card photo-reader">
@@ -1053,6 +1060,8 @@ function toggleFeedbackDimension(id) {
                                   </view>
 
 
+                              <view class="ai-review-shortcut"><view><view class="strong">AI双写建议</view><view class="tiny subtle">{{ aiStateLabel(selectedSubmission) }}</view></view><button class="text-button" :disabled="busy" @click="openAiReview(selectedSubmission)">查看AI批阅 ›</button></view>
+                                  <view v-if="selectedSubmission.status === 'pending'" class="notice review-source-note">{{ selectedSubmission.aiReview?.result ? (selectedSubmission.draftRevision ? '当前显示的是教师在AI批阅结果基础上修改的分数和评价。可点击分数或评价继续修改。' : '下方分数和评价为AI批阅结果。如需调整，教师可点击分数或评价直接修改。') : 'AI批阅尚无可用结果，教师可直接填写或修改分数和评价。' }}</view>
                                   <ReviewEditor
                                     v-if="['pending', 'published'].includes(selectedSubmission.status)"
                                     :review="review"
@@ -1085,7 +1094,7 @@ function toggleFeedbackDimension(id) {
                                   </view>
                                 </template>
 
-                              <view v-if="canAllowResubmission(selectedSubmission)" class="spaced-small"><view v-if="canResubmit(selectedSubmission)" class="small subtle resubmission-agreed">已同意重新提交，等待学生上传。</view><button v-else class="secondary full-width" :disabled="busy" @click="agreeResubmission(selectedSubmission)">让学生重新提交本次作业</button></view>
+                              <view v-if="canAllowResubmission(selectedSubmission)" class="spaced-small"><view v-if="canResubmit(selectedSubmission)" class="small subtle resubmission-agreed">作业已打回，待学生重新提交</view><button v-else class="secondary full-width" :disabled="busy" @click="agreeResubmission(selectedSubmission)">让学生重新提交本次作业</button></view>
                             </view>
                           </template>
                           <template v-else>
@@ -1238,6 +1247,13 @@ function toggleFeedbackDimension(id) {
                                         </view>
                                       </view>
                                     </view>
+                                    <view class="card feedback-original-work">
+                                      <view class="section-title">学生提交的作品</view>
+                                      <view v-for="(photo, index) in selectedSubmission.photos" :key="photo.id" class="feedback-work-page">
+                                        <view class="small subtle spaced">第 {{ index + 1 }} / {{ selectedSubmission.photos.length }} 页</view>
+                                        <image class="essay-image" :src="displayPhoto(photo.url)" mode="widthFix" @click="previewSubmittedWork(index)" />
+                                      </view>
+                                    </view>
                                     <view class="teacher-note card">
                                       <view class="teacher-note-header">
                                         <view class="avatar tiny-avatar">
@@ -1378,7 +1394,6 @@ function toggleFeedbackDimension(id) {
                                     >
                                       查看作业记录 ›
                                     </button>
-                                    <view v-if="canAllowResubmission(selectedSubmission)" class="spaced"><view v-if="canResubmit(selectedSubmission)" class="small subtle resubmission-agreed">已同意重新提交，等待学生上传。</view><button v-else class="secondary full-width" :disabled="busy" @click="agreeResubmission(selectedSubmission)">让学生重新提交本次作业</button></view>
                                   </template>
                                   <template v-else>
                                     <view :key="1" class="empty-state card">
