@@ -1,5 +1,7 @@
 # 写字星 · WritingStar v0.12.0
 
+2026-10-29最新网页交付：当前v0.12.0相机／相册修复版已部署到[原私有站点](https://writingstar.zongqiyang0414.chatgpt.site)，保持原所有者访问范围。此状态取代下方开发时“暂缓部署”的说明，发布证据见[交付状态](docs/云端交付状态.md)。
+
 2026-10-29相机权限修复已接续v0.12.0功能分支：点击开启原生相机、独立相册和系统拍摄、正确等待选图恢复并区分权限失败。新[微信导入包](outputs/WritingStar-v0.12.0-weixin-camera-fix-20261029.zip)替换旧扫描包，[授权操作说明](docs/扫描相机授权与排障.md)。网页部署仍按此前要求暂缓，真实微信及Chrome iOS需复测。
 
 当前扫描更新接续v0.12.0分支`feature/teacher-controlled-resubmission-2026-10-23`。新增实时框选、自动拍摄和纸面增强，沿用学生码归档；main本轮误推已回退。最新微信导入包见[下载](outputs/WritingStar-v0.12.0-weixin-scan-latest.zip)，浏览器部署暂缓。
