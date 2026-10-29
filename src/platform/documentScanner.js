@@ -1,9 +1,9 @@
 import jsQR from "jsqr";
 import { paperId } from "../services/paperWorkflow.js";
-import { enhanceDocument } from "./documentScan.js";
+import { analyzeDocument, enhanceDocument, rectifyDocument } from "./documentScan.js";
 
 // Four solid corner marks give a stable target even on a light desktop.
-export function detectPaperCorners({ data, width, height }) {
+export function detectPaperCorners({ data, width, height }, { markersOnly = false } = {}) {
   const seen = new Uint8Array(width * height), candidates = [];
   const dark = i => data[i * 4] + data[i * 4 + 1] + data[i * 4 + 2] < 210;
   for (let start = 0; start < seen.length; start++) {
@@ -34,6 +34,7 @@ export function detectPaperCorners({ data, width, height }) {
     corners = corners.map(p => ({ x: Math.max(0, Math.min(width - 1, center.x + (p.x - center.x) * 1.065)),
       y: Math.max(0, Math.min(height - 1, center.y + (p.y - center.y) * 1.065)) }));
   } else {
+    if (markersOnly) return null;
     // Light sheet on a darker surface. Reject frames where the full background is light.
     const points = [];
     for (let y = 0; y < height; y += 3) for (let x = 0; x < width; x += 3) {
@@ -106,17 +107,21 @@ function canvasFor(source, max = 1800) {
 export function inspectScanFrame(source) {
   const canvas = canvasFor(source, 480), context = canvas.getContext("2d", {willReadFrequently: true});
   const data = context.getImageData(0, 0, canvas.width, canvas.height);
-  return { corners: detectPaperCorners(data), width: canvas.width, height: canvas.height };
+  const detected = analyzeDocument(data);
+  const corners = detected?.corners.map(p => ({ x: p.x * (canvas.width - 1), y: p.y * (canvas.height - 1) }))
+    || detectPaperCorners(data, { markersOnly: true });
+  return { corners, width: canvas.width, height: canvas.height };
 }
 export async function processScanSource(source, name = "扫描答题卡") {
   let canvas = canvasFor(source), context = canvas.getContext("2d", {willReadFrequently: true});
   let pixels = context.getImageData(0, 0, canvas.width, canvas.height);
   let code = readStudentCode(pixels);
-  const inspect = inspectScanFrame(source), corners = inspect.corners?.map(p => ({ x: p.x * canvas.width / inspect.width, y: p.y * canvas.height / inspect.height }));
+  const inspect = inspectScanFrame(source), corners = inspect.corners?.map(p => ({ x: p.x / (inspect.width - 1), y: p.y / (inspect.height - 1) }));
   if (corners) {
-    const output = document.createElement("canvas"), size = paperOutputSize(corners); output.width = size.width; output.height = size.height;
+    const corrected = await rectifyDocument(pixels, corners);
+    const output = document.createElement("canvas"); output.width = corrected.width; output.height = corrected.height;
     const out = output.getContext("2d"), target = out.createImageData(output.width, output.height);
-    target.data.set(rectifyPaperPixels(pixels, corners, output.width, output.height).data);
+    target.data.set(corrected.data);
     out.putImageData(target, 0, 0); canvas = output;
     if (!code) code = readStudentCode(target);
   }

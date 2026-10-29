@@ -20,8 +20,10 @@ export function analyzePaperCapture(image) {
   const small = downsample(image, 480);
   const detected = analyzeDocument(small);
   if (detected) return detected;
-  const corners = detectPaperCorners(small)?.map(p => ({ x: p.x / (small.width - 1), y: p.y / (small.height - 1) }));
-  return validQuad(corners, 0.15) ? { corners, confidence: 0.85, fingerprint: [] } : null;
+  const corners = detectPaperCorners(small, { markersOnly: true })?.map(p => ({ x: p.x / (small.width - 1), y: p.y / (small.height - 1) }));
+  // Printed marks can guide a manual crop, but do not prove that all four
+  // physical edges are visible. Never promote this estimate to an auto shutter.
+  return validQuad(corners, 0.15) ? { corners, confidence: 0.65, autoEligible: false, fingerprint: [] } : null;
 }
 
 // Read the identifier before enhancement, then retry on the rectified pixels.

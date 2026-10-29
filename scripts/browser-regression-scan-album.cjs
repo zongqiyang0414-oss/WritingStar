@@ -1,0 +1,65 @@
+// Exercise real multiple-file inputs and sequential processing, including a
+// manual-corner interruption between two successfully detected pages.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const http = require('node:http');
+const { chromium } = require(process.env.WRITINGSTAR_PLAYWRIGHT_MODULE || 'playwright');
+const root = path.resolve(__dirname, '../dist/build/h5');
+const types = {'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.svg':'image/svg+xml'};
+const server = http.createServer((req,res) => {
+  const file = path.resolve(root, '.' + (new URL(req.url,'http://localhost').pathname === '/' ? '/index.html' : decodeURIComponent(new URL(req.url,'http://localhost').pathname)));
+  if(!file.startsWith(root+path.sep)||!fs.existsSync(file)||!fs.statSync(file).isFile()){res.writeHead(404);res.end();return;}
+  res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream'});fs.createReadStream(file).pipe(res);
+});
+(async()=>{
+  let browser; const errors=[];
+  try {
+    await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+    browser=await chromium.launch({executablePath:process.env.WRITINGSTAR_CHROMIUM_EXECUTABLE||'/usr/bin/chromium',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
+    const page=await browser.newPage({viewport:{width:390,height:900}});
+    page.setDefaultTimeout(20000);page.on('pageerror',e=>errors.push(e.message));
+    const base=`http://127.0.0.1:${server.address().port}/#/pages/scan/index?batch=paper&remaining=`;
+    const button=text=>page.locator('uni-button').filter({hasText:text});
+    await page.goto(base+'6',{waitUntil:'networkidle'});
+    const images=await page.evaluate(()=>[0,1,2].map(index=>{
+      const canvas=document.createElement('canvas');canvas.width=720;canvas.height=960;const ctx=canvas.getContext('2d');
+      ctx.fillStyle=index===1?'#eee':'#70645b';ctx.fillRect(0,0,720,960);
+      if(index!==1){const gradient=ctx.createLinearGradient(90,0,630,0);gradient.addColorStop(0,'#b6b6b6');gradient.addColorStop(1,'#e8e8e8');ctx.fillStyle=gradient;ctx.fillRect(90,80,540,800);}
+      ctx.strokeStyle='#292929';ctx.lineWidth=2;ctx.strokeRect(145,150,430,640);
+      ctx.fillStyle='#252525';ctx.font='25px sans-serif';ctx.fillText('Document '+(index+1),170,190);ctx.fillText(String(index+1),340,850);
+      return canvas.toDataURL('image/png');
+    }));
+    const files=images.map((image,index)=>({name:`test-page-${index+1}.png`,mimeType:'image/png',buffer:Buffer.from(image.split(',')[1],'base64')}));
+    const choose=async payload=>{const selected=page.waitForEvent('filechooser');await button('从相册扫描').click();const input=await selected;assert.equal(input.isMultiple(),true);await input.setFiles(payload);};
+    await choose(files);
+    await button('确认并处理').waitFor();
+    assert.match(await page.locator('.scan-count').innerText(),/^1/,'first image was processed before ambiguous second image');
+    assert.match(await page.locator('.scan-status').innerText(),/后续还有 1 张/);
+    await button('确认并处理').click();
+    await page.waitForFunction(()=>document.querySelector('.scan-count')?.textContent.startsWith('3'));
+    await button('调整边角').waitFor();
+    const third=await page.locator('.scan-result img').getAttribute('src');
+    await button('上一页').click();await page.waitForFunction(previous=>document.querySelector('.scan-result img')?.src!==previous,third);const second=await page.locator('.scan-result img').getAttribute('src');
+    await button('上一页').click();await page.waitForFunction(previous=>document.querySelector('.scan-result img')?.src!==previous,second);const first=await page.locator('.scan-result img').getAttribute('src');
+    assert.ok(first!==second && second!==third,'each selected page has its own result');
+    const quality=await page.evaluate(async source=>{
+      const image=new Image();await new Promise(resolve=>{image.onload=resolve;image.src=source;});
+      const c=document.createElement('canvas');c.width=image.width;c.height=image.height;const ctx=c.getContext('2d');ctx.drawImage(image,0,0);
+      const data=ctx.getImageData(0,0,c.width,c.height).data;
+      const gray=(x,y)=>data[(Math.round(y*c.height)*c.width+Math.round(x*c.width))*4];
+      return {width:c.width,height:c.height,white:gray(.5,.45),margin:gray(.03,.5),dark:Array.from({length:40},(_,i)=>gray(.102+i*.001,.5)).some(v=>v<100)};
+    },first);
+    assert.ok(quality.width<600&&quality.height<850,'desk cropped away');
+    assert.ok(quality.white>240&&quality.margin>235,'shadowed sheet becomes white including page margins');
+    assert.ok(quality.dark,'printed outline remains dark');
+    await page.screenshot({path:path.resolve(__dirname,'../outputs/scan-album-multiple-20261029.png')});
+    // A query-only hash change reuses the uni-app page instance; reload for a
+    // new independent scan session with a different remaining capacity.
+    await page.goto('about:blank');await page.goto(base+'2',{waitUntil:'networkidle'});await choose(files);
+    await page.locator('.scan-error').waitFor();assert.match(await page.locator('.scan-error').innerText(),/还可添加 2 页/);
+    assert.match(await page.locator('.scan-count').innerText(),/^0/,'over-limit choice does not partially import');
+    assert.deepEqual(errors,[]);
+    console.log('Album multiple input, selected order, corner-confirmation queue, white correction, retained print, outer margins and capacity limit passed.');
+  } finally {await browser?.close();server.close();}
+})().catch(error=>{console.error(error);process.exitCode=1;});

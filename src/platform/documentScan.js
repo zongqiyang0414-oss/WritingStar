@@ -1,94 +1,224 @@
-import { clamp, convexHull, hullToQuad, polygonArea, validQuad, projectiveMap, distance } from "./scanGeometry.js";
+import { clamp, convexHull, hullToQuad, orderQuad, polygonArea, validQuad, projectiveMap, distance } from "./scanGeometry.js";
 
 const luminance = (data, i) => (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
 
-// Bounded, low-resolution analysis; never pass full camera frames into Vue state.
+// Sample in image coordinates so detection and the full-quality still share the
+// same normalized corners, including when the analysis image is downscaled.
+function sample(gray, width, height, x, y) {
+  x = clamp(x, 0, width - 1); y = clamp(y, 0, height - 1);
+  const ix = Math.floor(x), iy = Math.floor(y), dx = x - ix, dy = y - iy;
+  const nx = Math.min(width - 1, ix + 1), ny = Math.min(height - 1, iy + 1);
+  return gray[iy * width + ix] * (1 - dx) * (1 - dy) + gray[iy * width + nx] * dx * (1 - dy)
+    + gray[ny * width + ix] * (1 - dx) * dy + gray[ny * width + nx] * dx * dy;
+}
+
+// Hull vertices are only proposals. Fit each physical border to many samples,
+// then intersect neighboring lines; dilation and raster stair-steps must not
+// determine the final crop. Contrast farther across the line rejects printed
+// rules whose two sides are actually the same paper surface.
+function fitBorder(quad, side, gray, width, height) {
+  const a = quad[side], b = quad[(side + 1) % 4];
+  const ax = a.x * (width - 1), ay = a.y * (height - 1);
+  const dx = (b.x - a.x) * (width - 1), dy = (b.y - a.y) * (height - 1), length = Math.hypot(dx, dy);
+  const tx = dx / length, ty = dy / length, nx = -ty, ny = tx;
+  const points = [], search = Math.max(3, Math.min(7, Math.max(width, height) * .018));
+  for (let index = 0; index < 36; index++) {
+    const along = length * (.07 + index / 35 * .86), x = ax + tx * along, y = ay + ty * along;
+    let best = null;
+    for (let offset = -search; offset <= search; offset += .5) {
+      const px = x + nx * offset, py = y + ny * offset;
+      const near = sample(gray, width, height, px + nx * 1.25, py + ny * 1.25) - sample(gray, width, height, px - nx * 1.25, py - ny * 1.25);
+      const across = sample(gray, width, height, px + nx * 4, py + ny * 4) - sample(gray, width, height, px - nx * 4, py - ny * 4);
+      if (Math.abs(across) < 5 || near * across <= 0) continue;
+      const strength = Math.min(Math.abs(near), Math.abs(across)) - Math.abs(offset) * .15;
+      if (!best || strength > best.strength) best = { along, offset, strength, across };
+    }
+    if (best && best.strength >= 3.5) points.push(best);
+  }
+  if (points.length < 22) return null;
+  const polarity = Math.sign(points.reduce((total, p) => total + Math.sign(p.across), 0));
+  let retained = points.filter(p => Math.sign(p.across) === polarity);
+  if (retained.length < 22) return null;
+  let intercept = 0, slope = 0;
+  for (let pass = 0; pass < 3; pass++) {
+    let weight = 0, sumX = 0, sumY = 0, sumXX = 0, sumXY = 0;
+    for (const p of retained) {
+      // Cap weights so a few black characters cannot pull the paper edge inward.
+      const w = Math.min(30, p.strength);
+      weight += w; sumX += p.along * w; sumY += p.offset * w; sumXX += p.along * p.along * w; sumXY += p.along * p.offset * w;
+    }
+    const denominator = weight * sumXX - sumX * sumX;
+    if (Math.abs(denominator) < 1e-6) return null;
+    slope = (weight * sumXY - sumX * sumY) / denominator;
+    intercept = (sumY - slope * sumX) / weight;
+    retained = retained.filter(p => Math.abs(p.offset - intercept - slope * p.along) < 1.8);
+    if (retained.length < 20) return null;
+  }
+  const normalX = nx - slope * tx, normalY = ny - slope * ty;
+  return { x: normalX, y: normalY, c: normalX * ax + normalY * ay + intercept,
+    support: retained.length / 36, contrast: retained.reduce((sum, p) => sum + Math.abs(p.across), 0) / retained.length, polarity };
+}
+
+function refineQuad(quad, gray, width, height) {
+  const lines = quad.map((_, side) => fitBorder(quad, side, gray, width, height));
+  if (lines.some(line => !line)) return null;
+  // A sheet separates two surfaces in a consistent direction. Mixed polarity
+  // usually indicates an interior table, crossed shadows, or unrelated objects.
+  if (Math.abs(lines.reduce((sum, line) => sum + line.polarity, 0)) < 2) return null;
+  const corners = lines.map((line, index) => {
+    const previous = lines[(index + 3) % 4], det = previous.x * line.y - line.x * previous.y;
+    if (Math.abs(det) < .15) return { x: NaN, y: NaN };
+    return { x: (previous.c * line.y - line.c * previous.y) / det / (width - 1),
+      y: (previous.x * line.c - line.x * previous.c) / det / (height - 1) };
+  });
+  if (!validQuad(corners, .12) || corners.some(p => p.x < .012 || p.y < .012 || p.x > .988 || p.y > .988)) return null;
+  const sides = corners.map((p, i) => distance({ x: p.x * width, y: p.y * height }, { x: corners[(i + 1) % 4].x * width, y: corners[(i + 1) % 4].y * height }));
+  if (Math.max(...sides) / Math.min(...sides) > 3.4) return null;
+  const support = lines.reduce((sum, line) => sum + line.support, 0) / 4;
+  const confidence = clamp(.5 * support + .3 * Math.min(...lines.map(line => line.support)) + .2 * Math.min(1, Math.min(...lines.map(line => line.contrast)) / 18));
+  return { corners, confidence, score: polygonArea(corners) * confidence };
+}
+
+// Overlapping sheets can belong to a single bright component. Recover proposals
+// from long, independently supported lines instead of taking that merged hull.
+function lineQuads(gray, width, height) {
+  const diagonal = Math.ceil(Math.hypot(width, height)), bins = diagonal * 2 + 1, angles = 90;
+  const votes = new Uint16Array(angles * bins);
+  const cos = Array.from({ length: angles }, (_, i) => Math.cos(i * Math.PI / angles));
+  const sin = Array.from({ length: angles }, (_, i) => Math.sin(i * Math.PI / angles));
+  for (let y = 2; y < height - 2; y++) for (let x = 2; x < width - 2; x++) {
+    const i = y * width + x, gx = gray[i + 1] - gray[i - 1], gy = gray[i + width] - gray[i - width];
+    if (Math.hypot(gx, gy) < 7) continue;
+    const angle = Math.round((Math.atan2(gy, gx) + Math.PI) % Math.PI * angles / Math.PI) % angles;
+    for (let delta = -2; delta <= 2; delta++) {
+      const a = (angle + delta + angles) % angles, rho = Math.round(x * cos[a] + y * sin[a]) + diagonal;
+      votes[a * bins + rho]++;
+    }
+  }
+  const peaks = [], minimum = Math.min(width, height) * .24;
+  for (let a = 0; a < angles; a++) for (let r = 1; r < bins - 1; r++) {
+    const v = votes[a * bins + r];
+    if (v >= minimum && v >= votes[a * bins + r - 1] && v >= votes[a * bins + r + 1]) peaks.push({ a, c: r - diagonal, votes: v, x: cos[a], y: sin[a] });
+  }
+  peaks.sort((a, b) => b.votes - a.votes);
+  const lines = [];
+  for (const line of peaks) {
+    if (lines.some(other => {
+      const dot = line.x * other.x + line.y * other.y;
+      return Math.abs(dot) > .994 && Math.abs(line.c - Math.sign(dot) * other.c) < 6;
+    })) continue;
+    // Reject ink rules before combining lines. A rule is dark only on the line;
+    // a physical edge separates different surface intensities on either side.
+    let supported = 0;
+    const tx = -line.y, ty = line.x;
+    for (let t = -diagonal; t <= diagonal; t += 4) {
+      const x = line.x * line.c + tx * t, y = line.y * line.c + ty * t;
+      if (x < 6 || y < 6 || x >= width - 6 || y >= height - 6) continue;
+      const inside = sample(gray, width, height, x + line.x * 4, y + line.y * 4);
+      const outside = sample(gray, width, height, x - line.x * 4, y - line.y * 4);
+      if (Math.abs(inside - outside) > 7) supported++;
+    }
+    if (supported < Math.min(width, height) * .065) continue;
+    lines.push(line);
+    if (lines.length === 28) break;
+  }
+  const pairs = [];
+  for (let i = 0; i < lines.length; i++) for (let j = i + 1; j < lines.length; j++) {
+    const a = lines[i], b = lines[j], dot = a.x * b.x + a.y * b.y;
+    if (Math.abs(dot) > .94 && Math.abs(a.c - Math.sign(dot) * b.c) > Math.min(width, height) * .23) pairs.push([a, b]);
+  }
+  const intersect = (a, b) => {
+    const det = a.x * b.y - a.y * b.x;
+    return { x: (a.c * b.y - a.y * b.c) / det / (width - 1), y: (a.x * b.c - a.c * b.x) / det / (height - 1) };
+  };
+  const proposals = [];
+  for (let i = 0; i < pairs.length; i++) for (let j = i + 1; j < pairs.length; j++) {
+    const [a, b] = pairs[i], [c, d] = pairs[j];
+    if (Math.abs(a.x * c.x + a.y * c.y) > .4) continue;
+    const quad = orderQuad([intersect(a, c), intersect(a, d), intersect(b, c), intersect(b, d)]);
+    if (!validQuad(quad, .12) || quad.some(p => p.x < .01 || p.x > .99 || p.y < .01 || p.y > .99)) continue;
+    proposals.push({ quad, score: polygonArea(quad) * Math.min(a.votes, b.votes, c.votes, d.votes) });
+  }
+  proposals.sort((a, b) => b.score - a.score);
+  return proposals.slice(0, 24).map(p => p.quad);
+}
+
+// Bounded analysis with both contrast polarities. Otsu separates the surfaces;
+// histogram quantiles and connected edges cover shadows and printed worksheets.
 export function analyzeDocument(image) {
-  const scale = Math.min(1, 256 / Math.max(image.width, image.height));
+  if (!image?.data || image.width < 16 || image.height < 16 || image.data.length < image.width * image.height * 4) return null;
+  const scale = Math.min(1, 384 / Math.max(image.width, image.height));
   const width = Math.round(image.width * scale), height = Math.round(image.height * scale);
   const gray = new Uint8Array(width * height), histogram = new Uint32Array(256);
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    const i = (Math.min(image.height - 1, Math.floor(y / scale)) * image.width + Math.min(image.width - 1, Math.floor(x / scale))) * 4;
-    const value = luminance(image.data, i);
+    const sx = Math.round(x / (width - 1) * (image.width - 1)), sy = Math.round(y / (height - 1) * (image.height - 1));
+    const value = luminance(image.data, (sy * image.width + sx) * 4);
     gray[y * width + x] = value; histogram[value]++;
   }
   let sum = 0, count = 0, leftSum = 0, variance = 0, otsu = 128;
   for (let i = 0; i < 256; i++) sum += histogram[i] * i;
+  const quantiles = [];
   for (let i = 0; i < 255; i++) {
     count += histogram[i]; leftSum += histogram[i] * i;
+    for (const fraction of [.2, .5, .8]) if (count >= gray.length * fraction && quantiles.length < [.2, .5, .8].indexOf(fraction) + 1) quantiles.push(i);
     if (!count || count === gray.length) continue;
     const difference = leftSum / count - (sum - leftSum) / (gray.length - count);
     const value = count * (gray.length - count) * difference * difference;
     if (value > variance) { variance = value; otsu = i; }
   }
-  const gradient = new Uint16Array(gray.length);
-  for (let y = 1; y < height - 1; y++) for (let x = 1; x < width - 1; x++) {
+  if (!variance) return null;
+  const thresholds = [...new Set([otsu, ...quantiles.slice(0, -1).map((value, i) => Math.round((value + quantiles[i + 1]) / 2))])];
+  const masks = thresholds.flatMap(threshold => [gray.map(v => v > threshold ? 1 : 0), gray.map(v => v <= threshold ? 1 : 0)]);
+  const edges = new Uint8Array(gray.length);
+  // A low absolute floor allows pale paper on a pale desk; line fitting below
+  // requires a coherent, long border and rejects isolated texture/noise.
+  for (let y = 2; y < height - 2; y++) for (let x = 2; x < width - 2; x++) {
     const i = y * width + x;
     const gx = gray[i - width + 1] + 2 * gray[i + 1] + gray[i + width + 1] - gray[i - width - 1] - 2 * gray[i - 1] - gray[i + width - 1];
     const gy = gray[i + width - 1] + 2 * gray[i + width] + gray[i + width + 1] - gray[i - width - 1] - 2 * gray[i - width] - gray[i - width + 1];
-    gradient[i] = Math.abs(gx) + Math.abs(gy);
-  }
-  const masks = [otsu + 10, otsu + 35, 185].map(threshold => gray.map(v => v > Math.min(235, threshold) ? 1 : 0));
-  // Connected edge contours supplement brightness segmentation on shaded paper.
-  const edges = new Uint8Array(gray.length);
-  for (let y = 2; y < height - 2; y++) for (let x = 2; x < width - 2; x++) {
-    const i = y * width + x;
-    if (gradient[i] > 110) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) edges[i + dy * width + dx] = 1;
+    if (Math.abs(gx) + Math.abs(gy) > 24) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) edges[i + dy * width + dx] = 1;
   }
   masks.push(edges);
   let best = null;
+  const queue = new Int32Array(gray.length);
   for (const mask of masks) {
-    const queue = new Int32Array(mask.length);
     for (let start = 0; start < mask.length; start++) {
-      if (!mask[start]) continue;
-      let head = 0, tail = 1;
-      queue[0] = start; mask[start] = 0;
+      if (mask[start] !== 1) continue;
+      let head = 0, tail = 1, touchesFrame = false;
+      queue[0] = start; mask[start] = 2;
       const boundary = [];
       while (head < tail) {
         const i = queue[head++], x = i % width, y = Math.floor(i / width);
         let edge = false;
+        if (!x || !y || x === width - 1 || y === height - 1) touchesFrame = true;
         for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
           const nx = x + dx, ny = y + dy, ni = ny * width + nx;
           if (nx < 0 || ny < 0 || nx >= width || ny >= height) { edge = true; continue; }
           if (mask[ni] === 1) { mask[ni] = 2; queue[tail++] = ni; }
           else if (mask[ni] === 0) edge = true;
         }
-        // Mark visited separately so component interiors do not all enter hull sorting.
-        mask[i] = 2;
         if (edge) boundary.push({ x: x / (width - 1), y: y / (height - 1) });
       }
-      for (let i = 0; i < tail; i++) mask[queue[i]] = 0;
-      if (tail < gray.length * 0.025 || boundary.length < 4) continue;
+      // Keep visited pixels distinct from background. Clearing them would turn
+      // every processed component interior into a boundary for its neighbors.
+      if (touchesFrame || tail < gray.length * .006 || boundary.length < 4) continue;
       const hull = convexHull(boundary), quad = hullToQuad(hull);
-      if (!validQuad(quad, 0.15) || polygonArea(quad) / polygonArea(hull) < 0.88) continue;
-      if (quad.some(p => p.x < 0.012 || p.y < 0.012 || p.x > 0.988 || p.y > 0.988)) continue;
-      const sides = quad.map((p, i) => distance({ x: p.x * width, y: p.y * height }, { x: quad[(i + 1) % 4].x * width, y: quad[(i + 1) % 4].y * height }));
-      if (Math.max(...sides) / Math.min(...sides) > 3.4) continue;
-      const supports = quad.map((p, side) => {
-        const q = quad[(side + 1) % 4];
-        let supported = 0;
-        for (let t = 0.08; t < 0.95; t += 0.03) {
-          const x = Math.round((p.x + (q.x - p.x) * t) * (width - 1));
-          const y = Math.round((p.y + (q.y - p.y) * t) * (height - 1));
-          let maximum = 0;
-          for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) maximum = Math.max(maximum, gradient[clamp(y + dy, 0, height - 1) * width + clamp(x + dx, 0, width - 1)]);
-          if (maximum > 85) supported++;
-        }
-        return supported / 29;
-      });
-      if (Math.min(...supports) < 0.48) continue;
-      const confidence = supports.reduce((s, n) => s + n, 0) / 4;
-      // Prefer the paper region over a similarly sized dilated edge contour;
-      // the latter includes a thin strip of desk outside the physical border.
-      const score = polygonArea(quad) * confidence * (mask === edges ? 0.94 : 1);
-      if (!best || score > best.score) best = { corners: quad, confidence, score };
+      if (!validQuad(quad, .12) || polygonArea(quad) / polygonArea(hull) < .86) continue;
+      const candidate = refineQuad(quad, gray, width, height);
+      if (candidate && (!best || candidate.score > best.score)) best = candidate;
     }
+  }
+  // Run the bounded line search only when components do not yield a strong
+  // sheet. This covers stacked pages without adding work to clean frames.
+  if (!best || best.confidence < .82) for (const quad of lineQuads(gray, width, height)) {
+    const candidate = refineQuad(quad, gray, width, height);
+    if (candidate && (!best || candidate.score > best.score)) best = candidate;
   }
   if (!best) return null;
   const project = projectiveMap(best.corners), fingerprint = [];
   for (let y = 1; y <= 16; y++) for (let x = 1; x <= 12; x++) {
     const p = project(x / 13, y / 17);
-    fingerprint.push(gray[Math.round(p.y * (height - 1)) * width + Math.round(p.x * (width - 1))] / 255);
+    fingerprint.push(sample(gray, width, height, p.x * (width - 1), p.y * (height - 1)) / 255);
   }
   return { corners: best.corners, confidence: best.confidence, fingerprint };
 }

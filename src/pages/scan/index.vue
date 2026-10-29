@@ -7,26 +7,28 @@ import { AutoScanGate } from "../../platform/autoScan.js";
 import { clamp, fitRect, validQuad } from "../../platform/scanGeometry.js";
 import { MAX_PHOTOS } from "../../platform/photos.js";
 import { nativeScanError } from "../../platform/scanAccess.js";
-import { authorizeScanCamera, chooseScanSource, createScanRenderer, openScanSettings, openScanAppSettings, openScanPrivacyContract, persistScanPages, startNativeFrames, takeNativePhoto } from "../../platform/scanner.js";
+import { authorizeScanCamera, chooseScanSources, createScanRenderer, openScanSettings, openScanAppSettings, openScanPrivacyContract, persistScanPages, startNativeFrames, takeNativePhoto } from "../../platform/scanner.js";
 // #ifdef H5
 import { openBrowserCamera } from "../../platform/scanner.js";
 // #endif
 
 const instance = getCurrentInstance().proxy;
-const mode = ref("live"), automatic = ref(false), busy = ref(false), saving = ref(false), cameraMounted = ref(false), cameraReady = ref(false);
+const mode = ref("live"), automatic = ref(true), busy = ref(false), saving = ref(false), cameraMounted = ref(false), cameraReady = ref(false);
 const errorAction = ref(""), errorDetail = ref("");
 const realtime = ref(true), starting = ref(false), error = ref(""), notice = ref("将整张作业放入画面，四周留出一些背景");
 const outlineUrl = ref(""), progress = ref(0), waiting = ref(false), pages = shallowRef([]), selected = ref(0), capacity = ref(MAX_PHOTOS);
 const paperBatch = ref(false);
+const importQueue = shallowRef([]), importStatus = ref("");
 const pending = shallowRef(null), corners = ref([]), stage = ref({ width: 300, height: 400, left: 0, top: 0 });
 const current = computed(() => pages.value[selected.value]);
 const full = computed(() => pages.value.length >= capacity.value);
 const fit = computed(() => pending.value ? fitRect(pending.value.width, pending.value.height, stage.value.width, stage.value.height) : stage.value);
-const frameText = computed(() => busy.value ? "正在裁切、矫正并增强纸面…" : full.value ? "本次页数已满，请检查后完成" : waiting.value && automatic.value ? "本页已扫描，请移开后放入下一张" : notice.value);
+const frameText = computed(() => busy.value ? importStatus.value || "正在裁切、矫正并增强纸面…" : full.value ? "本次页数已满，请检查后完成" : waiting.value && automatic.value ? "本页已扫描，请移开后放入下一张" : notice.value);
 const gate = new AutoScanGate();
 const initialized = ref(false), delivered = ref(false);
 let renderer, rendererPromise, nativeContext, browserCamera, stopFrames, channel, foreground = true, disposed = false, resumePicker;
 let epoch = 0, lastFrame = 0, drawing = false, lastDetection = null, dragging = -1, replacing = -1, choosing = false;
+let detectionErrors = 0;
 
 onLoad(options => {
   paperBatch.value = options?.batch === "paper";
@@ -41,7 +43,10 @@ onReady(() => {
   // Open the camera only from a click; page navigation/onReady is not a camera
   // gesture on mobile browsers. Canvas initialization must not block access.
 });
-onShow(() => { foreground = true; resumePicker?.(); });
+onShow(() => {
+  foreground = true; resumePicker?.();
+  if (importQueue.value.length && !busy.value && !pending.value) processImportQueue();
+});
 onResize(async () => { await nextTick(); if (!disposed) await measure(); });
 watch([mode, error, () => pages.value.length, waiting], async () => { await nextTick(); if (!disposed) await measure(); });
 onHide(() => { foreground = false; releaseCamera(); });
@@ -62,7 +67,7 @@ function clearOutline() {
 function releaseCamera() {
   epoch++; stopFrames?.(); stopFrames = null; browserCamera?.close(); browserCamera = null;
   nativeContext = null; cameraMounted.value = false; cameraReady.value = false; starting.value = false;
-  lastDetection = null; gate.restart(); progress.value = 0; clearOutline();
+  lastDetection = null; lastFrame = 0; detectionErrors = 0; gate.restart(); progress.value = 0; waiting.value = gate.locked; clearOutline();
 }
 async function ensureRenderer() {
   if (renderer) return renderer;
@@ -150,26 +155,46 @@ async function waitForPickerReturn() {
 }
 async function receiveFrame(frame) {
   const now = Date.now();
-  if (disposed || !foreground || !cameraReady.value || mode.value !== "live" || busy.value || drawing || full.value || now - lastFrame < 280) return;
+  if (disposed || !foreground || !cameraReady.value || mode.value !== "live" || busy.value || drawing || full.value || now - lastFrame < 180) return;
   lastFrame = now;
   const token = epoch;
+  drawing = true;
   try {
     const detection = analyzePaperCapture(frame); lastDetection = detection;
+    detectionErrors = 0;
     const state = gate.update(detection, now); progress.value = state.progress; waiting.value = state.waiting;
     if (detection) {
-      drawing = true;
-      await ensureRenderer();
-      const path = await renderer.drawOutline(detection.corners, frame.width, frame.height, stage.value);
-      if (token !== epoch || disposed) { renderer.remove(path); return; }
-      const old = outlineUrl.value; outlineUrl.value = path; if (old) renderer.remove(old);
-      notice.value = automatic.value ? "已找到纸张，请保持稳定" : "已框住纸张，点击下方拍摄";
+      let cover = true;
+      // #ifdef H5
+      cover = false;
+      // #endif
+      try {
+        await ensureRenderer();
+        const path = await renderer.drawOutline(detection.corners, frame.width, frame.height, stage.value, cover, detection.autoEligible !== false);
+        if (token !== epoch || disposed) { renderer.remove(path); return; }
+        const old = outlineUrl.value; outlineUrl.value = path; if (old) renderer.remove(old);
+      } catch {
+        // A temporary outline/export failure must not disable recognition.
+        if (token !== epoch || disposed) return;
+        clearOutline();
+      }
+      notice.value = detection.autoEligible === false ? "边缘尚不完整，请露出纸张四边；也可拍摄后调角"
+        : !automatic.value ? "已框住纸张，点击下方拍摄"
+        : state.reason === "moving" ? "检测到移动，请放稳纸张"
+        : state.reason === "uncertain" ? "正在确认纸张边缘，请保持稳定"
+        : `已找到纸张，保持稳定 ${Math.round(progress.value * 100)}%`;
     } else {
       clearOutline(); notice.value = "寻找纸张边缘，请放平作业并避开遮挡";
     }
-    if (automatic.value && realtime.value && state.capture && token === epoch) await capture(true);
+    if (automatic.value && realtime.value && state.capture && token === epoch) {
+      if (Date.now() - now > 650) { gate.restart(); progress.value = 0; }
+      else await capture(true);
+    }
   } catch {
-    realtime.value = false; automatic.value = false; clearOutline();
-    notice.value = "实时识别暂不可用，可以点击拍摄后调整边角";
+    if (token !== epoch || disposed) return;
+    gate.restart(); progress.value = 0; clearOutline();
+    if (++detectionErrors >= 3) { realtime.value = false; automatic.value = false; }
+    notice.value = "正在重新识别，也可以点击拍摄后调整边角";
   } finally { drawing = false; }
 }
 function toggleAutomatic() {
@@ -199,7 +224,7 @@ async function capture(fromAutomatic = false) {
     automatic.value = false;
   } finally { busy.value = false; }
 }
-async function processSource(source, fromAutomatic, token) {
+async function processSource(source, fromAutomatic, token, fromImport = false) {
   await ensureRenderer();
   const image = await renderer.read(source);
   if (token !== epoch || disposed) throw new Error("扫描已暂停，请重新拍摄。");
@@ -214,7 +239,7 @@ async function processSource(source, fromAutomatic, token) {
   const output = await makePage(source, image, detection.corners, token);
   pages.value = [...pages.value, output]; selected.value = pages.value.length - 1;
   notice.value = "扫描件已加入，请移开本页后放入下一张";
-  if (!fromAutomatic || full.value) { busy.value = false; reviewPage(selected.value); }
+  if (!fromImport && (!fromAutomatic || full.value)) { busy.value = false; reviewPage(selected.value); }
 }
 async function makePage(source, image, quad, token) {
   const cancelled = () => disposed || token !== epoch || !foreground;
@@ -231,13 +256,37 @@ async function importPage(sourceType = "album") {
   if (busy.value || choosing || full.value) return;
   choosing = true; clearError(); releaseCamera();
   try {
-    const source = await chooseScanSource(sourceType);
+    const sources = await chooseScanSources(sourceType, capacity.value - pages.value.length);
     await waitForPickerReturn();
-    if (disposed || !source) return;
-    await ensureRenderer(); renderer.track(source); busy.value = true;
-    await processSource(source, false, epoch);
+    if (!sources.length) return;
+    await ensureRenderer(); sources.forEach(source => renderer.track(source));
+    if (disposed) { sources.forEach(source => renderer.remove(source)); return; }
+    importQueue.value = sources;
+    await processImportQueue();
   } catch (failure) { if (!disposed) showFailure(failure, sourceType); }
   finally { choosing = false; busy.value = false; }
+}
+async function processImportQueue() {
+  busy.value = true;
+  try {
+    while (importQueue.value.length && !full.value && !disposed && foreground) {
+      const source = importQueue.value[0];
+      importQueue.value = importQueue.value.slice(1);
+      importStatus.value = `正在处理所选图片，还剩 ${importQueue.value.length + 1} 张…`;
+      const token = epoch;
+      try { await processSource(source, false, token, true); }
+      catch (failure) {
+        if (disposed) return;
+        if (!foreground || token !== epoch) { importQueue.value = [source, ...importQueue.value]; return; }
+        renderer.remove(source); showFailure(failure, "album");
+      }
+      if (mode.value === "corners") return;
+    }
+    if (!disposed && pages.value.length) mode.value = "review";
+  } finally {
+    busy.value = false; importStatus.value = "";
+    if (!disposed && foreground && importQueue.value.length && !pending.value && !full.value) nextTick(processImportQueue);
+  }
 }
 function reviewPage(index) {
   if (busy.value || !pages.value[index]) return;
@@ -272,11 +321,13 @@ async function confirmCorners() {
     pages.value = updated; pending.value = null; mode.value = "review";
   } catch (failure) { if (!disposed) error.value = failure.message || "图片处理失败，请重试。"; }
   finally { busy.value = false; }
+  if (!pending.value && importQueue.value.length) await processImportQueue();
 }
-function cancelCorners() {
+async function cancelCorners() {
   if (busy.value) return;
   if (replacing < 0) renderer.remove(pending.value?.source);
   pending.value = null; error.value = "";
+  if (importQueue.value.length) { mode.value = "live"; await processImportQueue(); return; }
   if (pages.value.length) mode.value = "review";
   else { mode.value = "live"; startCamera(); }
 }
@@ -321,7 +372,7 @@ function leave() {
       <view class="scan-heading"><text class="scan-title">作业扫描</text><text class="scan-subtitle">{{ mode === 'corners' ? '调整纸张四角' : mode === 'review' ? '检查扫描效果' : '自动框选 · 清晰留存' }}</text></view>
       <text class="scan-count">{{ pages.length }} / {{ capacity }} 页</text>
     </view>
-    <view class="scan-status" role="status">{{ mode === 'live' ? frameText : busy ? (saving ? '正在保存扫描件…' : '正在裁切、矫正并增强纸面…') : mode === 'corners' ? '拖动四角框住纸张，保留完整笔迹' : '已裁切矫正 · 纸面增强，请检查笔迹和边缘' }}</view>
+    <view class="scan-status" role="status">{{ mode === 'live' ? frameText : busy ? (saving ? '正在保存扫描件…' : importStatus || '正在裁切、矫正并增强纸面…') : mode === 'corners' ? '拖动四角框住纸张，保留完整笔迹' + (importQueue.length ? ' · 后续还有 ' + importQueue.length + ' 张' : '') : '已裁切矫正 · 纸面增强，请检查笔迹和边缘' }}</view>
     <view id="scan-stage" class="scan-stage" @touchmove.stop.prevent="moveCorner" @touchend="dragging = -1" @touchcancel="dragging = -1" @mousemove="moveCorner" @mouseup="dragging = -1" @mouseleave="dragging = -1">
       <!-- #ifdef H5 -->
       <view v-show="mode === 'live'" id="scan-browser-camera" class="scan-camera" />
@@ -389,7 +440,7 @@ function leave() {
         <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy || full" @click="startCamera">继续扫描</button><button class="scan-primary" :disabled="busy || delivered" @click="finish">完成 {{ pages.length }} 页</button></view>
       </template>
       <template v-else>
-        <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy" @click="cancelCorners">取消调整</button><button class="scan-primary" :disabled="busy" @click="confirmCorners">确认并处理</button></view>
+        <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy" @click="cancelCorners">{{ importQueue.length ? '跳过此张' : '取消调整' }}</button><button class="scan-primary" :disabled="busy" @click="confirmCorners">确认并处理</button></view>
       </template>
     </view>
     <!-- #ifdef MP-WEIXIN -->

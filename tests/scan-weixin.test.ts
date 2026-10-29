@@ -114,3 +114,20 @@ test('微信扫描件保存失败回滚本次副本，原临时扫描件仍可�
     assert.deepEqual([...saved], existing, 'rollback does not remove earlier saved pages');
   } finally { globalThis.uni = originalUni; globalThis.wx = originalWx; }
 });
+
+test('微信相册按剩余页数多选并保留页序，系统相机仍只拍一张', async () => {
+  const originalUni = globalThis.uni, originalWx = globalThis.wx;
+  try {
+    const native = await nativeModule();
+    globalThis.wx = { chooseMedia(options) {
+      assert.equal(options.count, 3);
+      options.success({ tempFiles: [{ tempFilePath: '/tmp/first.jpg' }, { tempFilePath: '/tmp/second.jpg' }] });
+    } };
+    assert.deepEqual(await native.chooseScanSources('album', 3), ['/tmp/first.jpg', '/tmp/second.jpg']);
+    globalThis.wx.chooseMedia = options => { assert.equal(options.count, 9); options.fail({ errMsg: 'chooseMedia:fail cancel' }); };
+    assert.deepEqual(await native.chooseScanSources('album', 60), []);
+    globalThis.uni = { chooseImage(options) { assert.equal(options.count, 1); options.success({ tempFilePaths: ['/tmp/camera.jpg'] }); } };
+    assert.deepEqual(await native.chooseScanSources('camera', 60), ['/tmp/camera.jpg']);
+    assert.deepEqual(await native.chooseScanSources('album', 0), []);
+  } finally { globalThis.uni = originalUni; globalThis.wx = originalWx; }
+});

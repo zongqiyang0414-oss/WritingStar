@@ -69,6 +69,9 @@ export async function createScanRenderer(instance) {
   const transient = new Set();
   let disposed = false;
   const remove = path => {
+    // #ifdef H5
+    if (transient.delete(path) && path?.startsWith("blob:")) URL.revokeObjectURL(path);
+    // #endif
     // #ifdef MP-WEIXIN
     if (transient.delete(path)) uni.getFileSystemManager().unlink({ filePath: path, fail: () => {} });
     // #endif
@@ -125,15 +128,15 @@ export async function createScanRenderer(instance) {
     }
     throw new Error("扫描图片较大，请缩小拍摄范围后重试。");
   }
-  async function drawOutline(corners, frameWidth, frameHeight, stage, cover = true) {
+  async function drawOutline(corners, frameWidth, frameHeight, stage, cover = true, confirmed = true) {
     outline.width = Math.round(stage.width); outline.height = Math.round(stage.height);
     const rect = fitRect(frameWidth, frameHeight, outline.width, outline.height, cover);
     const ctx = outline.getContext("2d");
     ctx.clearRect(0, 0, outline.width, outline.height);
     ctx.beginPath();
     corners.forEach((p, i) => ctx[i ? "lineTo" : "moveTo"](rect.left + p.x * rect.width, rect.top + p.y * rect.height));
-    ctx.closePath(); ctx.fillStyle = "rgba(0,214,178,0.16)"; ctx.fill();
-    ctx.strokeStyle = "#00d6b2"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.closePath(); ctx.fillStyle = confirmed ? "rgba(0,214,178,0.16)" : "rgba(255,192,80,0.12)"; ctx.fill();
+    ctx.strokeStyle = confirmed ? "#00d6b2" : "#ffc050"; ctx.lineWidth = 2; ctx.stroke();
     return encode(outline, "png");
   }
   async function persist(path) {
@@ -178,39 +181,49 @@ export async function persistScanPages(renderer, photos, cancelled = () => false
   }
 }
 
-export function chooseScanSource(source = "album") {
+export async function chooseScanSource(source = "album") {
+  return (await chooseScanSources(source, 1))[0] || null;
+}
+
+export function chooseScanSources(source = "album", remaining = 1) {
+  const limit = source === "camera" ? 1 : Math.max(0, Math.floor(remaining));
+  if (!limit) return Promise.resolve([]);
   // #ifdef H5
   return new Promise((resolve, reject) => {
-    const input = document.createElement("input"); input.type = "file"; input.accept = "image/*";
+    const input = document.createElement("input"); input.type = "file"; input.accept = "image/jpeg,image/png,image/webp";
+    input.multiple = source === "album" && limit > 1;
     if (source === "camera") input.setAttribute("capture", "environment");
-    input.style.cssText = "position:fixed;left:-100px;width:1px;height:1px;opacity:0";
-    input.setAttribute("aria-hidden", "true");
+    input.style.cssText = "position:fixed;left:-10000px;width:1px;height:1px";
     document.body.appendChild(input);
-    const finish = value => { input.remove(); resolve(value); };
+    const finish = paths => { input.remove(); resolve(paths); };
     const fail = error => { input.remove(); reject(error); };
-    input.oncancel = () => finish(null);
+    input.oncancel = () => finish([]);
     input.onchange = () => {
-      const file = input.files?.[0];
-      if (!file) { finish(null); return; }
-      if (file.size > 20 * 1024 * 1024) { fail(new Error("请选择 20 MB 以内的照片。")); return; }
-      const reader = new FileReader(); reader.onload = () => finish(String(reader.result));
-      reader.onerror = () => fail(new Error("照片读取失败，请重新选择。")); reader.readAsDataURL(file);
+      const files = Array.from(input.files || []);
+      if (files.length > limit) { fail(new Error(`还可添加 ${limit} 页，请减少所选图片。`)); return; }
+      if (files.some(file => file.size > 20 * 1024 * 1024)) { fail(new Error("请选择每张 20 MB 以内的照片。")); return; }
+      if (files.some(file => !["image/jpeg", "image/png", "image/webp"].includes(file.type))) {
+        fail(new Error("请选择 JPG、PNG 或 WebP 图片。")); return;
+      }
+      // Decode sequentially during processing instead of retaining every full
+      // photo as a base64 string. The renderer owns these temporary object URLs.
+      finish(files.map(file => URL.createObjectURL(file)));
     };
     try { input.click(); } catch (error) { fail(error); }
   });
   // #endif
   // #ifdef MP-WEIXIN
   return new Promise((resolve, reject) => {
-    const fail = failure => /cancel/i.test(failure.errMsg || "") ? resolve(null) : reject(nativeScanError(failure, source));
-    // Album selection never requests scope.camera or scope.writePhotosAlbum.
-    // Keep the older working system-photo path; do not require the extra
-    // chooseMedia API for still-camera capture. Native privacy checks still apply.
+    const fail = failure => /cancel/i.test(failure.errMsg || "") ? resolve([]) : reject(nativeScanError(failure, source));
+    const finish = paths => paths?.length ? resolve(paths.slice(0, limit)) : reject(new Error("未读到选择的照片，请重试。"));
+    // The native picker owns privacy consent; album access never needs camera
+    // permission. WeChat allows at most nine still images per picker session.
     if (source === "album" && typeof wx !== "undefined" && wx.chooseMedia) wx.chooseMedia({
-      count: 1, mediaType: ["image"], sourceType: [source], sizeType: ["original"],
-      success: result => result.tempFiles?.[0]?.tempFilePath ? resolve(result.tempFiles[0].tempFilePath) : reject(new Error("未读到选择的照片，请重试。")), fail,
+      count: Math.min(9, limit), mediaType: ["image"], sourceType: [source], sizeType: ["original"],
+      success: result => finish(result.tempFiles?.map(file => file.tempFilePath)), fail,
     });
-    else uni.chooseImage({ count: 1, sourceType: [source], sizeType: ["original"],
-      success: result => result.tempFilePaths?.[0] ? resolve(result.tempFilePaths[0]) : reject(new Error("未读到选择的照片，请重试。")), fail,
+    else uni.chooseImage({ count: Math.min(9, limit), sourceType: [source], sizeType: ["original"],
+      success: result => finish(result.tempFilePaths), fail,
     });
   });
   // #endif
@@ -230,7 +243,9 @@ export async function openBrowserCamera(host, onFrame) {
   const video = document.createElement("video"), canvas = document.createElement("canvas");
   video.muted = true; video.autoplay = true; video.playsInline = true;
   video.setAttribute("playsinline", "true"); video.setAttribute("webkit-playsinline", "true");
-  video.style.cssText = "width:100%;height:100%;object-fit:cover;display:block";
+  // Keep the full sensor frame visible, including the paper edges in landscape
+  // video on a portrait phone. The outline uses the same contain transform.
+  video.style.cssText = "width:100%;height:100%;object-fit:contain;display:block";
   video.srcObject = stream; host.appendChild(video);
   let timer, closed = false;
   const close = () => { closed = true; clearInterval(timer); stream.getTracks().forEach(track => track.stop()); video.srcObject = null; video.remove(); };
@@ -238,12 +253,12 @@ export async function openBrowserCamera(host, onFrame) {
   catch { close(); throw new Error("相机预览启动失败，请点击重新开启。"); }
   timer = setInterval(() => {
     if (closed || !video.videoWidth || video.readyState < 2) return;
-    const scale = 256 / Math.max(video.videoWidth, video.videoHeight);
+    const scale = Math.min(1, 480 / Math.max(video.videoWidth, video.videoHeight));
     canvas.width = Math.round(video.videoWidth * scale); canvas.height = Math.round(video.videoHeight * scale);
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     onFrame(ctx.getImageData(0, 0, canvas.width, canvas.height));
-  }, 300);
+  }, 200);
   return { close, capture() {
     if (closed || !video.videoWidth || video.readyState < 2) throw new Error("相机还未就绪，请稍后重试。");
     const shot = document.createElement("canvas"); shot.width = video.videoWidth; shot.height = video.videoHeight;
