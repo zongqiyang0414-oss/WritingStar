@@ -7,7 +7,7 @@ import { AutoScanGate } from "../../platform/autoScan.js";
 import { clamp, fitRect, validQuad } from "../../platform/scanGeometry.js";
 import { MAX_PHOTOS } from "../../platform/photos.js";
 import { nativeScanError } from "../../platform/scanAccess.js";
-import { authorizeScanCamera, chooseScanSource, createScanRenderer, openScanSettings, openScanAppSettings, persistScanPages, startNativeFrames, takeNativePhoto } from "../../platform/scanner.js";
+import { authorizeScanCamera, chooseScanSource, createScanRenderer, openScanSettings, openScanAppSettings, openScanPrivacyContract, persistScanPages, startNativeFrames, takeNativePhoto } from "../../platform/scanner.js";
 // #ifdef H5
 import { openBrowserCamera } from "../../platform/scanner.js";
 // #endif
@@ -129,13 +129,18 @@ async function systemSettings() {
   catch (failure) { error.value = failure.message || "请打开手机设置，在微信权限中允许相机。"; }
 }
 function permissionHelp() {
-  uni.showModal({ title: "相机授权说明", showCancel: false, content: errorAction.value === "privacy"
-    ? "微信的“权限使用记录”只显示调用记录。若隐私配置缺失，需要小程序管理员在微信公众平台“设置→服务内容声明→用户隐私保护指引”补充使用摄像头、选择照片等用途并发布。手机授权无法替代后台声明。"
+  uni.showModal({ title: "相机授权说明", showCancel: false, content: errorAction.value.startsWith("privacy")
+    ? "管理员在电脑浏览器打开 mp.weixin.qq.com，登录AppID为wxe3fefef9eaab17c3的小程序。进入“设置→服务内容声明→用户隐私保护指引”，补充摄像头（拍摄纸质作业）、选中的照片或视频信息（导入作业图片），按平台提示提交并确认生效。手机微信设置里没有这个配置；仅查看指引也不等于已经同意授权。"
     : "在 Chrome 地址栏的网站信息中，允许此网站使用相机。手机还需在系统设置中允许 Chrome 使用相机。请通过 HTTPS 地址直接打开网站；嵌入页可能不支持授权。相册和系统相机可单独使用。" });
+}
+async function privacyContract() {
+  try { await openScanPrivacyContract(); }
+  catch (failure) { showFailure(failure); }
 }
 function copyError() { uni.setClipboardData({ data: `写字星 v0.12.0 扫描
 ${error.value}
-${errorDetail.value}` }); }
+${errorDetail.value}`, fail: () => uni.showModal({ title: "请长按复制错误详情", showCancel: false,
+  content: errorDetail.value || error.value }) }); }
 async function waitForPickerReturn() {
   if (foreground || disposed) return;
   await new Promise((resolve, reject) => {
@@ -352,9 +357,16 @@ function leave() {
     <view v-if="error" class="scan-error" role="alert">
       <view>{{ error }}</view>
       <view class="scan-error-actions">
-        <button v-if="errorAction === 'privacy' || errorAction === 'web-help'" class="scan-text-button" @click="permissionHelp">查看授权说明</button>
+        <!-- #ifdef MP-WEIXIN -->
+        <button v-if="errorAction === 'privacy' || errorAction === 'privacy-config'" class="scan-text-button" @click="privacyContract">查看隐私指引</button>
+        <button v-if="errorAction === 'privacy' || errorAction === 'privacy-config'" class="scan-text-button" @click="permissionHelp">后台配置位置</button>
+        <!-- #endif -->
+        <button v-if="errorAction === 'web-help'" class="scan-text-button" @click="permissionHelp">查看授权说明</button>
         <button v-if="errorDetail" class="scan-text-button" @click="copyError">复制错误详情</button>
       </view>
+      <!-- #ifdef MP-WEIXIN -->
+      <text v-if="errorDetail" class="scan-error-detail" selectable>{{ errorDetail }}</text>
+      <!-- #endif -->
     </view>
     <view class="scan-controls">
       <template v-if="mode === 'live'">
@@ -420,7 +432,8 @@ function leave() {
 .scan-finish { width: 100%; margin-top: 12px; }
 .scan-text-button { background: transparent; color: #6ee2c1; font-size: 12px; line-height: 20px; padding: 4px; }
 .scan-next { margin: 0 auto 8px; }
-.scan-error-actions { display: flex; gap: 12px; }
+.scan-error-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.scan-error-detail { display: block; margin-top: 5px; overflow-wrap: anywhere; word-break: break-all; }
 .scan-error-actions .scan-text-button { margin: 4px 0 0; padding: 0; }
 .scan-error { background: #502d27; color: #ffe4d9; font-size: 12px; line-height: 19px; padding: 9px 16px; flex-shrink: 0; }
 .scan-pagination { display: flex; align-items: center; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }

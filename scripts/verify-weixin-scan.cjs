@@ -12,8 +12,8 @@ const camera = template.match(/<camera\b[^>]+>/)[0];
 const start = template.match(/<button\b[^>]*class="scan-primary"[^>]+>/)[0];
 const album = template.match(/<button\b[^>]*class="scan-side-action"[^>]+>/)[0];
 
-function createPage({ denied = false, canvasUnavailable = false } = {}) {
-  let definition, canvasQueries = 0, requests = 0, pickerReturn;
+function createPage({ denied = false, canvasUnavailable = false, mediaFailure = '' } = {}) {
+  let definition, canvasQueries = 0, requests = 0, pickerReturn, contractOpens = 0, systemPhotos = 0;
   const lifecycle = {}, cache = {};
   const hooks = name => callback => (lifecycle[name] ||= []).push(callback);
   const canvasNode = {
@@ -39,13 +39,22 @@ function createPage({ denied = false, canvasUnavailable = false } = {}) {
       }; return query;
     },
     createCameraContext() { return { onCameraFrame() { return { start() {}, stop() {} }; } }; },
+    chooseImage(options) {
+      assert.deepEqual(Array.from(options.sourceType), ['camera']); systemPhotos++;
+      options.success({ tempFilePaths: ['/tmp/system-camera.jpg'] });
+    },
+    setClipboardData(options) { options.fail({ errMsg: 'setClipboardData:fail api scope is not declared in privacy agreement' }); },
+    showModal(options) { assert.ok(options.content); },
     getFileSystemManager() { return { unlink(options) { options.success?.(); } }; },
   };
   const wx = {
     createPage(page) { definition = page; },
-    getPrivacySetting(options) { options.success({ needAuthorization: false }); }, requirePrivacyAuthorize() { assert.fail('already agreed'); },
+    getPrivacySetting() { assert.fail('privacy-setting failure must not block native media'); },
+    requirePrivacyAuthorize() { assert.fail('native media owns consent'); },
+    openPrivacyContract(options) { contractOpens++; options.success(); },
     chooseMedia(options) {
       assert.deepEqual(Array.from(options.sourceType), ['album']);
+      if (mediaFailure) { options.fail({ errMsg: mediaFailure }); return; }
       lifecycle.onHide.forEach(callback => callback());
       options.success({ tempFiles: [{ tempFilePath: '/tmp/album.jpg' }] });
       // Real picker success can precede the page's onShow notification.
@@ -77,6 +86,7 @@ function createPage({ denied = false, canvasUnavailable = false } = {}) {
   lifecycle.onShow.forEach(callback => callback());
   lifecycle.onReady.forEach(callback => callback());
   return { render, lifecycle, get canvasQueries() { return canvasQueries; }, get requests() { return requests; },
+    get contractOpens() { return contractOpens; }, get systemPhotos() { return systemPhotos; },
     close() { clearTimeout(pickerReturn); lifecycle.onUnload.forEach(callback => callback()); },
   };
 }
@@ -100,5 +110,26 @@ function createPage({ denied = false, canvasUnavailable = false } = {}) {
   assert.match(JSON.stringify(denied.render()), /确认并处理|corners|拖动四角/);
   assert.doesNotMatch(JSON.stringify(denied.render()), /扫描已暂停|相册未能打开/);
   denied.close();
-  console.log('WeChat compiled scan checks passed: user-click camera mount, lazy canvas, denied camera recovery and picker success before onShow.');
+
+  const blocked = createPage({ mediaFailure: 'chooseMedia:fail api scope is not declared in privacy agreement' });
+  await blocked.render()[event(album, 'bindtap')]();
+  assert.equal(blocked.render()[event(camera, 'wx:if')], false);
+  assert.match(JSON.stringify(blocked.render()), /缺少隐私声明/);
+  assert.match(JSON.stringify(blocked.render()), /chooseMedia:fail api scope is not declared/);
+  assert.match(template, /<text[^>]*selectable[^>]*>/, 'raw errors remain selectable if clipboard permission fails');
+  const contract = template.match(/<button\b[^>]+>查看隐私指引/)[0];
+  await blocked.render()[event(contract, 'bindtap')]();
+  assert.equal(blocked.contractOpens, 1, 'privacy link must open the actual WeChat contract');
+  const copy = template.match(/<button\b[^>]+>复制错误详情/)[0];
+  blocked.render()[event(copy, 'bindtap')]();
+  assert.match(JSON.stringify(blocked.render()), /chooseMedia:fail api scope is not declared/, 'failed clipboard does not hide the media failure');
+  blocked.close();
+
+  const system = createPage();
+  const capture = template.match(/<button\b[^>]+>使用系统相机拍摄/)[0];
+  await system.render()[event(capture, 'bindtap')]();
+  assert.equal(system.systemPhotos, 1);
+  assert.match(JSON.stringify(system.render()), /确认并处理|corners|拖动四角/);
+  system.close();
+  console.log('WeChat compiled scan checks passed: native consent without privacy preflight, real privacy rejection, contract link, clipboard failure, system photo, camera mount and picker lifecycle.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

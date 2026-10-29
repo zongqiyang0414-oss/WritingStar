@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { nativeScanError } from '../src/platform/scanAccess.js';
 
 async function nativeModule() {
   let source = fs.readFileSync(new URL('../src/platform/scanner.js', import.meta.url), 'utf8');
@@ -21,21 +22,39 @@ test('微信首次相机请求交给camera组件，不用缺失的授权条目�
   } finally { globalThis.uni = originalUni; globalThis.wx = originalWx; }
 });
 
-test('手机系统权限与微信隐私配置分别提示，不把所有失败归成没有权限', async () => {
+test('隐私预检故障不阻止原生相机，真实的系统拒绝仍然阻止', async () => {
   const originalUni = globalThis.uni, originalWx = globalThis.wx;
   try {
     const native = await nativeModule();
     globalThis.uni = { getSetting(options) { options.success({ authSetting: {} }); } };
     globalThis.wx = { getAppAuthorizeSetting() { return { cameraAuthorized: 'denied' }; } };
     await assert.rejects(native.authorizeScanCamera(), error => error.code === 'wx-system-camera' && error.action === 'app-settings');
-    globalThis.wx = { getPrivacySetting(options) { options.fail({ errMsg: 'getPrivacySetting:fail privacy not declared' }); }, requirePrivacyAuthorize() {} };
-    await assert.rejects(native.authorizeScanCamera(), error => error.code === 'wx-privacy' && /not declared/.test(error.detail));
-    globalThis.wx.getPrivacySetting = options => options.success({ needAuthorization: true });
-    globalThis.wx.requirePrivacyAuthorize = options => options.fail({ errMsg: 'requirePrivacyAuthorize:fail user deny' });
-    await assert.rejects(native.authorizeScanCamera(), error => error.code === 'wx-privacy-consent' && /user deny/.test(error.detail));
-    globalThis.wx.requirePrivacyAuthorize = options => options.success();
+    globalThis.wx = { getPrivacySetting() { assert.fail('an unrelated privacy probe must not gate camera'); },
+      requirePrivacyAuthorize() { assert.fail('native camera owns consent on first use'); } };
     await native.authorizeScanCamera();
   } finally { globalThis.uni = originalUni; globalThis.wx = originalWx; }
+});
+
+test('真实接口的未声明、未同意与网络故障分别处理并保留原文', () => {
+  const config = nativeScanError({ errMsg: 'camera:fail api scope is not declared in privacy agreement' });
+  assert.equal(config.code, 'wx-privacy-config'); assert.equal(config.action, 'privacy-config');
+  assert.match(config.message, /管理员.*电脑/); assert.match(config.detail, /not declared/);
+  const denied = nativeScanError({ errMsg: 'camera:fail privacy permission is not authorized' });
+  assert.equal(denied.action, 'privacy'); assert.doesNotMatch(denied.message, /缺少隐私声明/);
+  const network = nativeScanError({ errMsg: 'camera:fail network timeout' });
+  assert.equal(network.code, 'wx-media-failed'); assert.equal(network.detail, 'camera:fail network timeout');
+});
+
+test('查看隐私指引调用微信真实入口，不把阅读当作用户已同意', async () => {
+  const originalWx = globalThis.wx;
+  try {
+    const native = await nativeModule(); let opens = 0;
+    globalThis.wx = { openPrivacyContract(options) { opens++; options.success(); },
+      requirePrivacyAuthorize() { assert.fail('viewing the contract does not grant consent'); } };
+    await native.openScanPrivacyContract(); assert.equal(opens, 1);
+    globalThis.wx.openPrivacyContract = options => options.fail({ errMsg: 'openPrivacyContract:fail privacy not configured' });
+    await assert.rejects(native.openScanPrivacyContract(), error => error.action === 'privacy-config' && /not configured/.test(error.detail));
+  } finally { globalThis.wx = originalWx; }
 });
 
 test('相册在相机被拒后仍可用，走chooseMedia且不请求相机或写相册权限', async () => {
@@ -44,7 +63,7 @@ test('相册在相机被拒后仍可用，走chooseMedia且不请求相机或写
     const native = await nativeModule();
     globalThis.uni = { getSetting() { assert.fail('album must not depend on camera settings'); }, authorize() { assert.fail('album requires neither camera nor writePhotosAlbum scope'); } };
     globalThis.wx = {
-      getPrivacySetting(options) { options.success({ needAuthorization: false }); }, requirePrivacyAuthorize() { assert.fail('already agreed'); },
+      getPrivacySetting() { assert.fail('album must reach the native picker without privacy preflight'); }, requirePrivacyAuthorize() { assert.fail('native picker owns consent'); },
       getAppAuthorizeSetting() { return { cameraAuthorized: 'denied' }; },
       chooseMedia(options) { assert.deepEqual(options.sourceType, ['album']); assert.deepEqual(options.mediaType, ['image']); options.success({ tempFiles: [{ tempFilePath: '/tmp/album.jpg' }] }); },
     };
@@ -52,12 +71,13 @@ test('相册在相机被拒后仍可用，走chooseMedia且不请求相机或写
     globalThis.wx.chooseMedia = options => options.fail({ errMsg: 'chooseMedia:fail cancel' });
     assert.equal(await native.chooseScanSource(), null);
     globalThis.wx.chooseMedia = options => options.fail({ errMsg: 'chooseMedia:fail api scope is not declared in privacy agreement' });
-    await assert.rejects(native.chooseScanSource(), error => error.code === 'wx-privacy' && /scope/.test(error.detail));
+    globalThis.uni.chooseImage = () => assert.fail('do not retry another API to bypass an actual privacy rejection');
+    await assert.rejects(native.chooseScanSource(), error => error.code === 'wx-privacy-config' && /scope/.test(error.detail));
+    globalThis.uni.chooseImage = options => { assert.deepEqual(options.sourceType, ['camera']); options.success({ tempFilePaths: ['/tmp/system-camera.jpg'] }); };
+    assert.equal(await native.chooseScanSource('camera'), '/tmp/system-camera.jpg', 'system camera uses the previously working chooseImage even when chooseMedia exists');
     delete globalThis.wx.chooseMedia;
     globalThis.uni.chooseImage = options => { assert.deepEqual(options.sourceType, ['album']); options.success({ tempFilePaths: ['/tmp/older-library.jpg'] }); };
     assert.equal(await native.chooseScanSource(), '/tmp/older-library.jpg');
-    globalThis.uni.chooseImage = options => { assert.deepEqual(options.sourceType, ['camera']); options.success({ tempFilePaths: ['/tmp/system-camera.jpg'] }); };
-    assert.equal(await native.chooseScanSource('camera'), '/tmp/system-camera.jpg');
   } finally { globalThis.uni = originalUni; globalThis.wx = originalWx; }
 });
 

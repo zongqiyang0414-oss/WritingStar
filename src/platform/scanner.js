@@ -4,17 +4,6 @@ import { browserScanError, nativeScanError, scanAccessError } from "./scanAccess
 
 const api = (method, options = {}) => new Promise((resolve, reject) => uni[method]({ ...options, success: resolve, fail: reject }));
 
-async function requireScanPrivacy() {
-  // #ifdef MP-WEIXIN
-  if (typeof wx !== "undefined" && wx.getPrivacySetting && wx.requirePrivacyAuthorize) {
-    const privacy = await new Promise((resolve, reject) => wx.getPrivacySetting({ success: resolve, fail: failure => reject(nativeScanError(failure)) }));
-    if (privacy.needAuthorization) await new Promise((resolve, reject) => wx.requirePrivacyAuthorize({
-      success: resolve, fail: failure => reject(scanAccessError("尚未同意小程序隐私指引，请重新选择并完成授权。", "wx-privacy-consent", "privacy", failure)),
-    }));
-  }
-  // #endif
-}
-
 export async function authorizeScanCamera() {
   // #ifdef MP-WEIXIN
   const app = typeof wx !== "undefined" && wx.getAppAuthorizeSetting?.();
@@ -23,8 +12,8 @@ export async function authorizeScanCamera() {
   const setting = await api("getSetting");
   if (setting.authSetting?.["scope.camera"] === false)
     throw scanAccessError("已拒绝本小程序的摄像头授权。请点击“打开小程序权限设置”允许摄像头，再重新开启。", "wx-camera-denied", "mini-settings");
-  await requireScanPrivacy();
-  // An undecided scope is requested by mounting <camera>, using WeChat's native UI.
+  // Mount <camera> and let WeChat enforce privacy/permission and show its native
+  // consent UI. A separate getPrivacySetting failure is not a camera rejection.
   // #endif
 }
 
@@ -46,6 +35,15 @@ export function takeNativePhoto(context) {
 }
 
 export async function openScanSettings() { await api("openSetting"); }
+export function openScanPrivacyContract() {
+  // #ifdef MP-WEIXIN
+  if (typeof wx !== "undefined" && wx.openPrivacyContract)
+    return new Promise((resolve, reject) => wx.openPrivacyContract({ success: resolve,
+      fail: failure => reject(nativeScanError(failure, "privacy")),
+    }));
+  // #endif
+  return Promise.reject(new Error("当前微信不支持打开隐私指引，请更新微信后重试。"));
+}
 export function openScanAppSettings() {
   // #ifdef MP-WEIXIN
   if (typeof wx !== "undefined" && wx.openAppAuthorizeSetting)
@@ -202,17 +200,19 @@ export function chooseScanSource(source = "album") {
   });
   // #endif
   // #ifdef MP-WEIXIN
-  return requireScanPrivacy().then(() => new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     const fail = failure => /cancel/i.test(failure.errMsg || "") ? resolve(null) : reject(nativeScanError(failure, source));
     // Album selection never requests scope.camera or scope.writePhotosAlbum.
-    if (typeof wx !== "undefined" && wx.chooseMedia) wx.chooseMedia({
+    // Keep the older working system-photo path; do not require the extra
+    // chooseMedia API for still-camera capture. Native privacy checks still apply.
+    if (source === "album" && typeof wx !== "undefined" && wx.chooseMedia) wx.chooseMedia({
       count: 1, mediaType: ["image"], sourceType: [source], sizeType: ["original"],
       success: result => result.tempFiles?.[0]?.tempFilePath ? resolve(result.tempFiles[0].tempFilePath) : reject(new Error("未读到选择的照片，请重试。")), fail,
     });
     else uni.chooseImage({ count: 1, sourceType: [source], sizeType: ["original"],
       success: result => result.tempFilePaths?.[0] ? resolve(result.tempFilePaths[0]) : reject(new Error("未读到选择的照片，请重试。")), fail,
     });
-  }));
+  });
   // #endif
 }
 
