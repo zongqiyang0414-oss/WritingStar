@@ -1,0 +1,90 @@
+// Current source H5 workflow, real QR pixels, local files and a synthetic camera.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const http = require('node:http');
+const { chromium } = require(process.env.WRITINGSTAR_PLAYWRIGHT_MODULE || 'playwright');
+const root = path.resolve(__dirname, '../dist/build/h5');
+const types = {'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.svg':'image/svg+xml'};
+const server = http.createServer((req,res) => {
+  const file = path.resolve(root, '.' + (new URL(req.url,'http://localhost').pathname === '/' ? '/index.html' : decodeURIComponent(new URL(req.url,'http://localhost').pathname)));
+  if(!file.startsWith(root+path.sep)||!fs.existsSync(file)||!fs.statSync(file).isFile()){res.writeHead(404);res.end();return;}
+  res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream'});fs.createReadStream(file).pipe(res);
+});
+function stored() {
+  const raw = JSON.parse(localStorage.getItem('jiaxiu-prototype-v1'));
+  return raw.schemaVersion ? raw : typeof raw === 'string' ? JSON.parse(raw) : typeof raw.data === 'string' ? JSON.parse(raw.data) : raw.data;
+}
+(async()=>{
+  let browser,page; const errors=[];
+  try {
+    await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+    browser=await chromium.launch({executablePath:process.env.WRITINGSTAR_CHROMIUM_EXECUTABLE||'/usr/bin/chromium',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
+    const context=await browser.newContext({viewport:{width:390,height:900},acceptDownloads:true});
+    await context.route('**/*',route=>new URL(route.request().url()).hostname==='127.0.0.1'||route.request().url().startsWith('data:')?route.continue():route.abort());
+    page=await context.newPage();page.setDefaultTimeout(20000);page.on('pageerror',e=>errors.push(e.message));
+    const button=(text,scope=page)=>scope.locator('uni-button').filter({hasText:text});
+    const confirm=async()=>{await page.locator('.modal-actions .primary').click();await page.locator('.slide-down-panel.is-dialog').waitFor({state:'hidden'});};
+    const bind=async code=>{await page.locator('.binding-login').click();await page.locator('.binding-code input').fill(code);await button('查看绑定信息').click();await button(/^\s*确认\s*$/,page.locator('.binding-view')).click();await page.locator('.greeting').waitFor();};
+    const importFiles=async files=>{const chooser=page.waitForEvent('filechooser');await button('批量导入照片').click();await(await chooser).setFiles(files);await page.waitForFunction(()=>!Array.from(document.querySelectorAll('uni-button')).some(e=>e.textContent.includes('正在处理…')));};
+    const noOverflow=async()=>{for(const width of [320,390,1280]){await page.setViewportSize({width,height:900});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`overflow at ${width}`);}await page.setViewportSize({width:390,height:900});};
+    await page.addInitScript(() => {
+      window.__capture = { paper: '', present: true, streams: [] };
+      Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable:true, value: async () => {
+        const state=window.__capture, canvas=document.createElement('canvas'); canvas.width=720;canvas.height=960;
+        const ctx=canvas.getContext('2d'), img=new Image();
+        await new Promise(resolve=>{img.onload=resolve;img.src=state.paper;});
+        let loaded=state.paper;
+        const draw=()=>{if(loaded!==state.paper){loaded=state.paper;img.src=loaded;}ctx.fillStyle='#544d41';ctx.fillRect(0,0,720,960);if(state.present&&img.complete&&img.naturalWidth)ctx.drawImage(img,145,150,430,608);};
+        draw(); const timer=setInterval(draw,80),stream=canvas.captureStream(12); state.streams.push(stream);
+        const track=stream.getVideoTracks()[0],stop=track.stop.bind(track);track.stop=()=>{clearInterval(timer);stop();};
+        return stream;
+      }});
+    });
+    await page.goto(`http://127.0.0.1:${server.address().port}`,{waitUntil:'networkidle'});await bind('JS2026');
+    await button('布置作业').click();await page.locator('.form-input input').fill('学生码与纸质作业流程验收');await page.locator('.form-card textarea').fill('记录一次秋天里的发现，写清楚观察的经过和自己的感受。');await button('发布作业').click();await page.locator('.paper-assignment-entry').waitFor();
+    const state=await page.evaluate(stored), assignment=state.assignments.find(a=>a.title==='学生码与纸质作业流程验收');assert.equal(assignment.paperPacket.pages,2);assert.equal(assignment.paperPacket.cards.length,53);
+    await button('查看 / 打印答题卡').click();await page.locator('.paper-preview-image').waitFor();
+    const first = await page.locator('.paper-preview-image img').getAttribute('src');
+    await button('下一页 ›').click();
+    await page.waitForFunction(previous=>document.querySelector('.paper-preview-image img')?.src!==previous,first);
+    const images = [first, await page.locator('.paper-preview-image img').getAttribute('src')];
+    await button(/去.*扫描/).click();
+    await page.evaluate(image=>{window.__capture.paper=image;}, images[0]);
+    await button('开启相机扫描').click();await page.locator('.scan-outline').waitFor();
+    assert.match(await page.locator('.scan-count').innerText(), /0 \/ 60/);
+    await page.locator('.scan-shutter').click();await button('调整边角').waitFor();
+    assert.ok((await page.locator('.scan-result img').getAttribute('src')).startsWith('data:image/jpeg;'));
+    await page.screenshot({path:path.resolve(__dirname,'../outputs/v0120-scan-result-2026-10-29.png')});
+    await button('继续扫描').click();await page.locator('.scan-outline').waitFor();
+    // New capture stream uses the second physical sheet; explicitly rearm after moving paper.
+    await page.locator('.scan-mode-toggle').click();
+    await page.evaluate(()=>window.__capture.present=false);await page.waitForTimeout(1500);
+    // Reopen the stream with page 2, preserving the in-session page 1 lock.
+    await page.evaluate(image=>window.__capture.paper=image,images[1]);
+    await page.evaluate(()=>window.__capture.present=true);
+    await page.waitForFunction(()=>document.querySelector('.scan-count')?.textContent.startsWith('2'));
+    await page.waitForTimeout(1800);
+    assert.match(await page.locator('.scan-count').innerText(), /^2/);
+    await page.locator('.scan-side-action').filter({hasText:'已扫描'}).click();
+    // Both processed pages must retain the original card identifiers.
+    await button(/^完成 \d+ 页$/).click();await page.locator('.scan-page-card').first().waitFor();
+    assert.equal(await page.locator('.scan-page-card').count(),2);
+    assert.match(await page.locator('.scan-page-card').first().innerText(),/小禾.*第 1 页/);
+    assert.match(await page.locator('.scan-page-card').first().innerText(),/已自动校正/);
+    assert.ok(await page.evaluate(()=>window.__capture.streams.every(s=>s.getTracks().every(t=>t.readyState==='ended'))));
+    // Album enhancement must retain QR duplicate rejection.
+    const sourceFile='/tmp/writingstar-v0120-page2.png';fs.writeFileSync(sourceFile,Buffer.from(images[1].split(',')[1],'base64'));
+    const chooser=page.waitForEvent('filechooser');await button('批量导入照片').click();await(await chooser).setFiles(sourceFile);
+    await page.waitForFunction(()=>document.querySelector('.paper-error')?.textContent.includes('未能添加'));
+    assert.equal(await page.locator('.scan-page-card').count(),2);
+    assert.match(await page.locator('.scan-student-group').first().innerText(),/可提交/);
+    await page.screenshot({path:path.resolve(__dirname,'../outputs/v0120-scan-inbox-2026-10-29.png'),fullPage:true});
+    await button('统一提交并开始AI批阅').click();await confirm();await page.locator('.scan-empty').waitFor();
+    const submissions=(await page.evaluate(stored)).submissions.filter(s=>s.assignmentId===assignment.id);
+    assert.equal(submissions.length,1);assert.equal(submissions[0].paper.source,'teacher-scan');
+    assert.deepEqual(submissions[0].paper.pages.map(p=>p.page),[1,2]);assert.ok(submissions[0].photos.every(p=>!p.sample));
+    await noOverflow();assert.deepEqual(errors,[]);
+    console.log('v0.12 scan camera, processed images, QR identity, duplicate protection, 60-page inbox, album enhancement, ordered submission and camera release passed.');
+  } finally { await browser?.close();server.close(); }
+})().catch(error=>{console.error(error);process.exitCode=1;});

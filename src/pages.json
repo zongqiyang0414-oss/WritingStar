@@ -1,1 +1,27 @@
-{"pages":[{"path":"pages/index/index","style":{"navigationStyle":"custom","navigationBarTitleText":"写字星"}}],"globalStyle":{"backgroundColor":"#f4f8f5","navigationBarTextStyle":"black","navigationBarTitleText":"写字星"}}
+{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "写字星"
+      }
+    },
+    {
+      "path": "pages/scan/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "作业扫描",
+        "disableScroll": true,
+        "backgroundColor": "#111816",
+        "navigationBarTextStyle": "white",
+        "pageOrientation": "portrait"
+      }
+    }
+  ],
+  "globalStyle": {
+    "backgroundColor": "#f4f8f5",
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "写字星"
+  }
+}

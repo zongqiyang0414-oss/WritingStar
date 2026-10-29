@@ -1,5 +1,6 @@
 import jsQR from "jsqr";
 import { paperId } from "../services/paperWorkflow.js";
+import { enhanceDocument } from "./documentScan.js";
 
 // Four solid corner marks give a stable target even on a light desktop.
 export function detectPaperCorners({ data, width, height }) {
@@ -119,6 +120,10 @@ export async function processScanSource(source, name = "扫描答题卡") {
     out.putImageData(target, 0, 0); canvas = output;
     if (!code) code = readStudentCode(target);
   }
+  // Album import uses the same paper-white enhancement as camera capture.
+  const finalContext = canvas.getContext("2d", {willReadFrequently: true});
+  const enhanced = await enhanceDocument(finalContext.getImageData(0, 0, canvas.width, canvas.height));
+  finalContext.putImageData(enhanced, 0, 0);
   let url = canvas.toDataURL("image/jpeg", .86);
   if (url.length > 800 * 1024 * 4 / 3) url = canvas.toDataURL("image/jpeg", .65);
   if (url.length > 800 * 1024 * 4 / 3) throw new Error("扫描图片仍过大，请减少画面杂物后重试。");

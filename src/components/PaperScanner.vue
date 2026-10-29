@@ -7,12 +7,12 @@ import { loadScanDraft, saveScanDraft } from "../platform/scanDrafts.js";
 import { chooseDeviceScanImages, processDeviceScan, preserveDeviceScan } from "../platform/devicePaperScanner.js";
 // #endif
 // #ifdef H5
-import { chooseScanFiles, inspectScanFrame, loadScanImage, processScanSource } from "../platform/documentScanner.js";
+import { chooseScanFiles, loadScanImage, processScanSource } from "../platform/documentScanner.js";
 // #endif
 const props = defineProps({ state: Object, assignment: Object, cards: Array, teacher: Boolean, studentId: String, identityId: String, busy: Boolean });
 const emit = defineEmits(["submit", "cards", "ai", "confirm"]);
 const rows = ref([]), error = ref(""), saving = ref(false), processing = ref(false), progress = ref(""), initialized = ref(false);
-const cameraOpen = ref(false), cameraStarting = ref(false), cameraStatus = ref("将整张答题卡放入画面"), automatic = ref(true);
+const cameraStarting = ref(false);
 const editId = ref(""), editStudent = ref(0), editPage = ref(0), editCode = ref("");
 const summary = computed(() => scanGroups(props.state, props.assignment.id, rows.value, props.teacher ? "" : props.studentId));
 const ready = computed(() => summary.value.groups.filter(g => g.ready));
@@ -21,9 +21,8 @@ const issues = computed(() => new Map(summary.value.unresolved.map(r => [r.id, r
 const students = computed(() => props.cards.map(c => ({ id: c.studentId, name: c.studentName })));
 const pageLabels = computed(() => Array.from({length: props.assignment.paperPacket?.pages || 2}, (_, i) => `第 ${i + 1} 页`));
 const key = `writingstar-scan-v1:${props.teacher ? 'teacher' : 'student'}:${props.identityId}:${props.assignment.id}`;
-const cameraId = `paper-camera-${paperId()}`;
 const instance = getCurrentInstance(), canvasWidth = ref(1000), canvasHeight = ref(1414);
-let persistQueue = Promise.resolve(), alive = true, stream, video, timer, lastCorners, stable = 0, emptyFrames = 0, lastSavedCode = "", frameBusy = false;
+let persistQueue = Promise.resolve(), alive = true;
 onMounted(async () => {
   try { const saved = await loadScanDraft(key); if (alive) rows.value = saved; }
   catch (failure) { error.value = failure.message; }
@@ -75,68 +74,29 @@ async function importImages() {
   } catch (failure) { error.value = failure.message; }
   finally { processing.value = false; progress.value = ""; }
 }
-function stopCamera() {
-  clearTimeout(timer); timer = undefined;
-  stream?.getTracks().forEach(track => track.stop()); stream = null;
-  if (video) { video.srcObject = null; video.remove(); video = null; }
-  cameraOpen.value = false; cameraStarting.value = false; stable = 0; lastCorners = null;
-}
-async function startCamera() {
+function stopCamera() { cameraStarting.value = false; }
+function startCamera() {
+  if (processing.value || cameraStarting.value || props.busy || !initialized.value) return;
+  const remaining = MAX_SCAN_PAGES - rows.value.length;
+  if (remaining <= 0) { error.value = "本批已达 60 页，请先提交或移除页面。"; return; }
   error.value = ""; cameraStarting.value = true;
-  // #ifdef H5
-  try {
-    if (!navigator.mediaDevices?.getUserMedia) throw new Error("当前浏览器无法开启相机，请使用系统相机拍摄后批量导入。");
-    const opened = await navigator.mediaDevices.getUserMedia({ video: { facingMode: {ideal: "environment"}, width: {ideal: 1920}, height: {ideal: 2560} }, audio: false });
-    if (!alive || !cameraStarting.value) { opened.getTracks().forEach(t => t.stop()); return; }
-    stream = opened; cameraOpen.value = true; await nextTick();
-    video = document.createElement("video"); video.autoplay = true; video.muted = true; video.setAttribute("playsinline", ""); video.srcObject = stream;
-    document.getElementById(cameraId)?.prepend(video); await video.play();
-    cameraStarting.value = false; timer = setTimeout(tick, 350);
-  } catch (failure) {
-    stopCamera(); error.value = failure.name === "NotAllowedError" ? "相机权限未开启，请允许相机访问或使用批量导入。" : failure.message || "相机不可用，请使用批量导入。";
-  }
-  // #endif
-  // #ifndef H5
-  cameraStarting.value = false;
-  await importImages();
-  // #endif
-}
-// #ifdef H5
-async function tick() {
-  if (!cameraOpen.value || !video || !alive) return;
-  try {
-    if (!frameBusy && video.readyState >= 2) {
-      const frame = inspectScanFrame(video), corners = frame.corners;
-      if (!corners) {
-        stable = 0; emptyFrames++;
-        if (emptyFrames >= 3) lastSavedCode = "";
-        cameraStatus.value = "请放入完整答题卡，保持四角清晰";
-      } else {
-        emptyFrames = 0;
-        stable = lastCorners && corners.every((p, i) => Math.hypot(p.x - lastCorners[i].x, p.y - lastCorners[i].y) < 8) ? stable + 1 : 0;
-        lastCorners = corners;
-        cameraStatus.value = stable >= 2 ? "已对齐，保持稳定" : "已找到纸张，正在对齐";
-        if (automatic.value && stable >= 3) await capture(true);
-      }
-    }
-  } catch (failure) { error.value = failure.message; }
-  finally { if (cameraOpen.value && alive) timer = setTimeout(tick, 350); }
-}
-// #endif
-async function capture(auto = false) {
-  if (frameBusy || !cameraOpen.value) return;
-  frameBusy = true;
-  // #ifdef H5
-  try {
-    const row = await processScanSource(video, "相机扫描答题卡");
-    if (auto && !row.code) { cameraStatus.value = "未读到学生码，可靠近拍摄或点击拍摄"; return; }
-    if (row.code && row.code === lastSavedCode) { cameraStatus.value = "本页已保存，请换下一页"; return; }
-    await append(row); lastSavedCode = row.code; stable = 0;
-    cameraStatus.value = `已自动保存 ${rows.value.length} 页，请换下一页`;
-    if (rows.value.length >= MAX_SCAN_PAGES) stopCamera();
-  } catch (failure) { error.value = failure.message; cameraStatus.value = "请检查收件箱提示"; }
-  finally { frameBusy = false; }
-  // #endif
+  uni.navigateTo({
+    url: `/pages/scan/index?batch=paper&remaining=${remaining}`,
+    events: { scanned: async added => {
+      if (!alive) return;
+      processing.value = true;
+      let rejected = 0;
+      try {
+        for (const row of added) {
+          if (!alive) break;
+          try { await append(row); } catch (failure) { rejected++; error.value = failure.message; }
+        }
+        if (rejected) error.value = `${rejected} 页未能添加（重复页或保存失败），请核对收件箱。`;
+      } finally { processing.value = false; }
+    } },
+    complete: () => { cameraStarting.value = false; },
+    fail: () => { error.value = "无法打开扫描相机，请稍后重试。"; },
+  });
 }
 function edit(row) {
   const match = matching.value.get(row.id);
@@ -205,13 +165,7 @@ onUnmounted(() => {
         <view v-if="processing" class="small subtle spaced-small">{{ progress || '正在读取图片…' }}</view>
         <view class="tiny subtle spaced-small">支持 JPG / PNG / WebP；可导入扫描软件导出的图片，每批最多 60 页。</view>
       </view>
-      <!-- #ifdef H5 -->
-      <view v-if="cameraOpen" class="scan-camera-card">
-        <view :id="cameraId" class="scan-camera-viewport"><view class="scan-camera-guides"><view class="scan-camera-guide-text">请保留四角标记与学生码</view></view></view>
-        <view class="scan-camera-status">{{ cameraStatus }}</view>
-        <view class="scan-camera-toolbar"><view class="small"><switch :checked="automatic" color="#257b61" @change="automatic = $event.detail.value" /> 连续自动拍摄</view><button class="secondary" @click="capture(false)">拍摄本页</button><button class="text-button" @click="stopCamera">关闭相机</button></view>
-      </view>
-      <!-- #endif -->
+
       <view v-if="error" class="paper-error" role="alert">{{ error }}</view>
       <view v-if="!rows.length" class="card scan-empty"><view class="scan-empty-symbol">▤</view><view class="strong">暂无扫描或导入的答题卡</view><view class="small subtle spaced-small">请点击上方“开启相机扫描”或“批量导入照片”添加作业。添加成功后，扫描结果会在这里按学生和页码归档；学生码模糊时可人工确认。</view><button class="text-button spaced" @click="emit('cards')">查看 / 打印答题卡 ›</button></view>
       <view v-if="summary.groups.length" class="section-heading"><view class="section-title">按学生归档</view><text class="tiny subtle">自动按页码排序</text></view>
