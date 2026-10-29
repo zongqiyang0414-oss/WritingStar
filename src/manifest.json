@@ -16,13 +16,7 @@
     "setting": {
       "urlCheck": true
     },
-    "usingComponents": true,
-    "permission": {
-      "scope.camera": {
-        "desc": "用于拍摄作业，识别纸张边缘并生成清晰扫描件"
-      }
-    },
-    "__usePrivacyCheck__": true
+    "usingComponents": true
   },
   "uniStatistics": {
     "enable": false

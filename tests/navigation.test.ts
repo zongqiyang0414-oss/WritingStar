@@ -27,7 +27,7 @@ async function setup() {
   await service.bindInvitation('JS2026', 'teacher');
   await service.signIn('student');
   await service.bindInvitation('XS2026', 'student');
-  const shows = [], hides = [], disposals = [], navigations = [];
+  const shows = [], hides = [], disposals = [];
   const modules = {
     '../platform/photos.js': photos,
     '../services/identity.js': identity,
@@ -52,7 +52,7 @@ async function setup() {
     Date, console,
     setTimeout: () => 1, clearTimeout: () => {},
     setInterval: () => 1, clearInterval: () => {},
-    uni: { pageScrollTo: () => {}, navigateTo: options => navigations.push(options) },
+    uni: { pageScrollTo: () => {} },
   };
   const statements = [];
   for (const statement of ast.program.body) {
@@ -66,26 +66,8 @@ async function setup() {
   ast.program.body = statements;
   vm.createContext(sandbox);
   vm.runInContext(generate(ast).code + ';globalThis.usePage = usePrototype;', sandbox);
-  return { page: sandbox.usePage(), service, navigations, show: () => shows.forEach(callback => callback()) };
+  return { page: sandbox.usePage(), service, show: () => shows.forEach(callback => callback()) };
 }
-
-test('扫描页按剩余页数打开，回传保留页序，重复回调和换学生后的迟到结果不混入', async () => {
-  const { page, service, navigations, show } = await setup();
-  const assignment = await service.createAssignment({ classId: 'class-1', title: '扫描回传', requirements: '扫描', dueAt: new Date(Date.now() + 86400000).toISOString() }, 'teacher');
-  show(); page.openAssignment(assignment); page.openTeacherSubmit(assignment);
-  page.scanPhotos(); assert.equal(navigations.length, 0);
-  page.selectSubmissionStudent(page.submissionStudents.value.findIndex(student => student.id === 'student-1'));
-  page.addSamples(); page.scanPhotos();
-  assert.equal(navigations[0].url, '/pages/scan/index?remaining=4');
-  const result = [{ id: 'scan-a', url: '/saved/scan-a.jpg', name: '扫描件.jpg', sample: false }, { id: 'scan-b', url: '/saved/scan-b.jpg', name: '扫描件.jpg', sample: false }];
-  navigations[0].events.scanned(result); navigations[0].events.scanned(result);
-  assert.equal(page.photos.value.length, 4);
-  assert.deepEqual(page.photos.value.slice(2).map(photo => photo.id), ['scan-a', 'scan-b']);
-  page.selectSubmissionStudent(page.submissionStudents.value.findIndex(student => student.id === 'student-2'));
-  await page.confirmModal();
-  navigations[0].events.scanned(result);
-  assert.equal(page.photos.value.length, 0);
-});
 
 test('切页和返回前台复用只读状态，保存后才刷新快照', async () => {
   const { page, service, show } = await setup();
