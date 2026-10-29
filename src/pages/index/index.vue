@@ -220,26 +220,6 @@ function toggleFeedbackDimension(id) {
       </view>
     </view>
     <!-- #endif -->
-    <view class="mobile-preview-tools">
-      <PrototypeTools
-        :screen="screen"
-        :role="role"
-        :needs-binding="needsBinding"
-        :signed-in="accountSignedIn"
-        :busy="busy"
-        @restartBinding="restartBinding"
-        @invite="
-          (e) => {
-            inviteCode = e;
-            editBindingCode();
-          }
-        "
-        @samples="addSamples"
-        @reset="reset"
-        v-model:failSubmit="failSubmit"
-        v-model:failAnalysis="failAnalysis"
-      />
-    </view>
     <view class="app-shell">
       <view class="app-header">
         <view class="top-row">
@@ -1660,6 +1640,26 @@ function toggleFeedbackDimension(id) {
           </button>
         </view>
       </template>
+    </view>
+    <view class="mobile-preview-tools">
+      <PrototypeTools
+        :screen="screen"
+        :role="role"
+        :needs-binding="needsBinding"
+        :signed-in="accountSignedIn"
+        :busy="busy"
+        @restartBinding="restartBinding"
+        @invite="
+          (e) => {
+            inviteCode = e;
+            editBindingCode();
+          }
+        "
+        @samples="addSamples"
+        @reset="reset"
+        v-model:failSubmit="failSubmit"
+        v-model:failAnalysis="failAnalysis"
+      />
     </view>
     <!-- #ifdef H5 -->
     <view class="desktop-guide">

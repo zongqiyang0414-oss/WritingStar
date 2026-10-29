@@ -1,8 +1,16 @@
 import { MockService } from "./mock.js";
+// #ifdef MP-WEIXIN
+import { createWeixinStateStorage } from "../platform/weixinStateStorage.js";
+// #endif
 
 export const STORAGE_KEY = "jiaxiu-prototype-v1";
 export function createPrototypeService() {
-  const e = new MockService({
+  let storage;
+  // #ifdef MP-WEIXIN
+  storage = createWeixinStateStorage(STORAGE_KEY);
+  // #endif
+  // #ifndef MP-WEIXIN
+  storage = {
     read: () => {
       const e = uni.getStorageSync(STORAGE_KEY);
       if (!e) return null;
@@ -21,7 +29,9 @@ export function createPrototypeService() {
         );
       }
     },
-  });
+  };
+  // #endif
+  const e = new MockService(storage);
   e.prepareClassPractice();
   e.preparePaperCards();
   e.prepareAutoAi();

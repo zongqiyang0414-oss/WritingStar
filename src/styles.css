@@ -2175,3 +2175,8 @@ textarea:focus {
 .assignment-report-counts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 20px 0 16px; text-align: center; }
 .assignment-report-counts .metric-number { font-size: 29px; font-family: Georgia, serif; line-height: 1.4; color: #254b3e; }
 .assignment-report-counts > view + view { border-left: 1px solid #e4ece4; }
+
+/* Keep mobile prototype controls below the application and above fixed navigation. */
+@media (max-width: 900px) {
+  .mobile-preview-tools { padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
+}
