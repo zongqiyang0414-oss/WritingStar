@@ -1,5 +1,13 @@
 # 写字星前端协作约定
 
+## 2026-10-29 · 微信隐私预检阻断二次修复（最新）
+
+- 用户确认网页相机可用，微信显示合并隐私错误、复制无反馈。旧camera-fix在原生camera／chooseMedia／chooseImage前强制getPrivacySetting，查询失败也挡住原接口；新privacy-fix移除此预检，让微信原生隐私弹窗与权限检查接管，不伪造同意、不关闭隐私检查、不绕过真实原生拒绝。
+- 系统拍照恢复旧chooseImage；相册优先chooseMedia。真实未声明与未授权区分；wx.openPrivacyContract实际打开指引。错误原文直接显示为selectable文字，setClipboardData失败有反馈，不再依赖剪贴板才能排障。
+- 新包WritingStar-v0.12.0-weixin-privacy-fix-20261029.zip；源码eb88127，保留原v0.12.0功能分支和main。微信后台配置由管理员在电脑mp.weixin.qq.com进入设置／服务内容声明／用户隐私保护指引，步骤见docs/扫描相机授权与排障.md；本次未操作用户后台。
+- 21项相关测试、类型检查、双端构建和编译页权限／隐私／复制失败检查通过，真机需复测。本轮微信专用修复未重新发布已可用网页；下方“隐私预检”及“网页继续暂缓”是历史状态。
+
+
 ## 2026-10-29 · 扫描相机和相册权限修复
 
 - 摄像头必须在扫描页实际点击后开启；不在onReady发起。H5的getUserMedia前不等待画布或selectorQuery，微信未决定scope由camera组件原生请求，不能用尚未挂载的相机权限条目作为前提。
