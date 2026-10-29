@@ -110,6 +110,7 @@ const { bottomInset: bottomInset } = {
     addSamples: addSamples,
     movePhoto: movePhoto,
     choosePhotos: choosePhotos,
+    scanPhotos,
     submit: submit,
     retry: retry,
     manual: manual,
@@ -1209,15 +1210,16 @@ const { bottomInset: bottomInset } = {
                                   <view class="upload-icon"> ＋ </view>
                                   <view class="strong"> 添加作品照片 </view>
                                   <view class="small subtle">
-                                    JPG / PNG / WebP · 最多 6 页
+                                    扫描自动裁切、矫正和增强 · 最多 6 页
                                   </view>
                                   <button
                                     class="primary"
-                                    :disabled="busy"
-                                    @click="choosePhotos"
+                                    :disabled="busy || photos.length >= 6 || !submissionStudent"
+                                    @click="scanPhotos"
                                   >
-                                    选择作品照片
+                                    扫描作业
                                   </button>
+                                  <button class="text-button" :disabled="busy || photos.length >= 6" @click="choosePhotos">选择作品照片</button>
                                 </view>
                                 <template v-if="photos.length">
                                   <view :key="0" class="section-heading">

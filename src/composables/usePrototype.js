@@ -888,6 +888,24 @@ export function usePrototype() {
         error.value = failure.message;
       }
     },
+    scanPhotos: function () {
+      if (busy.value) return;
+      error.value = "";
+      if (!submissionStudent.value) { error.value = "请先选择代交的学生。"; return; }
+      if (photos.value.length >= 6) { error.value = "最多添加 6 页，请先移除不需要的图片。"; return; }
+      const targetAssignment = assignmentId.value, targetStudent = submissionStudent.value.id;
+      uni.navigateTo({
+        url: `/pages/scan/index?remaining=${6 - photos.value.length}`,
+        events: { scanned: added => {
+          // Keep the scan tied to the assignment/student that opened the camera.
+          if (screen.value !== "submit" || assignmentId.value !== targetAssignment || submissionStudent.value?.id !== targetStudent) return;
+          const known = new Set(photos.value.map(photo => photo.id));
+          photos.value.push(...added.filter(photo => !known.has(photo.id)).slice(0, 6 - photos.value.length));
+          notify(`已添加扫描件，请检查页序和清晰度`);
+        } },
+        fail: () => { error.value = "无法打开扫描，请稍后重试。"; },
+      });
+    },
     submit: function () {
       if (!submissionStudent.value) { error.value = "请先选择代交的学生。"; return; }
       if (!isTeacher.value && !canSubmit.value) { error.value = "当前作业暂不能提交，请返回作业详情查看。"; return; }
