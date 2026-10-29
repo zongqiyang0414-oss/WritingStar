@@ -96,7 +96,7 @@ test('相机帧停止后忽略迟到回调，缺失帧能力降级，拍摄使�
   assert.equal(unavailable, 1);
   const path = await takeNativePhoto({ takePhoto(options) { assert.equal(options.quality, 'high'); options.success({ tempImagePath: '/tmp/capture.jpg' }); } });
   assert.equal(path, '/tmp/capture.jpg');
-  await assert.rejects(takeNativePhoto({ takePhoto(options) { options.fail(); } }), /拍摄失败/);
+  await assert.rejects(takeNativePhoto({ takePhoto(options) { options.fail(); } }), /相机未能启动/);
 });
 test('预览cover与调角contain分别映射，不把照片比例直接当成屏幕比例', () => {
   const cover = fitRect(400, 300, 300, 500, true);

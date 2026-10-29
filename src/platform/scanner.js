@@ -1,17 +1,30 @@
 import { MAX_PHOTO_BYTES } from "./photos.js";
 import { fitRect } from "./scanGeometry.js";
+import { browserScanError, nativeScanError, scanAccessError } from "./scanAccess.js";
 
 const api = (method, options = {}) => new Promise((resolve, reject) => uni[method]({ ...options, success: resolve, fail: reject }));
 
+async function requireScanPrivacy() {
+  // #ifdef MP-WEIXIN
+  if (typeof wx !== "undefined" && wx.getPrivacySetting && wx.requirePrivacyAuthorize) {
+    const privacy = await new Promise((resolve, reject) => wx.getPrivacySetting({ success: resolve, fail: failure => reject(nativeScanError(failure)) }));
+    if (privacy.needAuthorization) await new Promise((resolve, reject) => wx.requirePrivacyAuthorize({
+      success: resolve, fail: failure => reject(scanAccessError("尚未同意小程序隐私指引，请重新选择并完成授权。", "wx-privacy-consent", "privacy", failure)),
+    }));
+  }
+  // #endif
+}
+
 export async function authorizeScanCamera() {
   // #ifdef MP-WEIXIN
-  if (typeof wx !== "undefined" && wx.requirePrivacyAuthorize) {
-    await new Promise((resolve, reject) => wx.requirePrivacyAuthorize({ success: resolve, fail: () => reject(new Error("需要同意隐私保护指引后才能使用相机。")) }));
-  }
+  const app = typeof wx !== "undefined" && wx.getAppAuthorizeSetting?.();
+  if (app?.cameraAuthorized === "denied")
+    throw scanAccessError("手机系统已禁止微信使用相机。请在手机设置中开启微信的相机权限后重试。", "wx-system-camera", "app-settings");
   const setting = await api("getSetting");
-  if (setting.authSetting["scope.camera"] === false) throw new Error("相机权限已关闭，请在设置中允许使用相机。");
-  try { await api("authorize", { scope: "scope.camera" }); }
-  catch { throw new Error("未获得相机权限。可以打开设置授权，或从相册扫描。"); }
+  if (setting.authSetting?.["scope.camera"] === false)
+    throw scanAccessError("已拒绝本小程序的摄像头授权。请点击“打开小程序权限设置”允许摄像头，再重新开启。", "wx-camera-denied", "mini-settings");
+  await requireScanPrivacy();
+  // An undecided scope is requested by mounting <camera>, using WeChat's native UI.
   // #endif
 }
 
@@ -28,11 +41,18 @@ export function startNativeFrames(context, callback, onError) {
 export function takeNativePhoto(context) {
   return new Promise((resolve, reject) => context.takePhoto({
     quality: "high", success: result => resolve(result.tempImagePath),
-    fail: () => reject(new Error("拍摄失败，请保持相机开启后重试。")),
+    fail: failure => reject(nativeScanError(failure)),
   }));
 }
 
 export async function openScanSettings() { await api("openSetting"); }
+export function openScanAppSettings() {
+  // #ifdef MP-WEIXIN
+  if (typeof wx !== "undefined" && wx.openAppAuthorizeSetting)
+    return new Promise((resolve, reject) => wx.openAppAuthorizeSetting({ success: resolve, fail: reject }));
+  // #endif
+  return Promise.reject(new Error("请打开手机设置，在微信的权限中允许相机。"));
+}
 
 // Canvas nodes are used on WeChat; DOM canvas/video never enter the mini-program build.
 export async function createScanRenderer(instance) {
@@ -160,35 +180,53 @@ export async function persistScanPages(renderer, photos, cancelled = () => false
   }
 }
 
-export function chooseScanSource() {
+export function chooseScanSource(source = "album") {
   // #ifdef H5
   return new Promise((resolve, reject) => {
-    const input = document.createElement("input"); input.type = "file"; input.accept = "image/jpeg,image/png,image/webp";
-    input.oncancel = () => resolve(null);
+    const input = document.createElement("input"); input.type = "file"; input.accept = "image/*";
+    if (source === "camera") input.setAttribute("capture", "environment");
+    input.style.cssText = "position:fixed;left:-100px;width:1px;height:1px;opacity:0";
+    input.setAttribute("aria-hidden", "true");
+    document.body.appendChild(input);
+    const finish = value => { input.remove(); resolve(value); };
+    const fail = error => { input.remove(); reject(error); };
+    input.oncancel = () => finish(null);
     input.onchange = () => {
       const file = input.files?.[0];
-      if (!file) { resolve(null); return; }
-      if (file.size > 20 * 1024 * 1024) { reject(new Error("请选择 20 MB 以内的照片。")); return; }
-      const reader = new FileReader(); reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error("照片读取失败，请重新选择。")); reader.readAsDataURL(file);
+      if (!file) { finish(null); return; }
+      if (file.size > 20 * 1024 * 1024) { fail(new Error("请选择 20 MB 以内的照片。")); return; }
+      const reader = new FileReader(); reader.onload = () => finish(String(reader.result));
+      reader.onerror = () => fail(new Error("照片读取失败，请重新选择。")); reader.readAsDataURL(file);
     };
-    input.click();
+    try { input.click(); } catch (error) { fail(error); }
   });
   // #endif
   // #ifdef MP-WEIXIN
-  return new Promise((resolve, reject) => uni.chooseImage({ count: 1, sourceType: ["album"], sizeType: ["original"],
-    success: result => resolve(result.tempFilePaths[0]),
-    fail: result => result.errMsg?.includes("cancel") ? resolve(null) : reject(new Error("选择照片失败，请重试。")),
+  return requireScanPrivacy().then(() => new Promise((resolve, reject) => {
+    const fail = failure => /cancel/i.test(failure.errMsg || "") ? resolve(null) : reject(nativeScanError(failure, source));
+    // Album selection never requests scope.camera or scope.writePhotosAlbum.
+    if (typeof wx !== "undefined" && wx.chooseMedia) wx.chooseMedia({
+      count: 1, mediaType: ["image"], sourceType: [source], sizeType: ["original"],
+      success: result => result.tempFiles?.[0]?.tempFilePath ? resolve(result.tempFiles[0].tempFilePath) : reject(new Error("未读到选择的照片，请重试。")), fail,
+    });
+    else uni.chooseImage({ count: 1, sourceType: [source], sizeType: ["original"],
+      success: result => result.tempFilePaths?.[0] ? resolve(result.tempFilePaths[0]) : reject(new Error("未读到选择的照片，请重试。")), fail,
+    });
   }));
   // #endif
 }
 
 // #ifdef H5
 export async function openBrowserCamera(host, onFrame) {
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error("此浏览器暂不能打开相机，请使用 HTTPS 页面或从相册扫描。");
+  if (window.isSecureContext === false) throw scanAccessError("当前网页不是安全连接，Chrome 不允许直接使用摄像头。请通过 HTTPS 打开网站，或使用系统相机／相册扫描。", "web-insecure", "web-help");
+  const policy = document.permissionsPolicy || document.featurePolicy;
+  if (policy?.allowsFeature && !policy.allowsFeature("camera"))
+    throw scanAccessError("当前嵌入页面禁止使用摄像头。请在 Chrome 新标签页直接打开完整网站后扫描；也可以使用系统相机或相册。", "web-policy", "web-help");
+  if (!navigator.mediaDevices?.getUserMedia) throw scanAccessError("当前浏览器不支持实时相机。可使用系统相机拍摄，或从相册扫描。", "web-camera-unsupported");
+  if (!host) throw new Error("相机预览区尚未就绪，请重新打开扫描页。");
   let stream;
   try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false }); }
-  catch { throw new Error("相机未能打开，请允许相机权限并确认相机未被占用。"); }
+  catch (failure) { throw browserScanError(failure); }
   const video = document.createElement("video"), canvas = document.createElement("canvas");
   video.muted = true; video.autoplay = true; video.playsInline = true;
   video.setAttribute("playsinline", "true"); video.setAttribute("webkit-playsinline", "true");

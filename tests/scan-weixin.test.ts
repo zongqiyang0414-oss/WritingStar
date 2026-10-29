@@ -8,27 +8,59 @@ async function nativeModule() {
   source = source.replace(/from "(\.\/[^\"]+)"/g, (_, name) => `from "${new URL('../src/platform/' + name, import.meta.url).href}"`);
   return import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
 }
-test('微信拒绝授权不创建相机，隐私授权失败不继续请求摄像头权限', async () => {
+test('微信首次相机请求交给camera组件，不用缺失的授权条目阻止初始化', async () => {
   const originalUni = globalThis.uni, originalWx = globalThis.wx;
-  let authorizations = 0;
+  let prompts = 0;
   try {
     const native = await nativeModule();
-    globalThis.wx = { requirePrivacyAuthorize(options) { options.success(); } };
-    globalThis.uni = {
-      getSetting(options) { options.success({ authSetting: { 'scope.camera': false } }); },
-      authorize() { authorizations++; },
-    };
-    await assert.rejects(native.authorizeScanCamera(), /相机权限已关闭/);
-    assert.equal(authorizations, 0);
-    globalThis.wx.requirePrivacyAuthorize = options => options.fail();
-    await assert.rejects(native.authorizeScanCamera(), /隐私保护指引/);
-    assert.equal(authorizations, 0);
-    globalThis.wx.requirePrivacyAuthorize = options => options.success();
-    globalThis.uni.getSetting = options => options.success({ authSetting: {} });
-    globalThis.uni.authorize = options => { assert.equal(options.scope, 'scope.camera'); authorizations++; options.success(); };
-    await native.authorizeScanCamera(); assert.equal(authorizations, 1);
+    globalThis.wx = { getPrivacySetting(options) { options.success({ needAuthorization: false }); }, requirePrivacyAuthorize() { prompts++; } };
+    globalThis.uni = { getSetting(options) { options.success({ authSetting: {} }); }, authorize() { assert.fail('first use must mount camera, not gate it behind authorize'); } };
+    await native.authorizeScanCamera(); assert.equal(prompts, 0);
+    globalThis.uni.getSetting = options => options.success({ authSetting: { 'scope.camera': false } });
+    await assert.rejects(native.authorizeScanCamera(), error => error.code === 'wx-camera-denied' && error.action === 'mini-settings');
   } finally { globalThis.uni = originalUni; globalThis.wx = originalWx; }
 });
+
+test('手机系统权限与微信隐私配置分别提示，不把所有失败归成没有权限', async () => {
+  const originalUni = globalThis.uni, originalWx = globalThis.wx;
+  try {
+    const native = await nativeModule();
+    globalThis.uni = { getSetting(options) { options.success({ authSetting: {} }); } };
+    globalThis.wx = { getAppAuthorizeSetting() { return { cameraAuthorized: 'denied' }; } };
+    await assert.rejects(native.authorizeScanCamera(), error => error.code === 'wx-system-camera' && error.action === 'app-settings');
+    globalThis.wx = { getPrivacySetting(options) { options.fail({ errMsg: 'getPrivacySetting:fail privacy not declared' }); }, requirePrivacyAuthorize() {} };
+    await assert.rejects(native.authorizeScanCamera(), error => error.code === 'wx-privacy' && /not declared/.test(error.detail));
+    globalThis.wx.getPrivacySetting = options => options.success({ needAuthorization: true });
+    globalThis.wx.requirePrivacyAuthorize = options => options.fail({ errMsg: 'requirePrivacyAuthorize:fail user deny' });
+    await assert.rejects(native.authorizeScanCamera(), error => error.code === 'wx-privacy-consent' && /user deny/.test(error.detail));
+    globalThis.wx.requirePrivacyAuthorize = options => options.success();
+    await native.authorizeScanCamera();
+  } finally { globalThis.uni = originalUni; globalThis.wx = originalWx; }
+});
+
+test('相册在相机被拒后仍可用，走chooseMedia且不请求相机或写相册权限', async () => {
+  const originalUni = globalThis.uni, originalWx = globalThis.wx;
+  try {
+    const native = await nativeModule();
+    globalThis.uni = { getSetting() { assert.fail('album must not depend on camera settings'); }, authorize() { assert.fail('album requires neither camera nor writePhotosAlbum scope'); } };
+    globalThis.wx = {
+      getPrivacySetting(options) { options.success({ needAuthorization: false }); }, requirePrivacyAuthorize() { assert.fail('already agreed'); },
+      getAppAuthorizeSetting() { return { cameraAuthorized: 'denied' }; },
+      chooseMedia(options) { assert.deepEqual(options.sourceType, ['album']); assert.deepEqual(options.mediaType, ['image']); options.success({ tempFiles: [{ tempFilePath: '/tmp/album.jpg' }] }); },
+    };
+    assert.equal(await native.chooseScanSource(), '/tmp/album.jpg');
+    globalThis.wx.chooseMedia = options => options.fail({ errMsg: 'chooseMedia:fail cancel' });
+    assert.equal(await native.chooseScanSource(), null);
+    globalThis.wx.chooseMedia = options => options.fail({ errMsg: 'chooseMedia:fail api scope is not declared in privacy agreement' });
+    await assert.rejects(native.chooseScanSource(), error => error.code === 'wx-privacy' && /scope/.test(error.detail));
+    delete globalThis.wx.chooseMedia;
+    globalThis.uni.chooseImage = options => { assert.deepEqual(options.sourceType, ['album']); options.success({ tempFilePaths: ['/tmp/older-library.jpg'] }); };
+    assert.equal(await native.chooseScanSource(), '/tmp/older-library.jpg');
+    globalThis.uni.chooseImage = options => { assert.deepEqual(options.sourceType, ['camera']); options.success({ tempFilePaths: ['/tmp/system-camera.jpg'] }); };
+    assert.equal(await native.chooseScanSource('camera'), '/tmp/system-camera.jpg');
+  } finally { globalThis.uni = originalUni; globalThis.wx = originalWx; }
+});
+
 test('微信扫描件保存失败回滚本次副本，原临时扫描件仍可重试，迟到保存也回滚', async () => {
   const originalUni = globalThis.uni, originalWx = globalThis.wx;
   const originals = new Set(['/tmp/scan-a.jpg', '/tmp/scan-b.jpg']);

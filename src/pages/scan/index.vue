@@ -6,13 +6,15 @@ import { analyzePaperCapture, captureStudentCode } from "../../platform/paperSca
 import { AutoScanGate } from "../../platform/autoScan.js";
 import { clamp, fitRect, validQuad } from "../../platform/scanGeometry.js";
 import { MAX_PHOTOS } from "../../platform/photos.js";
-import { authorizeScanCamera, chooseScanSource, createScanRenderer, openScanSettings, persistScanPages, startNativeFrames, takeNativePhoto } from "../../platform/scanner.js";
+import { nativeScanError } from "../../platform/scanAccess.js";
+import { authorizeScanCamera, chooseScanSource, createScanRenderer, openScanSettings, openScanAppSettings, persistScanPages, startNativeFrames, takeNativePhoto } from "../../platform/scanner.js";
 // #ifdef H5
 import { openBrowserCamera } from "../../platform/scanner.js";
 // #endif
 
 const instance = getCurrentInstance().proxy;
 const mode = ref("live"), automatic = ref(false), busy = ref(false), saving = ref(false), cameraMounted = ref(false), cameraReady = ref(false);
+const errorAction = ref(""), errorDetail = ref("");
 const realtime = ref(true), starting = ref(false), error = ref(""), notice = ref("将整张作业放入画面，四周留出一些背景");
 const outlineUrl = ref(""), progress = ref(0), waiting = ref(false), pages = shallowRef([]), selected = ref(0), capacity = ref(MAX_PHOTOS);
 const paperBatch = ref(false);
@@ -23,7 +25,7 @@ const fit = computed(() => pending.value ? fitRect(pending.value.width, pending.
 const frameText = computed(() => busy.value ? "正在裁切、矫正并增强纸面…" : full.value ? "本次页数已满，请检查后完成" : waiting.value && automatic.value ? "本页已扫描，请移开后放入下一张" : notice.value);
 const gate = new AutoScanGate();
 const initialized = ref(false), delivered = ref(false);
-let renderer, nativeContext, browserCamera, stopFrames, channel, foreground = true, disposed = false;
+let renderer, rendererPromise, nativeContext, browserCamera, stopFrames, channel, foreground = true, disposed = false, resumePicker;
 let epoch = 0, lastFrame = 0, drawing = false, lastDetection = null, dragging = -1, replacing = -1, choosing = false;
 
 onLoad(options => {
@@ -33,21 +35,18 @@ onLoad(options => {
   capacity.value = Number.isFinite(count) && count > 0 ? Math.min(maximum, Math.floor(count)) : maximum;
   channel = instance.getOpenerEventChannel?.();
 });
-onReady(async () => {
-  try {
-    renderer = await createScanRenderer(instance);
-    initialized.value = true;
-    if (disposed) { renderer.dispose(); return; }
-    await measure();
-    if (foreground) await startCamera();
-  } catch (failure) { error.value = failure.message || "扫描初始化失败，请返回重试。"; }
+onReady(() => {
+  initialized.value = true;
+  measure();
+  // Open the camera only from a click; page navigation/onReady is not a camera
+  // gesture on mobile browsers. Canvas initialization must not block access.
 });
-onShow(() => { foreground = true; });
+onShow(() => { foreground = true; resumePicker?.(); });
 onResize(async () => { await nextTick(); if (!disposed) await measure(); });
 watch([mode, error, () => pages.value.length, waiting], async () => { await nextTick(); if (!disposed) await measure(); });
 onHide(() => { foreground = false; releaseCamera(); });
 onUnload(() => {
-  disposed = true; releaseCamera(); renderer?.dispose();
+  disposed = true; resumePicker?.(); releaseCamera(); renderer?.dispose();
 });
 
 function measure() {
@@ -65,19 +64,39 @@ function releaseCamera() {
   nativeContext = null; cameraMounted.value = false; cameraReady.value = false; starting.value = false;
   lastDetection = null; gate.restart(); progress.value = 0; clearOutline();
 }
+async function ensureRenderer() {
+  if (renderer) return renderer;
+  if (!rendererPromise) rendererPromise = createScanRenderer(instance).then(value => {
+    if (disposed) { value.dispose(); throw new Error("扫描已关闭。"); }
+    renderer = value; return value;
+  }).finally(() => { rendererPromise = null; });
+  return rendererPromise;
+}
+function clearError() { error.value = ""; errorAction.value = ""; errorDetail.value = ""; }
+function showFailure(failure, operation = "camera") {
+  let reason = failure;
+  // #ifdef MP-WEIXIN
+  reason = failure?.action !== undefined || failure?.message && !failure?.errMsg ? failure : nativeScanError(failure, operation);
+  // #endif
+  error.value = reason?.message || "操作失败，请重试。";
+  errorAction.value = reason?.action || "";
+  errorDetail.value = reason?.detail || reason?.errMsg || "";
+}
 async function startCamera() {
   if (!initialized.value || disposed || !foreground || starting.value || busy.value || full.value) return;
   releaseCamera();
-  mode.value = "live"; error.value = ""; starting.value = true; realtime.value = true;
+  mode.value = "live"; clearError(); starting.value = true; realtime.value = true;
   notice.value = "正在打开相机…";
   const token = epoch;
   try {
-    await nextTick(); await measure(); await authorizeScanCamera();
-    if (disposed || !foreground || token !== epoch) return;
     // #ifdef MP-WEIXIN
+    await authorizeScanCamera();
+    if (disposed || !foreground || token !== epoch) return;
     cameraMounted.value = true;
     // #endif
     // #ifdef H5
+    // No asynchronous query/initialization may precede getUserMedia: retain the
+    // trusted click. The host stays mounted while reviewing a captured page.
     const camera = await openBrowserCamera(document.getElementById("scan-browser-camera"), frame => receiveFrame(frame));
     if (disposed || !foreground || token !== epoch) { camera.close(); return; }
     browserCamera = camera; cameraReady.value = true; starting.value = false;
@@ -86,7 +105,7 @@ async function startCamera() {
   } catch (failure) {
     if (token !== epoch || disposed) return;
     releaseCamera(); notice.value = "相机暂未开启，也可以从相册扫描";
-    error.value = failure.message || "无法打开相机，请检查权限后重试。";
+    showFailure(failure);
   }
 }
 function nativeReady() {
@@ -99,11 +118,30 @@ function nativeReady() {
     notice.value = "此设备暂不支持实时框选；点击拍摄后识别边角";
   });
 }
-function cameraError() { releaseCamera(); error.value = "相机未能启动，请检查相机权限或稍后重试。"; }
+function cameraError(event) { releaseCamera(); showFailure(event?.detail || event); }
 function cameraStopped() { if (cameraMounted.value) { releaseCamera(); notice.value = "相机已暂停，点击继续开启"; } }
 async function settings() {
   try { await openScanSettings(); if (foreground) await startCamera(); }
-  catch { error.value = "无法打开设置，请在微信小程序设置中开启相机权限。"; }
+  catch (failure) { showFailure(failure); }
+}
+async function systemSettings() {
+  try { await openScanAppSettings(); }
+  catch (failure) { error.value = failure.message || "请打开手机设置，在微信权限中允许相机。"; }
+}
+function permissionHelp() {
+  uni.showModal({ title: "相机授权说明", showCancel: false, content: errorAction.value === "privacy"
+    ? "微信的“权限使用记录”只显示调用记录。若隐私配置缺失，需要小程序管理员在微信公众平台“设置→服务内容声明→用户隐私保护指引”补充使用摄像头、选择照片等用途并发布。手机授权无法替代后台声明。"
+    : "在 Chrome 地址栏的网站信息中，允许此网站使用相机。手机还需在系统设置中允许 Chrome 使用相机。请通过 HTTPS 地址直接打开网站；嵌入页可能不支持授权。相册和系统相机可单独使用。" });
+}
+function copyError() { uni.setClipboardData({ data: `写字星 v0.12.0 扫描
+${error.value}
+${errorDetail.value}` }); }
+async function waitForPickerReturn() {
+  if (foreground || disposed) return;
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => { resumePicker = null; reject(new Error("请返回扫描页面后重新选择照片。")); }, 5000);
+    resumePicker = () => { clearTimeout(timeout); resumePicker = null; resolve(); };
+  });
 }
 async function receiveFrame(frame) {
   const now = Date.now();
@@ -115,6 +153,7 @@ async function receiveFrame(frame) {
     const state = gate.update(detection, now); progress.value = state.progress; waiting.value = state.waiting;
     if (detection) {
       drawing = true;
+      await ensureRenderer();
       const path = await renderer.drawOutline(detection.corners, frame.width, frame.height, stage.value);
       if (token !== epoch || disposed) { renderer.remove(path); return; }
       const old = outlineUrl.value; outlineUrl.value = path; if (old) renderer.remove(old);
@@ -144,18 +183,19 @@ async function capture(fromAutomatic = false) {
     // #endif
     // #ifdef MP-WEIXIN
     source = await takeNativePhoto(nativeContext);
-    renderer.track(source);
+    await ensureRenderer(); renderer.track(source);
     // #endif
     if (token !== epoch || disposed) { renderer.remove(source); return; }
     // Lock immediately; an interrupted processing attempt must not trigger a burst.
     gate.captured(detection); waiting.value = true; progress.value = 0;
     await processSource(source, fromAutomatic, token);
   } catch (failure) {
-    if (!disposed) error.value = failure.message || "扫描失败，请重新拍摄。";
+    if (!disposed) showFailure(failure);
     automatic.value = false;
   } finally { busy.value = false; }
 }
 async function processSource(source, fromAutomatic, token) {
+  await ensureRenderer();
   const image = await renderer.read(source);
   if (token !== epoch || disposed) throw new Error("扫描已暂停，请重新拍摄。");
   // Detect again on the still image: frame and full-quality photo FOVs can differ.
@@ -182,15 +222,16 @@ async function makePage(source, image, quad, token) {
   return { source, code, width: image.width, height: image.height, corners: quad.map(p => ({ ...p })),
     photo: { id: `scan-${Date.now()}-${Math.random().toString(36).slice(2)}`, url, name: "作业扫描件.jpg", sample: false } };
 }
-async function importPage() {
+async function importPage(sourceType = "album") {
   if (busy.value || choosing || full.value) return;
-  choosing = true; error.value = ""; releaseCamera();
+  choosing = true; clearError(); releaseCamera();
   try {
-    const source = await chooseScanSource();
+    const source = await chooseScanSource(sourceType);
+    await waitForPickerReturn();
     if (disposed || !source) return;
-    renderer.track(source); busy.value = true;
+    await ensureRenderer(); renderer.track(source); busy.value = true;
     await processSource(source, false, epoch);
-  } catch (failure) { if (!disposed) error.value = failure.message || "无法扫描这张图片，请重试。"; }
+  } catch (failure) { if (!disposed) showFailure(failure, sourceType); }
   finally { choosing = false; busy.value = false; }
 }
 function reviewPage(index) {
@@ -277,6 +318,9 @@ function leave() {
     </view>
     <view class="scan-status" role="status">{{ mode === 'live' ? frameText : busy ? (saving ? '正在保存扫描件…' : '正在裁切、矫正并增强纸面…') : mode === 'corners' ? '拖动四角框住纸张，保留完整笔迹' : '已裁切矫正 · 纸面增强，请检查笔迹和边缘' }}</view>
     <view id="scan-stage" class="scan-stage" @touchmove.stop.prevent="moveCorner" @touchend="dragging = -1" @touchcancel="dragging = -1" @mousemove="moveCorner" @mouseup="dragging = -1" @mouseleave="dragging = -1">
+      <!-- #ifdef H5 -->
+      <view v-show="mode === 'live'" id="scan-browser-camera" class="scan-camera" />
+      <!-- #endif -->
       <template v-if="mode === 'live'">
         <!-- #ifdef MP-WEIXIN -->
         <camera v-if="cameraMounted" id="scan-camera" class="scan-camera" device-position="back" flash="off" frame-size="medium" resolution="high" @initdone="nativeReady" @error="cameraError" @stop="cameraStopped">
@@ -284,7 +328,6 @@ function leave() {
         </camera>
         <!-- #endif -->
         <!-- #ifdef H5 -->
-        <view id="scan-browser-camera" class="scan-camera" />
         <image v-if="outlineUrl" class="scan-outline" :src="outlineUrl" mode="scaleToFill" />
         <!-- #endif -->
         <view v-if="!cameraMounted && !cameraReady" class="scan-empty">
@@ -293,8 +336,10 @@ function leave() {
           <text class="scan-muted">纸张放平，保持光线均匀</text>
           <button v-if="!starting" class="scan-primary" :disabled="busy || full || !initialized" @click="startCamera">{{ full ? '已达到页数上限' : '开启相机' }}</button>
           <!-- #ifdef MP-WEIXIN -->
-          <button v-if="error && !starting" class="scan-text-button" @click="settings">打开相机权限设置</button>
+          <button v-if="errorAction === 'mini-settings' && !starting" class="scan-text-button" @click="settings">打开小程序权限设置</button>
+          <button v-if="errorAction === 'app-settings' && !starting" class="scan-text-button" @click="systemSettings">打开手机授权设置</button>
           <!-- #endif -->
+          <button v-if="!starting" class="scan-text-button" :disabled="busy || full" @click="importPage('camera')">使用系统相机拍摄</button>
         </view>
       </template>
       <image v-else-if="mode === 'review' && current" class="scan-result" :src="current.photo.url" mode="aspectFit" />
@@ -304,7 +349,13 @@ function leave() {
         <view v-for="(point, index) in corners" :key="index" class="scan-corner" :style="pointStyle(point)" @touchstart.stop.prevent="dragging = index" @mousedown.stop.prevent="dragging = index">{{ index + 1 }}</view>
       </template>
     </view>
-    <view v-if="error" class="scan-error" role="alert">{{ error }}</view>
+    <view v-if="error" class="scan-error" role="alert">
+      <view>{{ error }}</view>
+      <view class="scan-error-actions">
+        <button v-if="errorAction === 'privacy' || errorAction === 'web-help'" class="scan-text-button" @click="permissionHelp">查看授权说明</button>
+        <button v-if="errorDetail" class="scan-text-button" @click="copyError">复制错误详情</button>
+      </view>
+    </view>
     <view class="scan-controls">
       <template v-if="mode === 'live'">
         <view class="scan-mode-row">
@@ -314,7 +365,7 @@ function leave() {
         <view class="scan-progress"><view :style="{ width: automatic && !waiting ? Math.round(progress * 100) + '%' : '0%' }" /></view>
         <button v-if="automatic && waiting" class="scan-text-button scan-next" :disabled="busy" @click="nextPage">已换好下一页，继续识别</button>
         <view class="scan-actions">
-          <button class="scan-side-action" :disabled="busy || full || !initialized" @click="importPage"><text class="scan-action-icon">▧</text><text>从相册扫描</text></button>
+          <button class="scan-side-action" :disabled="busy || full || !initialized" @click="importPage('album')"><text class="scan-action-icon">▧</text><text>从相册扫描</text></button>
           <button class="scan-shutter" aria-label="拍摄扫描" :disabled="busy || !cameraReady || full" @click="capture(false)"><view class="scan-shutter-inner" /></button>
           <button class="scan-side-action" :disabled="busy || !pages.length" @click="reviewPage(pages.length - 1)"><image v-if="pages.length" class="scan-thumb" :src="pages[pages.length - 1].photo.url" mode="aspectFill" /><text v-else class="scan-action-icon">▤</text><text>已扫描 {{ pages.length }} 页</text></button>
         </view>
@@ -369,6 +420,8 @@ function leave() {
 .scan-finish { width: 100%; margin-top: 12px; }
 .scan-text-button { background: transparent; color: #6ee2c1; font-size: 12px; line-height: 20px; padding: 4px; }
 .scan-next { margin: 0 auto 8px; }
+.scan-error-actions { display: flex; gap: 12px; }
+.scan-error-actions .scan-text-button { margin: 4px 0 0; padding: 0; }
 .scan-error { background: #502d27; color: #ffe4d9; font-size: 12px; line-height: 19px; padding: 9px 16px; flex-shrink: 0; }
 .scan-pagination { display: flex; align-items: center; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
 .scan-pagination button { color: #e4eee8; background: transparent; font-size: 12px; margin: 0; padding: 6px 0; }

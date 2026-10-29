@@ -51,11 +51,13 @@ function stored() {
     const images = [first, await page.locator('.paper-preview-image img').getAttribute('src')];
     await button(/去.*扫描/).click();
     await page.evaluate(image=>{window.__capture.paper=image;}, images[0]);
-    await button('开启相机扫描').click();await page.locator('.scan-outline').waitFor();
+    await button('开启相机扫描').click();await page.locator('.scanner-page').waitFor();
+    assert.equal(await page.locator('#scan-browser-camera video').count(),0,'opening the page does not request camera permission');
+    await button(/^开启相机$/).click();await page.locator('.scan-outline').waitFor();
     assert.match(await page.locator('.scan-count').innerText(), /0 \/ 60/);
     await page.locator('.scan-shutter').click();await button('调整边角').waitFor();
     assert.ok((await page.locator('.scan-result img').getAttribute('src')).startsWith('data:image/jpeg;'));
-    await page.screenshot({path:path.resolve(__dirname,'../outputs/v0120-scan-result-2026-10-29.png')});
+    await page.screenshot({path:path.resolve(__dirname,'../outputs/v0120-scan-result-camera-fix-20261029.png')});
     await button('继续扫描').click();await page.locator('.scan-outline').waitFor();
     // New capture stream uses the second physical sheet; explicitly rearm after moving paper.
     await page.locator('.scan-mode-toggle').click();
@@ -79,7 +81,7 @@ function stored() {
     await page.waitForFunction(()=>document.querySelector('.paper-error')?.textContent.includes('未能添加'));
     assert.equal(await page.locator('.scan-page-card').count(),2);
     assert.match(await page.locator('.scan-student-group').first().innerText(),/可提交/);
-    await page.screenshot({path:path.resolve(__dirname,'../outputs/v0120-scan-inbox-2026-10-29.png'),fullPage:true});
+    await page.screenshot({path:path.resolve(__dirname,'../outputs/v0120-scan-inbox-camera-fix-20261029.png'),fullPage:true});
     await button('统一提交并开始AI批阅').click();await confirm();await page.locator('.scan-empty').waitFor();
     const submissions=(await page.evaluate(stored)).submissions.filter(s=>s.assignmentId===assignment.id);
     assert.equal(submissions.length,1);assert.equal(submissions[0].paper.source,'teacher-scan');

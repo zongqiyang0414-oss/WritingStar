@@ -1,5 +1,13 @@
 # 写字星前端协作约定
 
+## 2026-10-29 · 扫描相机和相册权限修复
+
+- 摄像头必须在扫描页实际点击后开启；不在onReady发起。H5的getUserMedia前不等待画布或selectorQuery，微信未决定scope由camera组件原生请求，不能用尚未挂载的相机权限条目作为前提。
+- 相册独立使用chooseMedia／旧版chooseImage，不申请scope.camera或writePhotosAlbum；选图回调可能早于onShow，恢复前台后再处理。不能把正常选图的后台生命周期误作扫描取消。
+- 错误区分手机系统、小程序授权、隐私配置和浏览器策略，并保留原始errMsg以供复制。manifest里的scope.camera声明不等于授权或微信后台隐私声明；缺失后台配置需要对应AppID管理员发布。
+- 官方微信构建新增verify-weixin-scan.cjs，检查真实编译页的点击、画布解耦、权限拒绝和选图恢复；不能仅凭API桩或桌面浏览器宣称iOS真机通过。操作与边界见docs/扫描相机授权与排障.md。仍在v0.12.0原功能分支，main不变，网页部署继续暂缓。
+
+
 ## 2026-10-29 · 当前开发分支与作业扫描移植
 
 - 当前最新版本为v0.12.0，继续在`feature/teacher-controlled-resubmission-2026-10-23`修改和上传。开始工作需获取全部远端分支并读取该分支交接；不得用旧main代替用户指定的功能分支。下方历史“先拉main”不适用于本轮及接续此版本的工作。
