@@ -129,6 +129,15 @@ export async function createScanRenderer(instance) {
     throw new Error("扫描图片较大，请缩小拍摄范围后重试。");
   }
   async function drawOutline(corners, frameWidth, frameHeight, stage, cover = true, confirmed = true) {
+    // #ifdef H5
+    // A four-sided overlay does not need a per-frame canvas readback and PNG
+    // encode. Keep it as a small vector image in the same display coordinates.
+    const width = Math.round(stage.width), height = Math.round(stage.height);
+    const display = fitRect(frameWidth, frameHeight, width, height, cover);
+    const points = corners.map(p => `${display.left + p.x * display.width},${display.top + p.y * display.height}`).join(" ");
+    const color = confirmed ? "#00d6b2" : "#ffc050";
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><polygon points="${points}" fill="${color}" fill-opacity="0.16" stroke="${color}" stroke-width="2"/></svg>`);
+    // #endif
     outline.width = Math.round(stage.width); outline.height = Math.round(stage.height);
     const rect = fitRect(frameWidth, frameHeight, outline.width, outline.height, cover);
     const ctx = outline.getContext("2d");

@@ -1,4 +1,4 @@
-import { clamp, convexHull, hullToQuad, orderQuad, polygonArea, validQuad, projectiveMap, distance } from "./scanGeometry.js";
+import { clamp, convexHull, hullToQuad, orderQuad, polygonArea, validQuad, projectiveMap, projectiveCoefficients, distance } from "./scanGeometry.js";
 
 const luminance = (data, i) => (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
 
@@ -237,6 +237,7 @@ function describeDocument(best, gray, width, height) {
 }
 
 const nextTick = () => new Promise(resolve => setTimeout(resolve, 0));
+const clock = () => typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
 function checkCancelled(cancelled) { if (cancelled()) throw new Error("扫描已暂停，请重试。"); }
 
 export async function rectifyDocument(image, corners, { maxEdge = 1800, cancelled = () => false } = {}) {
@@ -246,17 +247,27 @@ export async function rectifyDocument(image, corners, { maxEdge = 1800, cancelle
   const h = Math.max(distance(sourcePoints[0], sourcePoints[3]), distance(sourcePoints[1], sourcePoints[2]));
   const scale = Math.min(1, maxEdge / Math.max(w, h));
   const width = Math.max(2, Math.round(w * scale)), height = Math.max(2, Math.round(h * scale));
-  const project = projectiveMap(sourcePoints), data = new Uint8ClampedArray(width * height * 4);
+  const m = projectiveCoefficients(sourcePoints), data = new Uint8ClampedArray(width * height * 4);
+  const step = 1 / (width - 1), stepX = m.xx * step, stepY = m.yx * step, stepD = m.g * step;
+  const source = image.data, maxX = image.width - 1, maxY = image.height - 1;
+  let yieldAt = clock() + 10;
+  checkCancelled(cancelled);
   for (let y = 0; y < height; y++) {
-    if (y % 48 === 0) { checkCancelled(cancelled); await nextTick(); }
+    if (y % 16 === 0 && clock() >= yieldAt) { checkCancelled(cancelled); await nextTick(); yieldAt = clock() + 10; }
+    const v = y / (height - 1);
+    let numX = m.xy * v + m.x0, numY = m.yy * v + m.y0, denominator = m.h * v + 1;
     for (let x = 0; x < width; x++) {
-      const p = project(x / (width - 1), y / (height - 1));
-      const sx = clamp(p.x, 0, image.width - 1), sy = clamp(p.y, 0, image.height - 1);
+      const inverse = 1 / denominator;
+      const sx = clamp(numX * inverse, 0, maxX), sy = clamp(numY * inverse, 0, maxY);
+      numX += stepX; numY += stepY; denominator += stepD;
       const ix = Math.floor(sx), iy = Math.floor(sy), dx = sx - ix, dy = sy - iy;
       const a = (iy * image.width + ix) * 4, b = (iy * image.width + Math.min(ix + 1, image.width - 1)) * 4;
       const c = (Math.min(iy + 1, image.height - 1) * image.width + ix) * 4, d = (Math.min(iy + 1, image.height - 1) * image.width + Math.min(ix + 1, image.width - 1)) * 4;
       const target = (y * width + x) * 4;
-      for (let channel = 0; channel < 3; channel++) data[target + channel] = image.data[a + channel] * (1 - dx) * (1 - dy) + image.data[b + channel] * dx * (1 - dy) + image.data[c + channel] * (1 - dx) * dy + image.data[d + channel] * dx * dy;
+      const wa = (1 - dx) * (1 - dy), wb = dx * (1 - dy), wc = (1 - dx) * dy, wd = dx * dy;
+      data[target] = source[a] * wa + source[b] * wb + source[c] * wc + source[d] * wd;
+      data[target + 1] = source[a + 1] * wa + source[b + 1] * wb + source[c + 1] * wc + source[d + 1] * wd;
+      data[target + 2] = source[a + 2] * wa + source[b + 2] * wb + source[c + 2] * wc + source[d + 2] * wd;
       data[target + 3] = 255;
     }
   }
@@ -270,25 +281,39 @@ export async function enhanceDocument(image, cancelled = () => false) {
   const { width, height, data } = image, cell = 32;
   const columns = Math.ceil(width / cell), rows = Math.ceil(height / cell);
   const white = new Float32Array(columns * rows);
-  for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < columns; cx++) {
+  checkCancelled(cancelled);
+  let samplingYieldAt = clock() + 10;
+  for (let cy = 0; cy < rows; cy++) {
+    if (clock() >= samplingYieldAt) { checkCancelled(cancelled); await nextTick(); samplingYieldAt = clock() + 10; }
+    for (let cx = 0; cx < columns; cx++) {
     const values = [];
     for (let y = cy * cell; y < Math.min(height, (cy + 1) * cell); y += 3)
       for (let x = cx * cell; x < Math.min(width, (cx + 1) * cell); x += 3) values.push(luminance(data, (y * width + x) * 4));
     values.sort((a, b) => a - b);
     white[cy * columns + cx] = Math.max(80, values[Math.floor(values.length * 0.9)]);
+    }
   }
   const background = white.map((value, i) => {
     const x = i % columns, y = Math.floor(i / columns);
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) value = Math.max(value, white[clamp(y + dy, 0, rows - 1) * columns + clamp(x + dx, 0, columns - 1)]);
     return value;
   });
+  // Horizontal interpolation is identical for every row. Cache it once instead
+  // of recomputing clamps, floors and neighboring indices for every pixel.
+  const left = new Int32Array(width), right = new Int32Array(width), mix = new Float64Array(width);
+  for (let x = 0; x < width; x++) {
+    const gx = clamp(x / cell - .5, 0, columns - 1), ix = Math.floor(gx);
+    left[x] = ix; right[x] = Math.min(ix + 1, columns - 1); mix[x] = gx - ix;
+  }
+  let yieldAt = clock() + 10;
   for (let y = 0; y < height; y++) {
-    if (y % 48 === 0) { checkCancelled(cancelled); await nextTick(); }
+    if (y % 16 === 0 && clock() >= yieldAt) { checkCancelled(cancelled); await nextTick(); yieldAt = clock() + 10; }
+    const gy = clamp(y / cell - .5, 0, rows - 1), iy = Math.floor(gy), dy = gy - iy;
+    const top = iy * columns, bottom = Math.min(iy + 1, rows - 1) * columns;
     for (let x = 0; x < width; x++) {
-      const gx = clamp(x / cell - 0.5, 0, columns - 1), gy = clamp(y / cell - 0.5, 0, rows - 1);
-      const ix = Math.floor(gx), iy = Math.floor(gy), dx = gx - ix, dy = gy - iy;
-      const a = background[iy * columns + ix], b = background[iy * columns + Math.min(ix + 1, columns - 1)];
-      const c = background[Math.min(iy + 1, rows - 1) * columns + ix], d = background[Math.min(iy + 1, rows - 1) * columns + Math.min(ix + 1, columns - 1)];
+      const dx = mix[x];
+      const a = background[top + left[x]], b = background[top + right[x]];
+      const c = background[bottom + left[x]], d = background[bottom + right[x]];
       const paper = a * (1 - dx) * (1 - dy) + b * dx * (1 - dy) + c * (1 - dx) * dy + d * dx * dy;
       const i = (y * width + x) * 4;
       const value = clamp((luminance(data, i) / paper * 255 - 6) * 255 / 245, 0, 255);

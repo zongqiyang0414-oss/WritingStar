@@ -1,6 +1,7 @@
-import { detectPaperCorners, readStudentCode } from "./documentScanner.js";
+import { detectPaperCorners } from "./documentScanner.js";
 import { paperId } from "../services/paperWorkflow.js";
-import { analyzeDocument, enhanceDocument, rectifyDocument } from "./documentScan.js";
+import { analyzeDocument } from "./documentScan.js";
+import { processScanPixels } from "./scanProcessing.js";
 function call(api, args, scope) {
   return new Promise((resolve, reject) => uni[api]({ ...args, success: resolve, fail: () => reject(new Error("扫描处理失败，请重新选图或使用人工确认。")) }, scope));
 }
@@ -23,20 +24,14 @@ export async function processDeviceScan(photo, canvasId, scope, resize) {
   await new Promise(resolve => ctx.draw(false, resolve));
   const pixels = await call("canvasGetImageData", {canvasId, x:0, y:0, width, height}, scope);
   pixels.width = width; pixels.height = height;
-  let code = readStudentCode(pixels), corrected = false;
   // Downsample before corner detection so the connected-component pass stays small.
   const scale = Math.min(1, 480 / Math.max(width, height)), sw = Math.round(width * scale), sh = Math.round(height * scale), small = new Uint8ClampedArray(sw * sh * 4);
   for(let y=0;y<sh;y++) for(let x=0;x<sw;x++) {const from=(Math.min(height-1,Math.round(y/scale))*width+Math.min(width-1,Math.round(x/scale)))*4,to=(y*sw+x)*4;for(let c=0;c<4;c++)small[to+c]=pixels.data[from+c];}
   const detected = analyzeDocument({data:small,width:sw,height:sh});
   const corners = detected?.corners || detectPaperCorners({data:small,width:sw,height:sh}, {markersOnly:true})?.map(p=>({x:p.x/(sw-1),y:p.y/(sh-1)}));
-  let outputWidth=width,outputHeight=height, outputPixels=pixels;
-  if(corners) {
-    const output=await rectifyDocument(pixels,corners,{maxEdge:1600});outputWidth=output.width;outputHeight=output.height;
-    await resize(outputWidth,outputHeight);
-    await call("canvasPutImageData",{canvasId,x:0,y:0,width:outputWidth,height:outputHeight,data:output.data},scope);
-    if(!code)code=readStudentCode(output);corrected=true;outputPixels=output;
-  }
-  await enhanceDocument(outputPixels);
+  const { image: outputPixels, code } = await processScanPixels(pixels, corners, {maxEdge:1600, sourceCodeFallback: !detected});
+  const outputWidth=outputPixels.width, outputHeight=outputPixels.height, corrected=!!corners;
+  if (outputWidth !== width || outputHeight !== height) await resize(outputWidth, outputHeight);
   await call("canvasPutImageData",{canvasId,x:0,y:0,width:outputWidth,height:outputHeight,data:outputPixels.data},scope);
   const image = await call("canvasToTempFilePath",{canvasId,width:outputWidth,height:outputHeight,destWidth:outputWidth,destHeight:outputHeight,fileType:"jpg",quality:.8},scope);
   const saved = await call("saveFile",{tempFilePath:image.tempFilePath});

@@ -1,17 +1,11 @@
 import { analyzeDocument } from "./documentScan.js";
-import { detectPaperCorners, readStudentCode } from "./documentScanner.js";
+import { detectPaperCorners } from "./documentScanner.js";
 import { validQuad } from "./scanGeometry.js";
+import { downsampleScanImage } from "./scanPixels.js";
+import { readPaperScanCode } from "./scanCode.js";
 
 function downsample(image, maxEdge) {
-  const scale = Math.min(1, maxEdge / Math.max(image.width, image.height));
-  if (scale === 1) return image;
-  const width = Math.round(image.width * scale), height = Math.round(image.height * scale);
-  const data = new Uint8ClampedArray(width * height * 4);
-  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    const from = (Math.min(image.height - 1, Math.floor(y / scale)) * image.width + Math.min(image.width - 1, Math.floor(x / scale))) * 4;
-    data.set(image.data.subarray(from, from + 4), (y * width + x) * 4);
-  }
-  return { data, width, height };
+  return downsampleScanImage(image, maxEdge);
 }
 
 // Retain v0.12 paper corner-mark detection on pale desks. The general detector
@@ -56,8 +50,7 @@ export function selectCaptureDetection(image, preview, sameFrame, detect = analy
   return found;
 }
 
-// Read the identifier before enhancement, then retry on the rectified pixels.
-// A missing code stays unresolved for the existing manual-confirmation workflow.
+// Retained for callers that only need to read a card identifier.
 export function captureStudentCode(image) {
-  return readStudentCode(downsample(image, 1600));
+  return readPaperScanCode(image);
 }

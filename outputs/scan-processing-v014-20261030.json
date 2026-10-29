@@ -1,0 +1,45 @@
+{
+  "baseline": "27ec764",
+  "version": "0.14.0",
+  "runtime": "v24.19.0",
+  "input": [
+    1600,
+    2200
+  ],
+  "measurement": "CPU pixel pipeline only; warm up once; median of three runs; excludes photo decode/JPEG export; not phone timing",
+  "cases": [
+    {
+      "scene": "printed-card",
+      "oldMedianMs": 745.51,
+      "newMedianMs": 179.93,
+      "codePreserved": true,
+      "output": [
+        1214,
+        1800
+      ],
+      "maxPixelDifference": 0
+    },
+    {
+      "scene": "custom-document-in-paper-inbox",
+      "oldMedianMs": 940.22,
+      "newMedianMs": 251.52,
+      "codePreserved": true,
+      "output": [
+        1214,
+        1800
+      ],
+      "maxPixelDifference": 0
+    },
+    {
+      "scene": "ordinary-document-scan",
+      "oldMedianMs": 919.46,
+      "newMedianMs": 129.59,
+      "codePreserved": true,
+      "output": [
+        1214,
+        1800
+      ],
+      "maxPixelDifference": 0
+    }
+  ]
+}

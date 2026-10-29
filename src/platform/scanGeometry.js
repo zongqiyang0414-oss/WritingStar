@@ -50,18 +50,23 @@ export function hullToQuad(hull) {
   return best ? orderQuad(best) : null;
 }
 // Unit square -> source quadrilateral homography (not a bounding-box crop).
-export function projectiveMap(q) {
+export function projectiveCoefficients(q) {
   const [a, b, c, d] = q;
   const dx1 = b.x - c.x, dx2 = d.x - c.x, dx3 = a.x - b.x + c.x - d.x;
   const dy1 = b.y - c.y, dy2 = d.y - c.y, dy3 = a.y - b.y + c.y - d.y;
   const det = dx1 * dy2 - dx2 * dy1;
   if (Math.abs(det) < 1e-9) throw new Error("边角范围无效，请重新调整。");
   const g = (dx3 * dy2 - dx2 * dy3) / det, h = (dx1 * dy3 - dx3 * dy1) / det;
+  return { xx: b.x - a.x + g * b.x, xy: d.x - a.x + h * d.x, x0: a.x,
+    yx: b.y - a.y + g * b.y, yy: d.y - a.y + h * d.y, y0: a.y, g, h };
+}
+export function projectiveMap(q) {
+  const {xx, xy, x0, yx, yy, y0, g, h} = projectiveCoefficients(q);
   return (u, v) => {
     const denominator = g * u + h * v + 1;
     return {
-      x: ((b.x - a.x + g * b.x) * u + (d.x - a.x + h * d.x) * v + a.x) / denominator,
-      y: ((b.y - a.y + g * b.y) * u + (d.y - a.y + h * d.y) * v + a.y) / denominator,
+      x: (xx * u + xy * v + x0) / denominator,
+      y: (yx * u + yy * v + y0) / denominator,
     };
   };
 }

@@ -1,8 +1,8 @@
 <script setup>
 import { computed, getCurrentInstance, nextTick, ref, shallowRef, watch } from "vue";
 import { onHide, onLoad, onReady, onResize, onShow, onUnload } from "@dcloudio/uni-app";
-import { enhanceDocument, rectifyDocument } from "../../platform/documentScan.js";
-import { analyzePaperCapture, captureStudentCode, LivePaperDetector, selectCaptureDetection } from "../../platform/paperScanCapture.js";
+import { processScanPixels } from "../../platform/scanProcessing.js";
+import { LivePaperDetector, selectCaptureDetection } from "../../platform/paperScanCapture.js";
 import { AutoScanGate } from "../../platform/autoScan.js";
 import { clamp, fitRect, validQuad } from "../../platform/scanGeometry.js";
 import { MAX_PHOTOS } from "../../platform/photos.js";
@@ -18,18 +18,19 @@ const errorAction = ref(""), errorDetail = ref("");
 const realtime = ref(true), starting = ref(false), error = ref(""), notice = ref("将整张作业放入画面，四周留出一些背景");
 const outlineUrl = ref(""), progress = ref(0), waiting = ref(false), pages = shallowRef([]), selected = ref(0), capacity = ref(MAX_PHOTOS);
 const paperBatch = ref(false);
-const importQueue = shallowRef([]), importStatus = ref("");
+const importQueue = shallowRef([]), importStatus = ref(""), processingStage = ref("");
 const pending = shallowRef(null), corners = ref([]), stage = ref({ width: 300, height: 400, left: 0, top: 0 });
 const current = computed(() => pages.value[selected.value]);
 const full = computed(() => pages.value.length >= capacity.value);
 const fit = computed(() => pending.value ? fitRect(pending.value.width, pending.value.height, stage.value.width, stage.value.height) : stage.value);
-const frameText = computed(() => busy.value ? importStatus.value || "正在裁切、矫正并增强纸面…" : full.value ? "本次页数已满，请检查后完成" : waiting.value && automatic.value ? "本页已扫描，请移开后放入下一张" : notice.value);
+const processingText = computed(() => [importStatus.value, processingStage.value || "正在处理扫描件…"].filter(Boolean).join(" "));
+const frameText = computed(() => busy.value ? processingText.value : full.value ? "本次页数已满，请检查后完成" : waiting.value && automatic.value ? "本页已扫描，请移开后放入下一张" : notice.value);
 const gate = new AutoScanGate();
 const liveDetector = new LivePaperDetector();
 const initialized = ref(false), delivered = ref(false);
 let renderer, rendererPromise, nativeContext, browserCamera, stopFrames, channel, foreground = true, disposed = false, resumePicker;
 let epoch = 0, lastFrame = 0, drawing = false, lastDetection = null, dragging = -1, replacing = -1, choosing = false;
-let detectionErrors = 0, lastDetectionTime = 0;
+let detectionErrors = 0, lastDetectionTime = 0, outlineDrawing = false;
 
 onLoad(options => {
   paperBatch.value = options?.batch === "paper";
@@ -143,7 +144,7 @@ async function privacyContract() {
   try { await openScanPrivacyContract(); }
   catch (failure) { showFailure(failure); }
 }
-function copyError() { uni.setClipboardData({ data: `写字星 v0.13.0 扫描
+function copyError() { uni.setClipboardData({ data: `写字星 v0.14.0 扫描
 ${error.value}
 ${errorDetail.value}`, fail: () => uni.showModal({ title: "请长按复制错误详情", showCancel: false,
   content: errorDetail.value || error.value }) }); }
@@ -172,20 +173,7 @@ async function receiveFrame(frame) {
       await capture(true); return;
     }
     if (detection) {
-      let cover = true;
-      // #ifdef H5
-      cover = false;
-      // #endif
-      try {
-        await ensureRenderer();
-        const path = await renderer.drawOutline(lastDetection.corners, frame.width, frame.height, stage.value, cover, detection.autoEligible !== false);
-        if (token !== epoch || disposed) { renderer.remove(path); return; }
-        const old = outlineUrl.value; outlineUrl.value = path; if (old) renderer.remove(old);
-      } catch {
-        // A temporary outline/export failure must not disable recognition.
-        if (token !== epoch || disposed) return;
-        clearOutline();
-      }
+      if (!outlineDrawing) updateLiveOutline(lastDetection, frame, token);
       notice.value = detection.autoEligible === false ? "边缘尚不完整，请露出纸张四边；也可拍摄后调角"
         : !automatic.value ? "已框住纸张，点击下方拍摄"
         : state.reason === "moving" ? "检测到移动，请放稳纸张"
@@ -200,6 +188,25 @@ async function receiveFrame(frame) {
     if (++detectionErrors >= 3) { realtime.value = false; automatic.value = false; }
     notice.value = "正在重新识别，也可以点击拍摄后调整边角";
   } finally { drawing = false; }
+}
+async function updateLiveOutline(detection, frame, token) {
+  outlineDrawing = true;
+  let cover = true;
+  // #ifdef H5
+  cover = false;
+  // #endif
+  try {
+    await ensureRenderer();
+    const path = await renderer.drawOutline(detection.corners, frame.width, frame.height, stage.value, cover, detection.autoEligible !== false);
+    // Native PNG export may finish after newer frames. Do not restore an old
+    // outline after the page moved, disappeared or the camera was released.
+    if (token !== epoch || disposed || !lastDetection || detection.corners.some((p, i) => Math.hypot(p.x - lastDetection.corners[i].x, p.y - lastDetection.corners[i].y) > .03)) {
+      renderer.remove(path); return;
+    }
+    const old = outlineUrl.value; outlineUrl.value = path; if (old) renderer.remove(old);
+  } catch {
+    if (token === epoch && !disposed) clearOutline();
+  } finally { outlineDrawing = false; }
 }
 function toggleAutomatic() {
   automatic.value = !automatic.value; gate.restart(); progress.value = 0;
@@ -233,6 +240,7 @@ async function capture(fromAutomatic = false) {
   } finally { busy.value = false; }
 }
 async function processSource(source, fromAutomatic, token, fromImport = false, previewDetection = null, sameFrame = false) {
+  processingStage.value = "正在读取照片…";
   await ensureRenderer();
   const image = await renderer.read(source);
   if (token !== epoch || disposed) throw new Error("扫描已暂停，请重新拍摄。");
@@ -250,10 +258,9 @@ async function processSource(source, fromAutomatic, token, fromImport = false, p
 }
 async function makePage(source, image, quad, token) {
   const cancelled = () => disposed || token !== epoch || !foreground;
-  let code = captureStudentCode(image);
-  const warped = await rectifyDocument(image, quad, { cancelled });
-  if (!code) code = captureStudentCode(warped);
-  const enhanced = await enhanceDocument(warped, cancelled);
+  const { image: enhanced, code } = await processScanPixels(image, quad, { cancelled, readCode: paperBatch.value,
+    onStage: text => { if (!cancelled()) processingStage.value = text; } });
+  processingStage.value = "正在生成扫描件…";
   const url = await renderer.exportImage(enhanced);
   if (cancelled()) { renderer.remove(url); throw new Error("扫描已暂停，请重试。"); }
   return { source, code, width: image.width, height: image.height, corners: quad.map(p => ({ ...p })),
@@ -379,7 +386,7 @@ function leave() {
       <view class="scan-heading"><text class="scan-title">作业扫描</text><text class="scan-subtitle">{{ mode === 'corners' ? '调整纸张四角' : mode === 'review' ? '检查扫描效果' : '自动框选 · 清晰留存' }}</text></view>
       <text class="scan-count">{{ pages.length }} / {{ capacity }} 页</text>
     </view>
-    <view class="scan-status" role="status">{{ mode === 'live' ? frameText : busy ? (saving ? '正在保存扫描件…' : importStatus || '正在裁切、矫正并增强纸面…') : mode === 'corners' ? '拖动四角框住纸张，保留完整笔迹' + (importQueue.length ? ' · 后续还有 ' + importQueue.length + ' 张' : '') : '已裁切矫正 · 纸面增强，请检查笔迹和边缘' }}</view>
+    <view class="scan-status" role="status">{{ mode === 'live' ? frameText : busy ? (saving ? '正在保存扫描件…' : processingText) : mode === 'corners' ? '拖动四角框住纸张，保留完整笔迹' + (importQueue.length ? ' · 后续还有 ' + importQueue.length + ' 张' : '') : '已裁切矫正 · 纸面增强，请检查笔迹和边缘' }}</view>
     <view id="scan-stage" class="scan-stage" @touchmove.stop.prevent="moveCorner" @touchend="dragging = -1" @touchcancel="dragging = -1" @mousemove="moveCorner" @mouseup="dragging = -1" @mouseleave="dragging = -1">
       <!-- #ifdef H5 -->
       <view v-show="mode === 'live'" id="scan-browser-camera" class="scan-camera" />

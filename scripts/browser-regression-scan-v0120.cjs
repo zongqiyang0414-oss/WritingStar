@@ -28,12 +28,12 @@ function stored() {
     const bind=async code=>{await page.locator('.binding-login').click();await page.locator('.binding-code input').fill(code);await button('查看绑定信息').click();await button(/^\s*确认\s*$/,page.locator('.binding-view')).click();await page.locator('.greeting').waitFor();};
     const noOverflow=async()=>{for(const width of [320,390,1280]){await page.setViewportSize({width,height:900});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`overflow at ${width}`);}await page.setViewportSize({width:390,height:900});};
     await page.addInitScript(() => {
-      window.__capture = { paper: '', present: true, streams: [], slowOutline: true };
+      window.__capture = { paper: '', present: true, streams: [], slowOutline: true, livePngExports: 0 };
       const encode=HTMLCanvasElement.prototype.toDataURL;
       HTMLCanvasElement.prototype.toDataURL=function(type,...args){
         // Reproduce an outline export exceeding the old 650ms reset. The
         // physical page stays still; rendering must not prevent the shutter.
-        if(type==='image/png' && window.__capture.slowOutline){const until=performance.now()+680;while(performance.now()<until){}}
+        if(type==='image/png' && window.__capture.slowOutline){if(window.__capture.streams.length)window.__capture.livePngExports++;const until=performance.now()+680;while(performance.now()<until){}}
         return encode.call(this,type,...args);
       };
       Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable:true, value: async () => {
@@ -77,14 +77,15 @@ function stored() {
     outline.actual.forEach((value,i)=>assert.ok(Math.abs(value-outline.expected[i])<8,`outline ${i}: ${value} vs ${outline.expected[i]}`));
     await page.waitForFunction(()=>document.querySelector('.scan-count')?.textContent.startsWith('1'));
     const firstCaptureMs=Date.now()-autoStarted;
-    assert.ok(firstCaptureMs<8000,'slow outline export must not keep resetting a stationary page');
+    assert.ok(firstCaptureMs<8000,'outline export must not keep resetting a stationary page');
+    assert.equal(await page.evaluate(()=>window.__capture.livePngExports),0,'live border uses vectors, never per-frame PNG encoding');
     await page.evaluate(()=>window.__capture.slowOutline=false);
-    console.log(`Stationary page captured with 680ms outline export: ${firstCaptureMs}ms including opening camera and processing.`);
+    console.log(`Stationary page captured with vector outline: ${firstCaptureMs}ms including opening camera and processing; no per-frame PNG export.`);
     assert.match(await page.locator('.scan-count').innerText(),/1 \/ 60/);
     await page.waitForTimeout(1800);
     assert.match(await page.locator('.scan-count').innerText(),/^1/,'the same paper must not be captured again');
     assert.equal(await page.locator('#scan-browser-camera video').count(),1,'automatic capture keeps the camera live');
-    await page.screenshot({path:path.resolve(__dirname,'../outputs/v0120-scan-auto-tracking-20261030.png')});
+    await page.screenshot({path:path.resolve(__dirname,'../outputs/v014-scan-auto-20261030.png')});
     // Removing a page and introducing the next page automatically rearms capture.
     await page.evaluate(()=>window.__capture.present=false);await page.waitForTimeout(1500);
     await page.evaluate(image=>window.__capture.paper=image,images[1]);
@@ -95,7 +96,7 @@ function stored() {
     await page.locator('.scan-side-action').filter({hasText:'已扫描'}).click();
     await button('调整边角').waitFor();
     assert.ok((await page.locator('.scan-result img').getAttribute('src')).startsWith('data:image/jpeg;'));
-    await page.screenshot({path:path.resolve(__dirname,'../outputs/v0120-scan-result-tracking-20261030.png')});
+    await page.screenshot({path:path.resolve(__dirname,'../outputs/v014-scan-result-20261030.png')});
     // The manual switch stops automatic capture; the shutter still creates a page.
     await button('继续扫描').click();await page.locator('.scan-outline').waitFor();
     await page.locator('.scan-mode-toggle').click();assert.match(await page.locator('.scan-mode-toggle').innerText(),/已关闭/);
@@ -117,12 +118,12 @@ function stored() {
     await page.waitForFunction(()=>document.querySelector('.paper-error')?.textContent.includes('未能添加'));
     assert.equal(await page.locator('.scan-page-card').count(),2);
     assert.match(await page.locator('.scan-student-group').first().innerText(),/可提交/);
-    await page.screenshot({path:path.resolve(__dirname,'../outputs/v0120-scan-inbox-tracking-20261030.png'),fullPage:true});
+    await page.screenshot({path:path.resolve(__dirname,'../outputs/v014-scan-inbox-20261030.png'),fullPage:true});
     await button('统一提交并开始AI批阅').click();await confirm();await page.locator('.scan-empty').waitFor();
     const submissions=(await page.evaluate(stored)).submissions.filter(s=>s.assignmentId===assignment.id);
     assert.equal(submissions.length,1);assert.equal(submissions[0].paper.source,'teacher-scan');
     assert.deepEqual(submissions[0].paper.pages.map(p=>p.page),[1,2]);assert.ok(submissions[0].photos.every(p=>!p.sample));
     await noOverflow();assert.deepEqual(errors,[]);
-    console.log('v0.12 default automatic capture, full-camera outline alignment, same-page lock, next-page rearm, manual capture, QR identity, duplicate protection, 60-page inbox, ordered submission and camera release passed.');
+    console.log('Scan default automatic capture, full-camera outline alignment, same-page lock, next-page rearm, manual capture, QR identity, duplicate protection, 60-page inbox, ordered submission and camera release passed.');
   } finally { await browser?.close();server.close(); }
 })().catch(error=>{console.error(error);process.exitCode=1;});

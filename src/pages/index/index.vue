@@ -216,7 +216,7 @@ function toggleFeedbackDimension(id) {
       </view>
       <view class="intro-foot">
         <text class="tiny-dot" />
-        原型展示 · v0.13.0
+        原型展示 · v0.14.0
       </view>
     </view>
     <!-- #endif -->
@@ -297,13 +297,14 @@ function toggleFeedbackDimension(id) {
             <template v-else>
               <view
                 :key="0"
-                :class="['page-heading', { 'root-heading': isRoot }]"
+                :class="['page-heading', { 'root-heading': isRoot, 'pinned-heading': !isRoot }]"
               >
                 <template v-if="isRoot" />
                 <template v-else>
                   <button
                     :key="0"
                     class="back-button"
+                    aria-label="返回上一页"
                     :disabled="busy"
                     @click="back"
                   >

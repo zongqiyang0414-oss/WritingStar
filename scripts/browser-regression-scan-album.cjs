@@ -53,7 +53,7 @@ const server = http.createServer((req,res) => {
     assert.ok(quality.width<600&&quality.height<850,'desk cropped away');
     assert.ok(quality.white>240&&quality.margin>235,'shadowed sheet becomes white including page margins');
     assert.ok(quality.dark,'printed outline remains dark');
-    await page.screenshot({path:path.resolve(__dirname,'../outputs/scan-album-multiple-20261029.png')});
+    await page.screenshot({path:path.resolve(__dirname,'../outputs/scan-album-multiple-v014-20261030.png')});
     // A query-only hash change reuses the uni-app page instance; reload for a
     // new independent scan session with a different remaining capacity.
     await page.goto('about:blank');await page.goto(base+'2',{waitUntil:'networkidle'});await choose(files);

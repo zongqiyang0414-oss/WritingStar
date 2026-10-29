@@ -1,6 +1,7 @@
 import jsQR from "jsqr";
 import { paperId } from "../services/paperWorkflow.js";
-import { analyzeDocument, enhanceDocument, rectifyDocument } from "./documentScan.js";
+import { analyzeDocument } from "./documentScan.js";
+import { processScanPixels } from "./scanProcessing.js";
 
 // Four solid corner marks give a stable target even on a light desktop.
 export function detectPaperCorners({ data, width, height }, { markersOnly = false } = {}) {
@@ -110,25 +111,17 @@ export function inspectScanFrame(source) {
   const detected = analyzeDocument(data);
   const corners = detected?.corners.map(p => ({ x: p.x * (canvas.width - 1), y: p.y * (canvas.height - 1) }))
     || detectPaperCorners(data, { markersOnly: true });
-  return { corners, width: canvas.width, height: canvas.height };
+  return { corners, markerEstimate: !detected && !!corners, width: canvas.width, height: canvas.height };
 }
 export async function processScanSource(source, name = "扫描答题卡") {
   let canvas = canvasFor(source), context = canvas.getContext("2d", {willReadFrequently: true});
   let pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-  let code = readStudentCode(pixels);
   const inspect = inspectScanFrame(source), corners = inspect.corners?.map(p => ({ x: p.x / (inspect.width - 1), y: p.y / (inspect.height - 1) }));
-  if (corners) {
-    const corrected = await rectifyDocument(pixels, corners);
-    const output = document.createElement("canvas"); output.width = corrected.width; output.height = corrected.height;
-    const out = output.getContext("2d"), target = out.createImageData(output.width, output.height);
-    target.data.set(corrected.data);
-    out.putImageData(target, 0, 0); canvas = output;
-    if (!code) code = readStudentCode(target);
-  }
-  // Album import uses the same paper-white enhancement as camera capture.
+  const { image: processed, code } = await processScanPixels(pixels, corners, { sourceCodeFallback: inspect.markerEstimate });
+  canvas.width = processed.width; canvas.height = processed.height;
   const finalContext = canvas.getContext("2d", {willReadFrequently: true});
-  const enhanced = await enhanceDocument(finalContext.getImageData(0, 0, canvas.width, canvas.height));
-  finalContext.putImageData(enhanced, 0, 0);
+  const target = finalContext.createImageData(processed.width, processed.height);
+  target.data.set(processed.data); finalContext.putImageData(target, 0, 0);
   let url = canvas.toDataURL("image/jpeg", .86);
   if (url.length > 800 * 1024 * 4 / 3) url = canvas.toDataURL("image/jpeg", .65);
   if (url.length > 800 * 1024 * 4 / 3) throw new Error("扫描图片仍过大，请减少画面杂物后重试。");

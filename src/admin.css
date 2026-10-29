@@ -1,6 +1,8 @@
 .admin-workspace { min-width: 0; }
 .admin-workspace .card { margin-bottom: 12px; }
 .admin-subheading { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+.admin-subheading { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 120; background: var(--paper); margin-left: -24px; margin-right: -24px; padding: 12px 24px; border-bottom: 1px solid var(--line); }
+@media (max-width: 520px) { .admin-subheading { margin-left: -20px; margin-right: -20px; padding-left: 20px; padding-right: 20px; } }
 .admin-seal { width: 39px; height: 44px; display: flex; align-items: center; justify-content: center; color: #497b5e; border: 1px solid #cdddcf; border-radius: 13px 13px 18px 18px; font-family: STSong, SimSun, serif; font-size: 21px; }
 .admin-hero { position: relative; overflow: hidden; border-radius: 18px; background: #285a45; color: #edf5e5; padding: 23px; }
 .admin-hero > .tiny { color: #c4d9bd; letter-spacing: 1px; }

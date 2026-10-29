@@ -133,7 +133,7 @@ function time(value) { const date = new Date(value); return `${date.getMonth() +
 <template>
   <view class="admin-workspace">
     <view v-if="mode !== 'list'" class="admin-subheading">
-      <button class="back-button" :disabled="busy" aria-label="返回管理列表" @click="back">‹</button>
+      <button class="back-button" :disabled="busy" aria-label="返回管理列表" @click="back">‹ 返回</button>
       <view><view class="tiny subtle">{{ organization.name }}</view><view class="section-title">{{ subTitle }}</view></view>
     </view>
 
