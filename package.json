@@ -1,6 +1,6 @@
 {
   "name": "writingstar",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "scripts": {
     "build:h5": "uni build",
     "test": "node --import tsx --test --test-isolation=none tests/*.test.ts",

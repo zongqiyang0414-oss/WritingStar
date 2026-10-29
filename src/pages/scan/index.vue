@@ -2,7 +2,7 @@
 import { computed, getCurrentInstance, nextTick, ref, shallowRef, watch } from "vue";
 import { onHide, onLoad, onReady, onResize, onShow, onUnload } from "@dcloudio/uni-app";
 import { enhanceDocument, rectifyDocument } from "../../platform/documentScan.js";
-import { analyzePaperCapture, captureStudentCode } from "../../platform/paperScanCapture.js";
+import { analyzePaperCapture, captureStudentCode, LivePaperDetector, selectCaptureDetection } from "../../platform/paperScanCapture.js";
 import { AutoScanGate } from "../../platform/autoScan.js";
 import { clamp, fitRect, validQuad } from "../../platform/scanGeometry.js";
 import { MAX_PHOTOS } from "../../platform/photos.js";
@@ -25,10 +25,11 @@ const full = computed(() => pages.value.length >= capacity.value);
 const fit = computed(() => pending.value ? fitRect(pending.value.width, pending.value.height, stage.value.width, stage.value.height) : stage.value);
 const frameText = computed(() => busy.value ? importStatus.value || "正在裁切、矫正并增强纸面…" : full.value ? "本次页数已满，请检查后完成" : waiting.value && automatic.value ? "本页已扫描，请移开后放入下一张" : notice.value);
 const gate = new AutoScanGate();
+const liveDetector = new LivePaperDetector();
 const initialized = ref(false), delivered = ref(false);
 let renderer, rendererPromise, nativeContext, browserCamera, stopFrames, channel, foreground = true, disposed = false, resumePicker;
 let epoch = 0, lastFrame = 0, drawing = false, lastDetection = null, dragging = -1, replacing = -1, choosing = false;
-let detectionErrors = 0;
+let detectionErrors = 0, lastDetectionTime = 0;
 
 onLoad(options => {
   paperBatch.value = options?.batch === "paper";
@@ -67,7 +68,7 @@ function clearOutline() {
 function releaseCamera() {
   epoch++; stopFrames?.(); stopFrames = null; browserCamera?.close(); browserCamera = null;
   nativeContext = null; cameraMounted.value = false; cameraReady.value = false; starting.value = false;
-  lastDetection = null; lastFrame = 0; detectionErrors = 0; gate.restart(); progress.value = 0; waiting.value = gate.locked; clearOutline();
+  lastDetection = null; lastDetectionTime = 0; lastFrame = 0; detectionErrors = 0; liveDetector.reset(); gate.restart(); progress.value = 0; waiting.value = gate.locked; clearOutline();
 }
 async function ensureRenderer() {
   if (renderer) return renderer;
@@ -142,7 +143,7 @@ async function privacyContract() {
   try { await openScanPrivacyContract(); }
   catch (failure) { showFailure(failure); }
 }
-function copyError() { uni.setClipboardData({ data: `写字星 v0.12.0 扫描
+function copyError() { uni.setClipboardData({ data: `写字星 v0.13.0 扫描
 ${error.value}
 ${errorDetail.value}`, fail: () => uni.showModal({ title: "请长按复制错误详情", showCancel: false,
   content: errorDetail.value || error.value }) }); }
@@ -160,9 +161,16 @@ async function receiveFrame(frame) {
   const token = epoch;
   drawing = true;
   try {
-    const detection = analyzePaperCapture(frame); lastDetection = detection;
+    const detection = liveDetector.update(frame, now);
     detectionErrors = 0;
     const state = gate.update(detection, now); progress.value = state.progress; waiting.value = state.waiting;
+    lastDetection = detection ? { ...detection, corners: state.corners || detection.corners, frameWidth: frame.width, frameHeight: frame.height } : null;
+    lastDetectionTime = now;
+    // Capture before exporting another outline PNG. Rendering time must not
+    // cancel a hold that already contains enough fresh stable observations.
+    if (automatic.value && realtime.value && state.capture && token === epoch) {
+      await capture(true); return;
+    }
     if (detection) {
       let cover = true;
       // #ifdef H5
@@ -170,7 +178,7 @@ async function receiveFrame(frame) {
       // #endif
       try {
         await ensureRenderer();
-        const path = await renderer.drawOutline(detection.corners, frame.width, frame.height, stage.value, cover, detection.autoEligible !== false);
+        const path = await renderer.drawOutline(lastDetection.corners, frame.width, frame.height, stage.value, cover, detection.autoEligible !== false);
         if (token !== epoch || disposed) { renderer.remove(path); return; }
         const old = outlineUrl.value; outlineUrl.value = path; if (old) renderer.remove(old);
       } catch {
@@ -185,10 +193,6 @@ async function receiveFrame(frame) {
         : `已找到纸张，保持稳定 ${Math.round(progress.value * 100)}%`;
     } else {
       clearOutline(); notice.value = "寻找纸张边缘，请放平作业并避开遮挡";
-    }
-    if (automatic.value && realtime.value && state.capture && token === epoch) {
-      if (Date.now() - now > 650) { gate.restart(); progress.value = 0; }
-      else await capture(true);
     }
   } catch {
     if (token !== epoch || disposed) return;
@@ -205,7 +209,7 @@ function nextPage() { gate.nextPage(); waiting.value = false; progress.value = 0
 async function capture(fromAutomatic = false) {
   if (!cameraReady.value || busy.value || full.value) return;
   busy.value = true; error.value = "";
-  const token = epoch, detection = lastDetection;
+  const token = epoch, detection = Date.now() - lastDetectionTime < 650 ? lastDetection : null;
   try {
     let source;
     // #ifdef H5
@@ -218,18 +222,21 @@ async function capture(fromAutomatic = false) {
     if (token !== epoch || disposed) { renderer.remove(source); return; }
     // Lock immediately; an interrupted processing attempt must not trigger a burst.
     gate.captured(detection); waiting.value = true; progress.value = 0;
-    await processSource(source, fromAutomatic, token);
+    let sameFrame = false;
+    // #ifdef H5
+    sameFrame = !!detection && browserCamera.matchesFrame(detection.frameWidth, detection.frameHeight);
+    // #endif
+    await processSource(source, fromAutomatic, token, false, detection, sameFrame);
   } catch (failure) {
     if (!disposed) showFailure(failure);
     automatic.value = false;
   } finally { busy.value = false; }
 }
-async function processSource(source, fromAutomatic, token, fromImport = false) {
+async function processSource(source, fromAutomatic, token, fromImport = false, previewDetection = null, sameFrame = false) {
   await ensureRenderer();
   const image = await renderer.read(source);
   if (token !== epoch || disposed) throw new Error("扫描已暂停，请重新拍摄。");
-  // Detect again on the still image: frame and full-quality photo FOVs can differ.
-  const detection = analyzePaperCapture(image);
+  const detection = selectCaptureDetection(image, previewDetection, sameFrame);
   if (!detection || detection.confidence < 0.7) {
     busy.value = false;
     await editSource({ source, width: image.width, height: image.height, corners: detection?.corners }, -1);

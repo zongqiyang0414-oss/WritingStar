@@ -31,7 +31,7 @@ export function fingerprintDifference(a, b) {
 
 export class AutoScanGate {
   constructor() { this.restart(); this.locked = false; this.lastFingerprint = null; }
-  resetHold() { this.anchor = null; this.held = 0; this.samples = 0; this.lastReliableTime = null; this.previousReliable = false; this.emitted = false; }
+  resetHold() { this.anchor = null; this.held = 0; this.samples = 0; this.history = []; this.lastReliableTime = null; this.previousReliable = false; this.emitted = false; }
   resetChange() { this.changedSince = null; this.changedAnchor = null; this.changedFingerprint = null; }
   restart() { this.resetHold(); this.resetChange(); this.missingSince = null; this.previousTime = null; }
   captured(detection) { this.locked = true; this.lastFingerprint = detection?.fingerprint?.slice(); this.restart(); }
@@ -79,11 +79,17 @@ export class AutoScanGate {
       this.held += elapsed;
     }
     this.samples++; this.lastReliableTime = time; this.previousReliable = true;
+    this.history.push(copyCorners(detection.corners));
+    if (this.history.length > 5) this.history.shift();
     const capture = !this.emitted && this.held >= HOLD_MS && this.samples >= 5;
     if (capture) this.emitted = true;
     return this.state(capture, moved ? "moving" : "steady");
   }
   state(capture, reason) {
-    return { capture, progress: this.locked ? 0 : Math.min(1, this.held / HOLD_MS), waiting: this.locked, reason: this.locked ? "waiting" : reason };
+    const corners = !this.locked && this.history.length >= 3 ? this.history[0].map((_, index) => {
+      const median = axis => this.history.map(quad => quad[index][axis]).sort((a, b) => a - b)[Math.floor(this.history.length / 2)];
+      return { x: median("x"), y: median("y") };
+    }) : null;
+    return { capture, corners: validQuad(corners, .15) ? corners : null, progress: this.locked ? 0 : Math.min(1, this.held / HOLD_MS), waiting: this.locked, reason: this.locked ? "waiting" : reason };
   }
 }

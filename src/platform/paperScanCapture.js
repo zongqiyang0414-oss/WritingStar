@@ -26,6 +26,36 @@ export function analyzePaperCapture(image) {
   return validQuad(corners, 0.15) ? { corners, confidence: 0.65, autoEligible: false, fingerprint: [] } : null;
 }
 
+export class LivePaperDetector {
+  constructor() { this.reset(); }
+  reset() { this.previous = null; this.lastSearch = -Infinity; }
+  update(image, time = Date.now()) {
+    if (this.previous) {
+      const tracked = analyzeDocument(image, { previousCorners: this.previous.corners, trackingOnly: true });
+      if (tracked) { this.previous = tracked; return tracked; }
+      this.previous = null;
+    }
+    // An empty/noisy scene must not monopolize the UI with global searches.
+    if (time - this.lastSearch < 400) return null;
+    this.lastSearch = time;
+    const found = analyzePaperCapture(image);
+    if (found?.autoEligible !== false && found?.confidence >= .7) this.previous = found;
+    return found;
+  }
+}
+
+export function selectCaptureDetection(image, preview, sameFrame, detect = analyzePaperCapture) {
+  // Browser snapshots and preview use the same video sensor/FOV. Keep the
+  // confirmed selection instead of independently switching to another sheet.
+  if (sameFrame && preview?.confidence >= .7 && preview.autoEligible !== false && validQuad(preview.corners, .15)) return preview;
+  const found = detect(image);
+  // Native preview and still FOV may differ. An implausibly different result
+  // needs corner confirmation, rather than silently selecting another page.
+  if (preview && found && found.corners.some((p, i) => Math.hypot(p.x - preview.corners[i].x, p.y - preview.corners[i].y) > .12))
+    return { ...found, confidence: .65, autoEligible: false };
+  return found;
+}
+
 // Read the identifier before enhancement, then retry on the rectified pixels.
 // A missing code stays unresolved for the existing manual-confirmation workflow.
 export function captureStudentCode(image) {

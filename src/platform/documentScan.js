@@ -145,7 +145,7 @@ function lineQuads(gray, width, height) {
 
 // Bounded analysis with both contrast polarities. Otsu separates the surfaces;
 // histogram quantiles and connected edges cover shadows and printed worksheets.
-export function analyzeDocument(image) {
+export function analyzeDocument(image, { previousCorners = null, trackingOnly = false } = {}) {
   if (!image?.data || image.width < 16 || image.height < 16 || image.data.length < image.width * image.height * 4) return null;
   const scale = Math.min(1, 384 / Math.max(image.width, image.height));
   const width = Math.round(image.width * scale), height = Math.round(image.height * scale);
@@ -155,6 +155,13 @@ export function analyzeDocument(image) {
     const value = luminance(image.data, (sy * image.width + sx) * 4);
     gray[y * width + x] = value; histogram[value]++;
   }
+  // Refit the four observed borders before searching the entire image again.
+  // Every frame still has to support all four real surface transitions.
+  if (validQuad(previousCorners, .12)) {
+    const tracked = refineQuad(previousCorners, gray, width, height);
+    if (tracked && tracked.confidence >= .7) return describeDocument(tracked, gray, width, height);
+  }
+  if (trackingOnly) return null;
   let sum = 0, count = 0, leftSum = 0, variance = 0, otsu = 128;
   for (let i = 0; i < 256; i++) sum += histogram[i] * i;
   const quantiles = [];
@@ -191,9 +198,11 @@ export function analyzeDocument(image) {
         const i = queue[head++], x = i % width, y = Math.floor(i / width);
         let edge = false;
         if (!x || !y || x === width - 1 || y === height - 1) touchesFrame = true;
-        for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-          const nx = x + dx, ny = y + dy, ni = ny * width + nx;
-          if (nx < 0 || ny < 0 || nx >= width || ny >= height) { edge = true; continue; }
+        for (let direction = 0; direction < 4; direction++) {
+          // Avoid allocating four coordinate arrays for every component pixel.
+          if ((direction === 0 && x === 0) || (direction === 1 && x === width - 1)
+            || (direction === 2 && y === 0) || (direction === 3 && y === height - 1)) { edge = true; continue; }
+          const ni = i + (direction === 0 ? -1 : direction === 1 ? 1 : direction === 2 ? -width : width);
           if (mask[ni] === 1) { mask[ni] = 2; queue[tail++] = ni; }
           else if (mask[ni] === 0) edge = true;
         }
@@ -215,6 +224,10 @@ export function analyzeDocument(image) {
     if (candidate && (!best || candidate.score > best.score)) best = candidate;
   }
   if (!best) return null;
+  return describeDocument(best, gray, width, height);
+}
+
+function describeDocument(best, gray, width, height) {
   const project = projectiveMap(best.corners), fingerprint = [];
   for (let y = 1; y <= 16; y++) for (let x = 1; x <= 12; x++) {
     const p = project(x / 13, y / 17);

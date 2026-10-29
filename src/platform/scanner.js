@@ -259,7 +259,11 @@ export async function openBrowserCamera(host, onFrame) {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     onFrame(ctx.getImageData(0, 0, canvas.width, canvas.height));
   }, 200);
-  return { close, capture() {
+  return { close, matchesFrame(width, height) {
+    // Analysis sizes are rounded to whole pixels; allow that sub-pixel aspect
+    // error, while rejecting a changed camera orientation or stream format.
+    return width > 0 && height > 0 && Math.abs(width / height - video.videoWidth / video.videoHeight) < .005;
+  }, capture() {
     if (closed || !video.videoWidth || video.readyState < 2) throw new Error("相机还未就绪，请稍后重试。");
     const shot = document.createElement("canvas"); shot.width = video.videoWidth; shot.height = video.videoHeight;
     shot.getContext("2d").drawImage(video, 0, 0);
