@@ -2,6 +2,7 @@
 import { computed, getCurrentInstance, nextTick, ref, shallowRef, watch } from "vue";
 import { onHide, onLoad, onReady, onResize, onShow, onUnload } from "@dcloudio/uni-app";
 import { processScanPixels } from "../../platform/scanProcessing.js";
+import ScanImageViewer from "../../components/ScanImageViewer.vue";
 import { LivePaperDetector, selectCaptureDetection } from "../../platform/paperScanCapture.js";
 import { AutoScanGate } from "../../platform/autoScan.js";
 import { clamp, fitRect, validQuad } from "../../platform/scanGeometry.js";
@@ -20,6 +21,12 @@ const outlineUrl = ref(""), progress = ref(0), waiting = ref(false), pages = sha
 const paperBatch = ref(false);
 const importQueue = shallowRef([]), importStatus = ref(""), processingStage = ref("");
 const pending = shallowRef(null), corners = ref([]), stage = ref({ width: 300, height: 400, left: 0, top: 0 });
+const captureFlight = shallowRef(null), thumbnailPulse = ref(false);
+const flightStyle = computed(() => {
+  const flight = captureFlight.value;
+  return flight ? { left: `${flight.left}px`, top: `${flight.top}px`, width: `${flight.width}px`, height: `${flight.height}px`,
+    transform: flight.moving ? `translate(${flight.dx}px, ${flight.dy}px) scale(${flight.scale})` : "translate(0px, 0px) scale(1)" } : {};
+});
 const current = computed(() => pages.value[selected.value]);
 const full = computed(() => pages.value.length >= capacity.value);
 const fit = computed(() => pending.value ? fitRect(pending.value.width, pending.value.height, stage.value.width, stage.value.height) : stage.value);
@@ -31,6 +38,7 @@ const initialized = ref(false), delivered = ref(false);
 let renderer, rendererPromise, nativeContext, browserCamera, stopFrames, channel, foreground = true, disposed = false, resumePicker;
 let epoch = 0, lastFrame = 0, drawing = false, lastDetection = null, dragging = -1, replacing = -1, choosing = false;
 let detectionErrors = 0, lastDetectionTime = 0, outlineDrawing = false;
+let flightStart, flightEnd, pulseEnd, flightResolve, flightSequence = 0;
 
 onLoad(options => {
   paperBatch.value = options?.batch === "paper";
@@ -49,7 +57,7 @@ onShow(() => {
   foreground = true; resumePicker?.();
   if (importQueue.value.length && !busy.value && !pending.value) processImportQueue();
 });
-onResize(async () => { await nextTick(); if (!disposed) await measure(); });
+onResize(async () => { cancelCaptureFeedback(); await nextTick(); if (!disposed) await measure(); });
 watch([mode, error, () => pages.value.length, waiting], async () => { await nextTick(); if (!disposed) await measure(); });
 onHide(() => { foreground = false; releaseCamera(); });
 onUnload(() => {
@@ -67,9 +75,51 @@ function clearOutline() {
   if (old) renderer?.remove(old);
 }
 function releaseCamera() {
+  cancelCaptureFeedback();
   epoch++; stopFrames?.(); stopFrames = null; browserCamera?.close(); browserCamera = null;
   nativeContext = null; cameraMounted.value = false; cameraReady.value = false; starting.value = false;
   lastDetection = null; lastDetectionTime = 0; lastFrame = 0; detectionErrors = 0; liveDetector.reset(); gate.restart(); progress.value = 0; waiting.value = gate.locked; clearOutline();
+}
+function cancelCaptureFeedback() {
+  flightSequence++; clearTimeout(flightStart); clearTimeout(flightEnd); clearTimeout(pulseEnd);
+  captureFlight.value = null; thumbnailPulse.value = false; flightResolve?.(false); flightResolve = null;
+}
+async function animateCapture(entry, token) {
+  cancelCaptureFeedback();
+  const sequence = flightSequence;
+  await nextTick();
+  const rects = await new Promise(resolve => {
+    const result = {};
+    const timeout = setTimeout(() => resolve({}), 180);
+    try {
+      uni.createSelectorQuery().in(instance).select(".scanner-page").boundingClientRect(rect => { result.page = rect; })
+        .select("#scan-stage").boundingClientRect(rect => { result.stage = rect; })
+        .select("#scan-capture-thumb").boundingClientRect(rect => { result.thumb = rect; }).exec(() => { clearTimeout(timeout); resolve(result); });
+    } catch { clearTimeout(timeout); resolve({}); }
+  });
+  if (sequence !== flightSequence || token !== epoch || disposed || !foreground || mode.value !== "live") return false;
+  const { page, stage: area, thumb } = rects;
+  if (!page?.width || !area?.width || !thumb?.width) return false;
+  const from = fitRect(entry.previewWidth, entry.previewHeight, area.width, area.height);
+  const to = fitRect(entry.previewWidth, entry.previewHeight, thumb.width, thumb.height);
+  const left = area.left - page.left + from.left, top = area.top - page.top + from.top;
+  captureFlight.value = { url: entry.photo.url, left, top, width: from.width, height: from.height,
+    dx: thumb.left - page.left + to.left - left, dy: thumb.top - page.top + to.top - top, scale: to.width / from.width, moving: false };
+  const completed = new Promise(resolve => { flightResolve = resolve; });
+  await nextTick();
+  // Commit the full-sized photograph first, then let CSS move the same image.
+  // No canvas export or detector work is needed for the feedback animation.
+  flightStart = setTimeout(() => {
+    if (sequence !== flightSequence) return;
+    captureFlight.value = { ...captureFlight.value, moving: true };
+    flightEnd = setTimeout(() => {
+      if (sequence !== flightSequence) return;
+      captureFlight.value = null; thumbnailPulse.value = true;
+      pulseEnd = setTimeout(() => { thumbnailPulse.value = false; }, 280);
+      flightResolve?.(true); flightResolve = null;
+    }, 540);
+  }, 60);
+  return completed;
 }
 async function ensureRenderer() {
   if (renderer) return renderer;
@@ -247,13 +297,20 @@ async function processSource(source, fromAutomatic, token, fromImport = false, p
   const detection = selectCaptureDetection(image, previewDetection, sameFrame);
   if (!detection || detection.confidence < 0.7) {
     busy.value = false;
-    await editSource({ source, width: image.width, height: image.height, corners: detection?.corners }, -1);
+    await editSource({ source, width: image.width, height: image.height, corners: detection?.corners, fromImport }, -1);
     notice.value = "未识别到完整边缘，请拖动四角框住整张纸";
     return;
   }
   const output = await makePage(source, image, detection.corners, token);
   pages.value = [...pages.value, output]; selected.value = pages.value.length - 1;
   notice.value = "扫描件已加入，请移开本页后放入下一张";
+  if (!fromImport) {
+    const feedback = animateCapture(output, token);
+    // Automatic scanning remains live while the photo flies into the tray.
+    // Manual capture opens review after landing so the destination stays visible.
+    if (!fromAutomatic || full.value) await feedback;
+  }
+  if (token !== epoch || disposed || !foreground) return;
   if (!fromImport && (!fromAutomatic || full.value)) { busy.value = false; reviewPage(selected.value); }
 }
 async function makePage(source, image, quad, token) {
@@ -263,7 +320,7 @@ async function makePage(source, image, quad, token) {
   processingStage.value = "正在生成扫描件…";
   const url = await renderer.exportImage(enhanced);
   if (cancelled()) { renderer.remove(url); throw new Error("扫描已暂停，请重试。"); }
-  return { source, code, width: image.width, height: image.height, corners: quad.map(p => ({ ...p })),
+  return { source, code, width: image.width, height: image.height, previewWidth: enhanced.width, previewHeight: enhanced.height, corners: quad.map(p => ({ ...p })),
     photo: { id: `scan-${Date.now()}-${Math.random().toString(36).slice(2)}`, url, name: "作业扫描件.jpg", sample: false } };
 }
 async function importPage(sourceType = "album") {
@@ -332,7 +389,14 @@ async function confirmCorners() {
     const updated = [...pages.value];
     if (replacing >= 0) { renderer.remove(updated[replacing].photo.url); updated[replacing] = output; selected.value = replacing; }
     else { updated.push(output); selected.value = updated.length - 1; }
-    pages.value = updated; pending.value = null; mode.value = "review";
+    const newlyCaptured = replacing < 0 && !pending.value.fromImport;
+    pages.value = updated; pending.value = null;
+    if (newlyCaptured) {
+      mode.value = "live";
+      await animateCapture(output, token);
+    }
+    if (token !== epoch || disposed || !foreground) return;
+    mode.value = "review";
   } catch (failure) { if (!disposed) error.value = failure.message || "图片处理失败，请重试。"; }
   finally { busy.value = false; }
   if (!pending.value && importQueue.value.length) await processImportQueue();
@@ -386,7 +450,7 @@ function leave() {
       <view class="scan-heading"><text class="scan-title">作业扫描</text><text class="scan-subtitle">{{ mode === 'corners' ? '调整纸张四角' : mode === 'review' ? '检查扫描效果' : '自动框选 · 清晰留存' }}</text></view>
       <text class="scan-count">{{ pages.length }} / {{ capacity }} 页</text>
     </view>
-    <view class="scan-status" role="status">{{ mode === 'live' ? frameText : busy ? (saving ? '正在保存扫描件…' : processingText) : mode === 'corners' ? '拖动四角框住纸张，保留完整笔迹' + (importQueue.length ? ' · 后续还有 ' + importQueue.length + ' 张' : '') : '已裁切矫正 · 去阴影增强，请检查笔迹和边缘' }}</view>
+    <view class="scan-status" role="status">{{ mode === 'live' ? frameText : busy ? (saving ? '正在保存扫描件…' : processingText) : mode === 'corners' ? '拖动四角框住纸张，保留完整笔迹' + (importQueue.length ? ' · 后续还有 ' + importQueue.length + ' 张' : '') : '双指放大、拖动查看笔迹，轻点查看全图' }}</view>
     <view id="scan-stage" class="scan-stage" @touchmove.stop.prevent="moveCorner" @touchend="dragging = -1" @touchcancel="dragging = -1" @mousemove="moveCorner" @mouseup="dragging = -1" @mouseleave="dragging = -1">
       <!-- #ifdef H5 -->
       <view v-show="mode === 'live'" id="scan-browser-camera" class="scan-camera" />
@@ -400,7 +464,7 @@ function leave() {
         <!-- #ifdef H5 -->
         <image v-if="outlineUrl" class="scan-outline" :src="outlineUrl" mode="scaleToFill" />
         <!-- #endif -->
-        <view v-if="!cameraMounted && !cameraReady" class="scan-empty">
+        <view v-if="!cameraMounted && !cameraReady && !captureFlight" class="scan-empty">
           <view class="scan-empty-symbol">▣</view>
           <text>{{ starting ? '正在开启相机' : '对准作业，扫描成清晰的纸面' }}</text>
           <text class="scan-muted">纸张放平，保持光线均匀</text>
@@ -412,7 +476,7 @@ function leave() {
           <button v-if="!starting" class="scan-text-button" :disabled="busy || full" @click="importPage('camera')">使用系统相机拍摄</button>
         </view>
       </template>
-      <image v-else-if="mode === 'review' && current" class="scan-result" :src="current.photo.url" mode="aspectFit" />
+      <ScanImageViewer v-else-if="mode === 'review' && current" :key="current.photo.id" :src="current.photo.url" :urls="pages.map(page => page.photo.url)" />
       <template v-else-if="mode === 'corners' && pending">
         <image class="scan-result" :src="pending.source" mode="aspectFit" />
         <view v-for="(point, index) in corners" :key="'edge-' + index" class="scan-edit-edge" :style="edgeStyle(point, index)" />
@@ -444,7 +508,7 @@ function leave() {
         <view class="scan-actions">
           <button class="scan-side-action" :disabled="busy || full || !initialized" @click="importPage('album')"><text class="scan-action-icon">▧</text><text>从相册扫描</text></button>
           <button class="scan-shutter" aria-label="拍摄扫描" :disabled="busy || !cameraReady || full" @click="capture(false)"><view class="scan-shutter-inner" /></button>
-          <button class="scan-side-action" :disabled="busy || !pages.length" @click="reviewPage(pages.length - 1)"><image v-if="pages.length" class="scan-thumb" :src="pages[pages.length - 1].photo.url" mode="aspectFill" /><text v-else class="scan-action-icon">▤</text><text>已扫描 {{ pages.length }} 页</text></button>
+          <button class="scan-side-action" :disabled="busy || !pages.length" @click="reviewPage(pages.length - 1)"><view v-if="pages.length" id="scan-capture-thumb" :class="['scan-thumb-slot', { 'scan-thumb-arrived': thumbnailPulse }]"><image class="scan-thumb" :src="pages[pages.length - 1].photo.url" mode="aspectFit" /></view><text v-else class="scan-action-icon">▤</text><text>已扫描 {{ pages.length }} 页</text></button>
         </view>
         <button v-if="pages.length" class="scan-primary scan-finish" :disabled="busy" @click="finish">完成，添加 {{ pages.length }} 页</button>
       </template>
@@ -457,6 +521,12 @@ function leave() {
         <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy" @click="cancelCorners">{{ importQueue.length ? '跳过此张' : '取消调整' }}</button><button class="scan-primary" :disabled="busy" @click="confirmCorners">确认并处理</button></view>
       </template>
     </view>
+    <!-- #ifdef H5 -->
+    <view v-if="captureFlight" :class="['scan-capture-flight', { 'scan-capture-moving': captureFlight.moving }]" :style="flightStyle" aria-hidden="true"><image class="scan-capture-photo" :src="captureFlight.url" mode="scaleToFill" /></view>
+    <!-- #endif -->
+    <!-- #ifdef MP-WEIXIN -->
+    <cover-view v-if="captureFlight" :class="['scan-capture-flight', { 'scan-capture-moving': captureFlight.moving }]" :style="flightStyle"><cover-image class="scan-capture-photo" :src="captureFlight.url" /></cover-view>
+    <!-- #endif -->
     <!-- #ifdef MP-WEIXIN -->
     <canvas id="scan-work-canvas" type="2d" class="scan-hidden-canvas" />
     <canvas id="scan-outline-canvas" type="2d" class="scan-hidden-canvas" />
@@ -490,7 +560,13 @@ function leave() {
 .scan-action-icon { font-size: 30px; height: 36px; line-height: 36px; }
 .scan-shutter { display: flex; align-items: center; justify-content: center; width: 72px; height: 72px; margin: 0; padding: 5px; border: 3px solid #00d6b2; border-radius: 50%; background: transparent; }
 .scan-shutter-inner { width: 56px; height: 56px; border-radius: 50%; background: #f5faf7; }
-.scan-thumb { width: 30px; height: 36px; border: 1px solid #fff; border-radius: 3px; }
+.scan-thumb-slot { display: flex; align-items: center; justify-content: center; width: 34px; height: 42px; border-radius: 4px; background: #fff; box-shadow: 3px -3px 0 #b0c4bb; }
+.scan-thumb { width: 30px; height: 38px; border-radius: 3px; }
+.scan-thumb-arrived { animation: scan-thumb-arrive .28s ease-out; }
+.scan-capture-flight { position: absolute; z-index: 20; transform-origin: top left; pointer-events: none; overflow: hidden; background: #fff; border-radius: 6px; box-shadow: 0 8px 28px #0008; transition: transform .52s cubic-bezier(.3,.1,.25,1), border-radius .52s; }
+.scan-capture-moving { border-radius: 3px; }
+.scan-capture-photo { display: block; width: 100%; height: 100%; }
+@keyframes scan-thumb-arrive { 0%, 100% { transform: scale(1); } 45% { transform: scale(1.16); } }
 .scan-primary, .scan-secondary { font-size: 14px; line-height: 22px; padding: 11px 16px; margin: 0; border-radius: 10px; font-weight: 600; }
 .scan-primary { color: #052c21; background: #31dfb3; }
 .scan-secondary { color: #e6f5ee; background: #263d33; }

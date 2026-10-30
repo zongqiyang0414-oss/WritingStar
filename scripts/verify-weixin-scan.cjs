@@ -13,7 +13,7 @@ const start = template.match(/<button\b[^>]*class="scan-primary"[^>]+>/)[0];
 const album = template.match(/<button\b[^>]*class="scan-side-action"[^>]+>/)[0];
 
 function createPage({ denied = false, canvasUnavailable = false, mediaFailure = '' } = {}) {
-  let definition, canvasQueries = 0, requests = 0, pickerReturn, contractOpens = 0, systemPhotos = 0;
+  let definition, viewerDefinition, canvasQueries = 0, requests = 0, pickerReturn, contractOpens = 0, systemPhotos = 0, previews = [];
   const lifecycle = {}, cache = {};
   const hooks = name => callback => (lifecycle[name] ||= []).push(callback);
   const canvasNode = {
@@ -45,10 +45,12 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
     },
     setClipboardData(options) { options.fail({ errMsg: 'setClipboardData:fail api scope is not declared in privacy agreement' }); },
     showModal(options) { assert.ok(options.content); },
+    previewImage(options) { previews.push(options); },
     getFileSystemManager() { return { unlink(options) { options.success?.(); } }; },
   };
   const wx = {
     createPage(page) { definition = page; },
+    createComponent(component) { viewerDefinition = component; },
     getPrivacySetting() { assert.fail('privacy-setting failure must not block native media'); },
     requirePrivacyAuthorize() { assert.fail('native media owns consent'); },
     openPrivacyContract(options) { contractOpens++; options.success(); },
@@ -65,8 +67,9 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
     getCurrentInstance: () => ({ proxy: { $scope: {}, getOpenerEventChannel() { return { emit() {} }; } } }),
     e: (...args) => Object.assign({}, ...args), t: String, o: handler => handler,
     n: value => value, s: value => value, f: (items, callback) => items.map(callback),
+    _export_sfc: (component, props) => Object.assign(component, Object.fromEntries(props)),
   };
-  for (const name of ['onLoad', 'onReady', 'onShow', 'onHide', 'onUnload', 'onResize']) vendor[name] = hooks(name);
+  for (const name of ['onLoad', 'onReady', 'onShow', 'onHide', 'onUnload', 'onResize', 'onMounted', 'onUnmounted']) vendor[name] = hooks(name);
   function load(file) {
     if (file === path.join(root, 'common/vendor.js')) return vendor;
     if (cache[file]) return cache[file].exports;
@@ -87,7 +90,14 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   lifecycle.onReady.forEach(callback => callback());
   return { render, lifecycle, get canvasQueries() { return canvasQueries; }, get requests() { return requests; },
     get contractOpens() { return contractOpens; }, get systemPhotos() { return systemPhotos; },
-    close() { clearTimeout(pickerReturn); lifecycle.onUnload.forEach(callback => callback()); },
+    get previews() { return previews; },
+    mountViewer() {
+      load(path.join(root, 'components/ScanImageViewer.js'));
+      const render = viewerDefinition.setup({src:'/tmp/scan-test.jpg',urls:['/tmp/scan-test.jpg','/tmp/scan-next.jpg']}, {});
+      lifecycle.onMounted.forEach(callback => callback());
+      return render;
+    },
+    close() { clearTimeout(pickerReturn); lifecycle.onUnload.forEach(callback => callback()); lifecycle.onUnmounted?.forEach(callback => callback()); },
   };
 }
 
@@ -131,5 +141,28 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   assert.equal(system.systemPhotos, 1);
   assert.match(JSON.stringify(system.render()), /确认并处理|corners|拖动四角/);
   system.close();
-  console.log('WeChat compiled scan checks passed: native consent without privacy preflight, real privacy rejection, contract link, clipboard failure, system photo, camera mount and picker lifecycle.');
+
+  // Run real compiled mini-program event bindings with native client coordinates.
+  // Browser touch input does not establish that WXML catches the same gestures.
+  assert.match(template, /<cover-view[^>]+class="[^\"]*scan-capture-flight/);
+  assert.match(template, /<cover-image[^>]+class="scan-capture-photo"/);
+  const viewerTemplate = fs.readFileSync(path.join(root, 'components/ScanImageViewer.wxml'), 'utf8');
+  const viewerTag = viewerTemplate.match(/<view\b[^>]+>/)[0], imageTag = viewerTemplate.match(/<image\b[^>]+>/)[0];
+  const touchHost = createPage(), viewer = touchHost.mountViewer();
+  await vue.nextTick();
+  viewer()[event(imageTag,'bindload')]({detail:{width:600,height:900}});
+  await vue.nextTick();
+  viewer()[event(viewerTag,'catchtouchstart')]({touches:[{clientX:100,clientY:300},{clientX:200,clientY:300}]});
+  viewer()[event(viewerTag,'catchtouchmove')]({touches:[{clientX:50,clientY:300},{clientX:250,clientY:300}]});
+  assert.match(JSON.stringify(viewer()), /scale\(2\)/, 'two native touches enlarge the processed photo');
+  viewer()[event(viewerTag,'catchtouchend')]({touches:[]});
+  viewer()[event(viewerTag,'catchtap')]();
+  assert.equal(touchHost.previews.length,0,'ending a pinch does not open another preview');
+  await new Promise(resolve => setTimeout(resolve,420));
+  viewer()[event(viewerTag,'catchtap')]();
+  assert.equal(touchHost.previews.length,1);
+  assert.equal(touchHost.previews[0].current,'/tmp/scan-test.jpg');
+  assert.equal(touchHost.previews[0].urls.length,2);
+  touchHost.close();
+  console.log('WeChat compiled scan checks passed: native consent, real privacy rejection, contract link, clipboard failure, system photo, picker lifecycle, capture cover-image, native pinch bindings and full-image preview.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
