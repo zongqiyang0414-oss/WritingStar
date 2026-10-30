@@ -6,6 +6,7 @@ const path = require('node:path');
 const http = require('node:http');
 const { chromium } = require(process.env.WRITINGSTAR_PLAYWRIGHT_MODULE || 'playwright');
 const root = path.resolve(__dirname, '../dist/build/h5');
+const artifactVersion = process.env.WRITINGSTAR_SCAN_ARTIFACT_VERSION || 'v014';
 const types = {'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.svg':'image/svg+xml'};
 const server = http.createServer((req,res) => {
   const file = path.resolve(root, '.' + (new URL(req.url,'http://localhost').pathname === '/' ? '/index.html' : decodeURIComponent(new URL(req.url,'http://localhost').pathname)));
@@ -28,6 +29,10 @@ const server = http.createServer((req,res) => {
       if(index!==1){const gradient=ctx.createLinearGradient(90,0,630,0);gradient.addColorStop(0,'#b6b6b6');gradient.addColorStop(1,'#e8e8e8');ctx.fillStyle=gradient;ctx.fillRect(90,80,540,800);}
       ctx.strokeStyle='#292929';ctx.lineWidth=2;ctx.strokeRect(145,150,430,640);
       ctx.fillStyle='#252525';ctx.font='25px sans-serif';ctx.fillText('Document '+(index+1),170,190);ctx.fillText(String(index+1),340,850);
+      // Real colored pixels must survive the complete import/rectify/enhance/
+      // JPEG path. A grayscale filter would pass the white-paper assertions.
+      ctx.strokeStyle='#214ca6';ctx.lineWidth=7;ctx.beginPath();ctx.moveTo(215,430);ctx.lineTo(265,447);ctx.lineTo(320,425);ctx.stroke();
+      ctx.strokeStyle='#b62e38';ctx.lineWidth=6;ctx.beginPath();ctx.arc(440,610,25,0,Math.PI*2);ctx.stroke();
       return canvas.toDataURL('image/png');
     }));
     const files=images.map((image,index)=>({name:`test-page-${index+1}.png`,mimeType:'image/png',buffer:Buffer.from(image.split(',')[1],'base64')}));
@@ -48,18 +53,26 @@ const server = http.createServer((req,res) => {
       const c=document.createElement('canvas');c.width=image.width;c.height=image.height;const ctx=c.getContext('2d');ctx.drawImage(image,0,0);
       const data=ctx.getImageData(0,0,c.width,c.height).data;
       const gray=(x,y)=>data[(Math.round(y*c.height)*c.width+Math.round(x*c.width))*4];
-      return {width:c.width,height:c.height,white:gray(.5,.45),margin:gray(.03,.5),dark:Array.from({length:40},(_,i)=>gray(.102+i*.001,.5)).some(v=>v<100)};
+      let blue=0,red=0;
+      for(let y=Math.floor(c.height*.2);y<c.height*.85;y+=2)for(let x=Math.floor(c.width*.15);x<c.width*.85;x+=2){
+        const i=(y*c.width+x)*4,r=data[i],g=data[i+1],b=data[i+2];
+        if(b-r>45&&b-g>15)blue++;
+        if(r-g>45&&r-b>45)red++;
+      }
+      return {width:c.width,height:c.height,white:gray(.5,.45),margin:gray(.03,.5),dark:Array.from({length:40},(_,i)=>gray(.102+i*.001,.5)).some(v=>v<100),blue,red};
     },first);
     assert.ok(quality.width<600&&quality.height<850,'desk cropped away');
     assert.ok(quality.white>240&&quality.margin>235,'shadowed sheet becomes white including page margins');
     assert.ok(quality.dark,'printed outline remains dark');
-    await page.screenshot({path:path.resolve(__dirname,'../outputs/scan-album-multiple-v014-20261030.png')});
+    assert.ok(quality.blue>100,`blue pen survives enhancement (${quality.blue} sampled pixels)`);
+    assert.ok(quality.red>100,`red stamp survives enhancement (${quality.red} sampled pixels)`);
+    await page.screenshot({path:path.resolve(__dirname,`../outputs/scan-album-multiple-${artifactVersion}-20261030.png`)});
     // A query-only hash change reuses the uni-app page instance; reload for a
     // new independent scan session with a different remaining capacity.
     await page.goto('about:blank');await page.goto(base+'2',{waitUntil:'networkidle'});await choose(files);
     await page.locator('.scan-error').waitFor();assert.match(await page.locator('.scan-error').innerText(),/还可添加 2 页/);
     assert.match(await page.locator('.scan-count').innerText(),/^0/,'over-limit choice does not partially import');
     assert.deepEqual(errors,[]);
-    console.log('Album multiple input, selected order, corner-confirmation queue, white correction, retained print, outer margins and capacity limit passed.');
+    console.log('Album multiple input, selected order, corner-confirmation queue, white correction, retained print/blue pen/red stamp, outer margins and capacity limit passed.',quality);
   } finally {await browser?.close();server.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

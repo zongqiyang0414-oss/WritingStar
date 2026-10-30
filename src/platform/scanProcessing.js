@@ -16,7 +16,7 @@ export async function processScanPixels(image, corners, { readCode = true, sourc
     if (!code && sourceCodeFallback && corners) code = readPaperScanCode(image);
     check();
   }
-  onStage("正在提亮纸面…");
+  onStage("正在去阴影、提亮纸面…");
   const enhanced = await enhanceDocument(output, cancelled);
   check();
   return { image: enhanced, code };

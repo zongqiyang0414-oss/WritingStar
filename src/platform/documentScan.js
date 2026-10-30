@@ -1,4 +1,5 @@
 import { clamp, convexHull, hullToQuad, orderQuad, polygonArea, validQuad, projectiveMap, projectiveCoefficients, distance } from "./scanGeometry.js";
+import { documentAppearance, hasInternalMaterialBoundary } from "./documentSurface.js";
 
 const luminance = (data, i) => (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
 
@@ -155,13 +156,18 @@ export function analyzeDocument(image, { previousCorners = null, trackingOnly = 
     const value = luminance(image.data, (sy * image.width + sx) * 4);
     gray[y * width + x] = value; histogram[value]++;
   }
+  let appearance = documentAppearance(image.data, image.width, image.height, width, height, false);
+  const supportedSurface = candidate => candidate && !hasInternalMaterialBoundary(candidate.corners, appearance, width, height, projectiveMap(candidate.corners));
   // Refit the four observed borders before searching the entire image again.
   // Every frame still has to support all four real surface transitions.
   if (validQuad(previousCorners, .12)) {
-    const tracked = refineQuad(previousCorners, gray, width, height);
-    if (tracked && tracked.confidence >= .7) return describeDocument(tracked, gray, width, height);
+    for (const channel of [gray, ...appearance.channels]) {
+      const tracked = refineQuad(previousCorners, channel, width, height);
+      if (supportedSurface(tracked) && tracked.confidence >= .7) return describeDocument(tracked, gray, width, height);
+    }
   }
   if (trackingOnly) return null;
+  appearance = documentAppearance(image.data, image.width, image.height, width, height);
   let sum = 0, count = 0, leftSum = 0, variance = 0, otsu = 128;
   for (let i = 0; i < 256; i++) sum += histogram[i] * i;
   const quantiles = [];
@@ -173,9 +179,10 @@ export function analyzeDocument(image, { previousCorners = null, trackingOnly = 
     const value = count * (gray.length - count) * difference * difference;
     if (value > variance) { variance = value; otsu = i; }
   }
-  if (!variance) return null;
+  if (!variance && !appearance.channels.length) return null;
   const thresholds = [...new Set([otsu, ...quantiles.slice(0, -1).map((value, i) => Math.round((value + quantiles[i + 1]) / 2))])];
   const masks = thresholds.flatMap(threshold => [gray.map(v => v > threshold ? 1 : 0), gray.map(v => v <= threshold ? 1 : 0)]);
+  masks.push(...appearance.masks);
   const edges = new Uint8Array(gray.length);
   // A low absolute floor allows pale paper on a pale desk; line fitting below
   // requires a coherent, long border and rejects isolated texture/noise.
@@ -213,15 +220,17 @@ export function analyzeDocument(image, { previousCorners = null, trackingOnly = 
       if (touchesFrame || tail < gray.length * .006 || boundary.length < 4) continue;
       const hull = convexHull(boundary), quad = hullToQuad(hull);
       if (!validQuad(quad, .12) || polygonArea(quad) / polygonArea(hull) < .86) continue;
-      const candidate = refineQuad(quad, gray, width, height);
-      if (candidate && (!best || candidate.score > best.score)) best = candidate;
+      for (const channel of [gray, ...appearance.channels]) {
+        const candidate = refineQuad(quad, channel, width, height);
+        if (supportedSurface(candidate) && (!best || candidate.score > best.score)) best = candidate;
+      }
     }
   }
   // Run the bounded line search only when components do not yield a strong
   // sheet. This covers stacked pages without adding work to clean frames.
-  if (!best || best.confidence < .82) for (const quad of lineQuads(gray, width, height)) {
-    const candidate = refineQuad(quad, gray, width, height);
-    if (candidate && (!best || candidate.score > best.score)) best = candidate;
+  if (!best || best.confidence < .82) for (const channel of [gray, ...appearance.channels]) for (const quad of lineQuads(channel, width, height)) {
+    const candidate = refineQuad(quad, channel, width, height);
+    if (supportedSurface(candidate) && (!best || candidate.score > best.score)) best = candidate;
   }
   if (!best) return null;
   return describeDocument(best, gray, width, height);
@@ -275,51 +284,4 @@ export async function rectifyDocument(image, corners, { maxEdge = 1800, cancelle
   return { width, height, data };
 }
 
-// Local paper-white correction, with continuous gray levels to retain pencil marks.
-// No OCR, generated content, or hard black/white thresholding is used.
-export async function enhanceDocument(image, cancelled = () => false) {
-  const { width, height, data } = image, cell = 32;
-  const columns = Math.ceil(width / cell), rows = Math.ceil(height / cell);
-  const white = new Float32Array(columns * rows);
-  checkCancelled(cancelled);
-  let samplingYieldAt = clock() + 10;
-  for (let cy = 0; cy < rows; cy++) {
-    if (clock() >= samplingYieldAt) { checkCancelled(cancelled); await nextTick(); samplingYieldAt = clock() + 10; }
-    for (let cx = 0; cx < columns; cx++) {
-    const values = [];
-    for (let y = cy * cell; y < Math.min(height, (cy + 1) * cell); y += 3)
-      for (let x = cx * cell; x < Math.min(width, (cx + 1) * cell); x += 3) values.push(luminance(data, (y * width + x) * 4));
-    values.sort((a, b) => a - b);
-    white[cy * columns + cx] = Math.max(80, values[Math.floor(values.length * 0.9)]);
-    }
-  }
-  const background = white.map((value, i) => {
-    const x = i % columns, y = Math.floor(i / columns);
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) value = Math.max(value, white[clamp(y + dy, 0, rows - 1) * columns + clamp(x + dx, 0, columns - 1)]);
-    return value;
-  });
-  // Horizontal interpolation is identical for every row. Cache it once instead
-  // of recomputing clamps, floors and neighboring indices for every pixel.
-  const left = new Int32Array(width), right = new Int32Array(width), mix = new Float64Array(width);
-  for (let x = 0; x < width; x++) {
-    const gx = clamp(x / cell - .5, 0, columns - 1), ix = Math.floor(gx);
-    left[x] = ix; right[x] = Math.min(ix + 1, columns - 1); mix[x] = gx - ix;
-  }
-  let yieldAt = clock() + 10;
-  for (let y = 0; y < height; y++) {
-    if (y % 16 === 0 && clock() >= yieldAt) { checkCancelled(cancelled); await nextTick(); yieldAt = clock() + 10; }
-    const gy = clamp(y / cell - .5, 0, rows - 1), iy = Math.floor(gy), dy = gy - iy;
-    const top = iy * columns, bottom = Math.min(iy + 1, rows - 1) * columns;
-    for (let x = 0; x < width; x++) {
-      const dx = mix[x];
-      const a = background[top + left[x]], b = background[top + right[x]];
-      const c = background[bottom + left[x]], d = background[bottom + right[x]];
-      const paper = a * (1 - dx) * (1 - dy) + b * dx * (1 - dy) + c * (1 - dx) * dy + d * dx * dy;
-      const i = (y * width + x) * 4;
-      const value = clamp((luminance(data, i) / paper * 255 - 6) * 255 / 245, 0, 255);
-      data[i] = data[i + 1] = data[i + 2] = value;
-    }
-  }
-  checkCancelled(cancelled);
-  return image;
-}
+export { enhanceDocument } from "./scanEnhancement.js";

@@ -1,0 +1,146 @@
+{
+  "baseline": "v0.14.0 / 6f6736f",
+  "version": "0.15.0",
+  "measurement": "Synthetic pixel quality; 0..255 luminance; corner error in source pixels. Does not measure phone timing or guarantee camera accuracy.",
+  "detection": [
+    {
+      "scene": "shadowed-paper-on-wood-with-desk-edge",
+      "before": {
+        "corners": [
+          {
+            "x": 0.2079848144684556,
+            "y": 0.1418138501556159
+          },
+          {
+            "x": 0.8071739046135128,
+            "y": 0.1527672003398237
+          },
+          {
+            "x": 0.7724202860337864,
+            "y": 0.8460896009812438
+          },
+          {
+            "x": 0.18562037987594276,
+            "y": 0.8221451225131832
+          }
+        ],
+        "confidence": 0.885135246961209,
+        "error": [
+          0.72,
+          0.74,
+          0.65,
+          0.66
+        ]
+      },
+      "after": {
+        "corners": [
+          {
+            "x": 0.2084879649809361,
+            "y": 0.1414008525278782
+          },
+          {
+            "x": 0.8074010840766104,
+            "y": 0.1529806827058325
+          },
+          {
+            "x": 0.7714143583328055,
+            "y": 0.8457372237169501
+          },
+          {
+            "x": 0.18449383570763672,
+            "y": 0.8224690730522537
+          }
+        ],
+        "confidence": 1,
+        "error": [
+          0.38,
+          0.78,
+          0.65,
+          0.77
+        ]
+      }
+    },
+    {
+      "scene": "similar-luminance-paper-vs-warm-desk",
+      "before": {
+        "corners": null,
+        "confidence": 0,
+        "error": null
+      },
+      "after": {
+        "corners": [
+          {
+            "x": 0.20924362137651945,
+            "y": 0.14161811859252363
+          },
+          {
+            "x": 0.8046813282343199,
+            "y": 0.1533726281156232
+          },
+          {
+            "x": 0.7708349193893588,
+            "y": 0.8448758002350771
+          },
+          {
+            "x": 0.18769641923929073,
+            "y": 0.8222892751544767
+          }
+        ],
+        "confidence": 1,
+        "error": [
+          0.54,
+          0.56,
+          0.78,
+          1.06
+        ]
+      }
+    }
+  ],
+  "enhancement": {
+    "input": {
+      "blankMean": 171.98,
+      "blankStd": 23.24,
+      "pencilContrast": 38.38,
+      "blueRGB": [
+        30,
+        57,
+        145
+      ],
+      "redRGB": [
+        120,
+        22,
+        21
+      ]
+    },
+    "v014": {
+      "blankMean": 235.91,
+      "blankStd": 12.56,
+      "pencilContrast": 49,
+      "blueRGB": [
+        70,
+        70,
+        70
+      ],
+      "redRGB": [
+        82,
+        82,
+        82
+      ]
+    },
+    "v015": {
+      "blankMean": 254.74,
+      "blankStd": 0.5,
+      "pencilContrast": 60.41,
+      "blueRGB": [
+        29,
+        65,
+        208
+      ],
+      "redRGB": [
+        168,
+        24,
+        26
+      ]
+    }
+  }
+}

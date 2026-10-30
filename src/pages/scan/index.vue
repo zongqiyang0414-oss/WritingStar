@@ -386,7 +386,7 @@ function leave() {
       <view class="scan-heading"><text class="scan-title">作业扫描</text><text class="scan-subtitle">{{ mode === 'corners' ? '调整纸张四角' : mode === 'review' ? '检查扫描效果' : '自动框选 · 清晰留存' }}</text></view>
       <text class="scan-count">{{ pages.length }} / {{ capacity }} 页</text>
     </view>
-    <view class="scan-status" role="status">{{ mode === 'live' ? frameText : busy ? (saving ? '正在保存扫描件…' : processingText) : mode === 'corners' ? '拖动四角框住纸张，保留完整笔迹' + (importQueue.length ? ' · 后续还有 ' + importQueue.length + ' 张' : '') : '已裁切矫正 · 纸面增强，请检查笔迹和边缘' }}</view>
+    <view class="scan-status" role="status">{{ mode === 'live' ? frameText : busy ? (saving ? '正在保存扫描件…' : processingText) : mode === 'corners' ? '拖动四角框住纸张，保留完整笔迹' + (importQueue.length ? ' · 后续还有 ' + importQueue.length + ' 张' : '') : '已裁切矫正 · 去阴影增强，请检查笔迹和边缘' }}</view>
     <view id="scan-stage" class="scan-stage" @touchmove.stop.prevent="moveCorner" @touchend="dragging = -1" @touchcancel="dragging = -1" @mousemove="moveCorner" @mouseup="dragging = -1" @mouseleave="dragging = -1">
       <!-- #ifdef H5 -->
       <view v-show="mode === 'live'" id="scan-browser-camera" class="scan-camera" />
