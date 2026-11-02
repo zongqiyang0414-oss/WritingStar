@@ -194,7 +194,7 @@ async function privacyContract() {
   try { await openScanPrivacyContract(); }
   catch (failure) { showFailure(failure); }
 }
-function copyError() { uni.setClipboardData({ data: `写字星 v0.14.0 扫描
+function copyError() { uni.setClipboardData({ data: `写字星 v0.18.0 扫描
 ${error.value}
 ${errorDetail.value}`, fail: () => uni.showModal({ title: "请长按复制错误详情", showCancel: false,
   content: errorDetail.value || error.value }) }); }
