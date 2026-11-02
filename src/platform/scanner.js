@@ -53,7 +53,7 @@ export function openScanAppSettings() {
 }
 
 // Canvas nodes are used on WeChat; DOM canvas/video never enter the mini-program build.
-export async function createScanRenderer(instance) {
+export async function createScanRenderer(instance, { workSelector = "#scan-work-canvas", outlineSelector = "#scan-outline-canvas" } = {}) {
   let work, outline;
   // #ifdef H5
   work = document.createElement("canvas");
@@ -61,8 +61,8 @@ export async function createScanRenderer(instance) {
   // #endif
   // #ifdef MP-WEIXIN
   const result = await new Promise(resolve => uni.createSelectorQuery().in(instance)
-    .select("#scan-work-canvas").fields({ node: true, size: true })
-    .select("#scan-outline-canvas").fields({ node: true, size: true }).exec(resolve));
+    .select(workSelector).fields({ node: true, size: true })
+    .select(outlineSelector).fields({ node: true, size: true }).exec(resolve));
   work = result[0]?.node; outline = result[1]?.node;
   // #endif
   if (!work || !outline) throw new Error("当前设备不支持扫描画布，请更新微信后重试。");
