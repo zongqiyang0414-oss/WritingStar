@@ -33,6 +33,15 @@ export async function enhanceDocument(image, cancelled = () => false, { cooperat
       let threshold = 255, upper = 0;
       while (threshold > 0 && upper < count * .25) upper += histogram[threshold--];
       threshold++;
+      // The bright-quarter mean is biased above the paper when the sensor has
+      // grain. Estimate that bias from the upper paper tail (ink lives below
+      // it), bounded to 3% so genuinely faint strokes keep their contrast.
+      let cumulative = 0, q80 = 255, q95 = 255;
+      for (let value = 0; value < 256; value++) {
+        cumulative += histogram[value];
+        if (cumulative >= count * .8 && q80 === 255) q80 = value;
+        if (cumulative >= count * .95) { q95 = value; break; }
+      }
       let r = 0, g = 0, b = 0, n = 0;
       // Sample all channels at the same bright-paper pixels. Independent RGB
       // quantiles could combine unrelated ink colours into a false white point.
@@ -42,7 +51,9 @@ export async function enhanceDocument(image, cancelled = () => false, { cooperat
         r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
       }
       const index = cy * columns + cx;
-      red[index] = r / Math.max(1, n); green[index] = g / Math.max(1, n); blue[index] = b / Math.max(1, n);
+      const mean = luminance(r, g, b) / Math.max(1, n);
+      const gain = 1 - Math.min(mean * .03, (q95 - q80) * 1.2) / Math.max(1, mean);
+      red[index] = r / Math.max(1, n) * gain; green[index] = g / Math.max(1, n) * gain; blue[index] = b / Math.max(1, n) * gain;
       light[index] = luminance(red[index], green[index], blue[index]);
     }
   }
@@ -143,7 +154,7 @@ export async function enhanceDocument(image, cancelled = () => false, { cooperat
   // Continuous soft paper-white shoulder, with retained midtones and a modest
   // contrast gain. A 6% pencil mark stays grey instead of crossing a threshold.
   const tone = new Uint8ClampedArray(1025);
-  for (let i = 0; i <= 1024; i++) tone[i] = 255 * Math.pow(clamp((i / 1024 - .012) / .98), 1.12);
+  for (let i = 0; i <= 1024; i++) tone[i] = 255 * Math.pow(clamp((i / 1024 - .018) / .974), 1.28);
   const fields = [red, green, blue], floors = [wr * .28, wg * .28, wb * .28];
   // Horizontal interpolation changes only at a lighting-grid row boundary.
   // Cache two RGB rows instead of doing twelve field reads per output pixel.
@@ -169,9 +180,9 @@ export async function enhanceDocument(image, cancelled = () => false, { cooperat
       data[i + 2] = tone[Math.min(1024, Math.round(data[i + 2] / Math.max(floors[2], ub[x] + (lb[x] - ub[x]) * dy) * 1024))];
     }
   }
-  // Conservative edge restoration in the reflectance image. Three original
-  // rows prevent feedback from previously sharpened pixels; connected dark
-  // strokes get sharper without sharpening isolated bright-paper sensor noise.
+  // Range-weighted smoothing only on near-white neutral paper, then restore
+  // connected dark edges. Never average across a pencil/ink boundary. Three
+  // original rows prevent feedback; no full-size extra RGB buffer is needed.
   let previous = new Uint8ClampedArray(width * 4), current = data.slice(0, width * 4), next = data.slice(width * 4, width * 8);
   const fillLight = (pixels, values) => { for (let x = 0; x < width; x++) values[x] = luminance(pixels[x * 4], pixels[x * 4 + 1], pixels[x * 4 + 2]); };
   let previousLight = new Float32Array(width), currentLight = new Float32Array(width), nextLight = new Float32Array(width);
@@ -182,9 +193,18 @@ export async function enhanceDocument(image, cancelled = () => false, { cooperat
       const i = x * 4;
       const value = currentLight[x], l = currentLight[x - 1], r = currentLight[x + 1], u = previousLight[x], d = nextLight[x];
       const average = (l + r + u + d) / 4;
-      if (value >= average || Math.min(Math.abs(l - value), Math.abs(r - value), Math.abs(u - value), Math.abs(d - value)) >= 12) continue;
-      const darken = Math.min(14, (average - value) * .3), gain = Math.max(0, value - darken) / Math.max(1, value);
       const target = (y * width + x) * 4;
+      if (value > 230 && Math.max(current[i], current[i + 1], current[i + 2]) - Math.min(current[i], current[i + 1], current[i + 2]) < 18) {
+        const wl = Math.max(0, 1 - Math.abs(l - value) / 14), wr = Math.max(0, 1 - Math.abs(r - value) / 14);
+        const wu = Math.max(0, 1 - Math.abs(u - value) / 14), wd = Math.max(0, 1 - Math.abs(d - value) / 14);
+        let clean = (value * 2 + l * wl + r * wr + u * wu + d * wd) / (2 + wl + wr + wu + wd);
+        if (Math.min(value, l, r, u, d) > 242) clean += (clean - 242) * .3;
+        const lift = clean - value;
+        data[target] = current[i] + lift; data[target + 1] = current[i + 1] + lift; data[target + 2] = current[i + 2] + lift;
+        continue;
+      }
+      if (value >= average || Math.min(Math.abs(l - value), Math.abs(r - value), Math.abs(u - value), Math.abs(d - value)) >= 12) continue;
+      const darken = Math.min(20, (average - value) * .45), gain = Math.max(0, value - darken) / Math.max(1, value);
       data[target] = current[i] * gain; data[target + 1] = current[i + 1] * gain; data[target + 2] = current[i + 2] * gain;
     }
     const spare = previous; previous = current; current = next; next = spare;

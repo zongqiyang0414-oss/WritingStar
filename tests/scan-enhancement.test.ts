@@ -58,3 +58,32 @@ test('增强在采样前与让出UI后均响应取消，不返回迟到成片', 
   await assert.rejects(enhanceDocument(fixture(1400, 1800), () => cancelled), /暂停/);
   clearTimeout(timer);
 });
+
+test('有纸底颗粒的阴影作业提白，同时保留虚线、浅铅笔和红蓝色', async () => {
+  const image = fixture();
+  let seed = 71;
+  for (let i = 0; i < image.data.length; i += 4) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const grain = (seed / 4294967296 - .5) * 10;
+    for (let c = 0; c < 3; c++) image.data[i + c] += grain;
+  }
+  for (let x = 40; x < 270; x += 8) mark(image, x, 80, 4, 1, [.1, .1, .1]);
+  mark(image, 40, 130, 230, 1, [.94, .94, .94]);
+  mark(image, 40, 170, 230, 3, [.77, .77, .77]);
+  mark(image, 55, 220, 200, 5, [.15, .3, .8]);
+  mark(image, 200, 270, 45, 45, [.8, .15, .16]);
+  await enhanceDocument(image);
+  const paper = [];
+  for (let y = 25; y < 65; y++) for (let x = 30; x < 290; x++) paper.push(pixel(image, x, y)[0]);
+  paper.sort((a, b) => a - b);
+  assert.ok(paper[Math.floor(paper.length * .1)] >= 248, `90% of textured paper is near white: ${paper[Math.floor(paper.length * .1)]}`);
+  assert.ok(paper[Math.floor(paper.length * .5)] >= 253, 'paper median is white');
+  assert.ok(pixel(image, 120, 80)[0] < 45, 'one-pixel dashed frame retained');
+  assert.ok(pixel(image, 126, 80)[0] > 235, 'dash gap remains open');
+  const pencil = pixel(image, 120, 130)[0];
+  assert.ok(pencil > 210 && pencil < 246, `faint pencil is not whitened: ${pencil}`);
+  assert.ok(pixel(image, 120, 171)[0] < 210, 'ordinary pencil remains visible');
+  const blue = pixel(image, 120, 222), red = pixel(image, 222, 290);
+  assert.ok(blue[2] - blue[0] > 100 && blue[2] - blue[1] > 70);
+  assert.ok(red[0] - red[1] > 100 && red[0] - red[2] > 100);
+});

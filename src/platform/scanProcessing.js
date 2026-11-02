@@ -1,11 +1,16 @@
 import { rectifyDocument, enhanceDocument } from "./documentScan.js";
 import { readPaperScanCode } from "./scanCode.js";
+import { SCAN_OUTPUT_MAX_EDGE } from "./scanQuality.js";
 
-export async function processScanPixels(image, corners, { readCode = true, sourceCodeFallback = false, cancelled = () => false, maxEdge = 1800, aspectRatio = 0, cooperative = true, onStage = () => {} } = {}) {
+export async function processScanPixels(image, corners, { readCode = true, sourceCodeFallback = false, cancelled = () => false, maxEdge = SCAN_OUTPUT_MAX_EDGE, aspectRatio = 0, cooperative = true, onStage = () => {} } = {}) {
   const check = () => { if (cancelled()) throw new Error("扫描已暂停，请重试。"); };
   check();
   onStage("正在拉正纸面…");
-  const output = corners ? await rectifyDocument(image, corners, { maxEdge, aspectRatio, cancelled, cooperative }) : image;
+  // Uncertain borders still retain the whole frame, with the same bounded
+  // output budget and bilinear sampling as a corrected page.
+  const fullFrame = [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }];
+  const output = corners || Math.max(image.width, image.height) > maxEdge
+    ? await rectifyDocument(image, corners || fullFrame, { maxEdge, aspectRatio: corners ? aspectRatio : image.width / image.height, cancelled, cooperative }) : image;
   check();
   let code = "";
   if (readCode) {

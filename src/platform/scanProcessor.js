@@ -1,4 +1,5 @@
 import { processScanPixels } from "./scanProcessing.js";
+import { SCAN_OUTPUT_MAX_EDGE } from "./scanQuality.js";
 
 const paused = () => new Error("扫描已暂停，请重试。");
 const unavailable = () => new Error("后台图片处理不可用。");
@@ -72,7 +73,7 @@ export function createScanProcessor({ workerFactory, fallback = processScanPixel
       };
       if (!available) return runFallback();
       try {
-        const { readCode = true, sourceCodeFallback = false, maxEdge = 1800, aspectRatio = 0 } = options;
+        const { readCode = true, sourceCodeFallback = false, maxEdge = SCAN_OUTPUT_MAX_EDGE, aspectRatio = 0 } = options;
         const data = image.data;
         const buffer = data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
           ? data.buffer : data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);

@@ -120,8 +120,9 @@ test('微信扫描适配读取画布学生码并保存永久图片；失败可�
     canvasGetImageData:options=>options.success({data}),
     canvasPutImageData:options=>options.success({}),
     canvasToTempFilePath:options=>options.success({tempFilePath:'/tmp/processed.jpg'}),
+    getFileInfo:options=>options.success({size:1100*1024}),
     saveFile:options=>{saved.push(options.tempFilePath);options.success({savedFilePath:'/saved/'+saved.length});},
-    chooseImage:options=>{assert.equal(options.count,9);options.fail({errMsg:'chooseImage:fail cancel'});},
+    chooseImage:options=>{assert.equal(options.count,9);assert.deepEqual(options.sizeType,['original']);options.fail({errMsg:'chooseImage:fail cancel'});},
   };
   try {
     const photo={id:'photo-device',url:'/tmp/original',name:'作品',sample:false};

@@ -1,5 +1,6 @@
 import { clamp, convexHull, hullToQuad, orderQuad, polygonArea, validQuad, projectiveMap, projectiveCoefficients, distance, documentAspectRatio } from "./scanGeometry.js";
 import { documentAppearance, hasInternalMaterialBoundary } from "./documentSurface.js";
+import { SCAN_OUTPUT_MAX_EDGE } from "./scanQuality.js";
 
 const luminance = (data, i) => (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
 
@@ -261,7 +262,7 @@ const nextTick = () => new Promise(resolve => setTimeout(resolve, 0));
 const clock = () => typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
 function checkCancelled(cancelled) { if (cancelled()) throw new Error("扫描已暂停，请重试。"); }
 
-export async function rectifyDocument(image, corners, { maxEdge = 1800, aspectRatio = 0, cancelled = () => false, cooperative = true } = {}) {
+export async function rectifyDocument(image, corners, { maxEdge = SCAN_OUTPUT_MAX_EDGE, aspectRatio = 0, cancelled = () => false, cooperative = true } = {}) {
   if (!validQuad(corners)) throw new Error("请按顺序框住纸张四角，边线不能交叉。");
   const sourcePoints = corners.map(p => ({ x: p.x * (image.width - 1), y: p.y * (image.height - 1) }));
   const w = Math.max(distance(sourcePoints[0], sourcePoints[1]), distance(sourcePoints[2], sourcePoints[3]));

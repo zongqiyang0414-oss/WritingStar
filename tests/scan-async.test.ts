@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { scanCallback, createScanJobs } from '../src/platform/scanAsync.js';
-import { startNativeFrames } from '../src/platform/scanner.js';
+import { startNativeFrames, takeNativePhoto } from '../src/platform/scanner.js';
 
 test('原生接口不回调时超时退出，迟到临时文件被回收，重复成功回调不删有效文件', async () => {
   let success, cleaned=[];
@@ -29,6 +29,19 @@ test('相机高频帧不会堆积在检测后，停止监听后不再派发帧',
   stop();finish();emit({});assert.equal(seen,2);
 });
 
+test('微信支持原图时取原图，旧客户端仍用high，不影响拍照失败提示', async () => {
+ const previousWx=globalThis.wx,qualities=[];
+ const context={takePhoto(options){qualities.push(options.quality);options.success({tempImagePath:'/tmp/still.jpg'});}};
+ try {
+  globalThis.wx={canIUse:key=>key==='CameraContext.takePhoto.object.quality.original'};
+  assert.equal(await takeNativePhoto(context),'/tmp/still.jpg');
+  globalThis.wx={canIUse:()=>false};await takeNativePhoto(context);
+  globalThis.wx={canIUse:()=>{throw new Error('old client');}};await takeNativePhoto(context);
+  assert.deepEqual(qualities,['original','high','high']);
+  await assert.rejects(takeNativePhoto({takePhoto(options){options.fail({errMsg:'takePhoto:fail permission denied'});}}),/相机|摄像头|权限/);
+ } finally {globalThis.wx=previousWx;}
+});
+
 async function nativeModule() {
   let source=fs.readFileSync(new URL('../src/platform/scanner.js',import.meta.url),'utf8');
   source=source.replace(/\/\/ #ifdef H5[\s\S]*?\/\/ #endif/g,'');
@@ -51,4 +64,30 @@ test('取消读图不再写回共用画布；取消JPEG导出会移除迟到文�
     renderer.cancelPending();exportOptions.success({tempFilePath:'/tmp/late.jpg'});await assert.rejects(pending,/暂停/);
     assert.deepEqual(removed,['/tmp/late.jpg']);renderer.dispose();assert.ok(removed.includes('/tmp/already-scanned.jpg'));
   } finally {globalThis.uni=beforeUni;}
+});
+
+test('微信高细节扫描在独立预算内保留高质量JPEG，超限重试不会留下临时文件', async () => {
+ const previousUni=globalThis.uni,previousWx=globalThis.wx,qualities=[],removed=[];
+ let encoded=0,bytes=1100*1024;
+ const canvas={width:0,height:0,createImage(){const image={width:3200,height:2400};Object.defineProperty(image,'src',{set(){queueMicrotask(()=>image.onload());}});return image;},getContext(){return {
+  drawImage(){},getImageData(x,y,width,height){return {width,height,data:new Uint8ClampedArray(width*height*4)};},
+  createImageData(width,height){return {data:new Uint8ClampedArray(width*height*4)};},putImageData(){},
+ };},requestAnimationFrame(fn){queueMicrotask(fn);}};
+ globalThis.wx={env:{USER_DATA_PATH:'/user'}};
+ globalThis.uni={createSelectorQuery(){const q={in(){return q;},select(){return q;},fields(){return q;},exec(resolve){resolve([{node:canvas},{node:canvas}]);}};return q;},
+  canvasToTempFilePath(options){qualities.push(options.quality);options.success({tempFilePath:`/tmp/encoded-${++encoded}.jpg`});},
+  getFileInfo(options){options.success({size:bytes});},getFileSystemManager(){return {
+   copyFile(options){options.success({});},unlink(options){removed.push(options.filePath);},
+  };}};
+ try {
+  const {createScanRenderer}=await nativeModule(),renderer=await createScanRenderer({});
+  const source=await renderer.read('/tmp/original.jpg');assert.equal(source.width,2800);assert.equal(source.height,2100);
+  const output={width:2400,height:1700,data:new Uint8ClampedArray(2400*1700*4)};
+  const path=await renderer.exportImage(output);assert.ok(path.startsWith('/user/scan-preview-'));assert.deepEqual(qualities,[.94]);
+  bytes=2*1024*1024;await assert.rejects(renderer.exportImage(output),/较大/);
+  assert.deepEqual(qualities,[.94,.94,.9,.86,.82]);
+  for(let i=1;i<=5;i++)assert.ok(removed.includes(`/tmp/encoded-${i}.jpg`));
+  assert.ok(!removed.includes(path),'failed next export keeps the previous scan');
+  renderer.dispose();assert.ok(removed.includes(path));
+ } finally {globalThis.uni=previousUni;globalThis.wx=previousWx;}
 });

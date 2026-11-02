@@ -1,4 +1,4 @@
-import { MAX_PHOTO_BYTES } from "./photos.js";
+import { SCAN_SOURCE_MAX_EDGE, MAX_SCAN_BYTES, SCAN_JPEG_QUALITIES } from "./scanQuality.js";
 import { fitRect } from "./scanGeometry.js";
 import { browserScanError, nativeScanError, scanAccessError } from "./scanAccess.js";
 import { scanCallback } from "./scanAsync.js";
@@ -40,8 +40,14 @@ export function startNativeFrames(context, callback, onError) {
 }
 
 export function takeNativePhoto(context) {
+  let quality = "high";
+  // Newer WeChat offers the original still. Older clients retain their known
+  // high-quality path; preview-frame resolution is independent of this choice.
+  // #ifdef MP-WEIXIN
+  try { if (typeof wx !== "undefined" && wx.canIUse?.("CameraContext.takePhoto.object.quality.original")) quality = "original"; } catch { /* Older capability API. */ }
+  // #endif
   return scanCallback((resolve, reject) => context.takePhoto({
-    quality: "high", success: result => resolve(result.tempImagePath),
+    quality, success: result => resolve(result.tempImagePath),
     fail: failure => reject(nativeScanError(failure)),
   }), { message: "拍照等待超时，请重新开启相机后重试。", onLateValue: path => {
     // #ifdef MP-WEIXIN
@@ -138,7 +144,7 @@ export async function createScanRenderer(instance) {
     } finally { remove(path); }
     // #endif
   }
-  async function read(path, canvas = work, maxEdge = 2200) {
+  async function read(path, canvas = work, maxEdge = SCAN_SOURCE_MAX_EDGE) {
     if (!canvas) throw new Error("当前设备暂不支持成片预览。");
     const token = revision;
     let img;
@@ -168,7 +174,7 @@ export async function createScanRenderer(instance) {
       const ctx = work.getContext("2d"), pixels = ctx.createImageData(image.width, image.height);
       pixels.data.set(image.data); ctx.putImageData(pixels, 0, 0);
       await flush(work, token);
-      for (const quality of [0.92, 0.82, 0.7, 0.58]) {
+      for (const quality of SCAN_JPEG_QUALITIES) {
         const path = await encode(work, "jpg", quality);
         let size = 0;
         // #ifdef H5
@@ -183,7 +189,7 @@ export async function createScanRenderer(instance) {
         } catch (error) { remove(path); throw error; }
         size = info.size;
         // #endif
-        if (size <= MAX_PHOTO_BYTES) return uniqueImage(path, "scan-preview", token);
+        if (size <= MAX_SCAN_BYTES) return uniqueImage(path, "scan-preview", token);
         remove(path);
       }
       throw new Error("扫描图片较大，请缩小拍摄范围后重试。");

@@ -2,11 +2,12 @@ import { detectPaperCorners } from "./documentScanner.js";
 import { paperId } from "../services/paperWorkflow.js";
 import { analyzeDocument } from "./documentScan.js";
 import { createScanProcessor } from "./scanProcessor.js";
+import { SCAN_SOURCE_MAX_EDGE, SCAN_OUTPUT_MAX_EDGE, SCAN_JPEG_QUALITIES, MAX_SCAN_BYTES } from "./scanQuality.js";
 function call(api, args, scope) {
   return new Promise((resolve, reject) => uni[api]({ ...args, success: resolve, fail: () => reject(new Error("扫描处理失败，请重新选图或使用人工确认。")) }, scope));
 }
 export function chooseDeviceScanImages(remaining) {
-  return new Promise((resolve, reject) => uni.chooseImage({count: Math.min(9, remaining), sourceType: ["camera", "album"], sizeType: ["compressed"],
+  return new Promise((resolve, reject) => uni.chooseImage({count: Math.min(9, remaining), sourceType: ["camera", "album"], sizeType: ["original"],
     success: result => {
       if (result.tempFiles.some(f => f.size > 20 * 1024 * 1024)) {reject(new Error("单张图片不能超过 20 MB。"));return;}
       resolve(result.tempFiles.map((f, i) => ({id:paperId("photo"),url:f.path,name:`扫描照片${i+1}`,sample:false})));
@@ -18,7 +19,7 @@ export async function preserveDeviceScan(photo) {
 }
 export async function processDeviceScan(photo, canvasId, scope, resize) {
   const info = await call("getImageInfo", {src: photo.url});
-  const ratio = Math.min(1, 1600 / Math.max(info.width, info.height)), width = Math.round(info.width * ratio), height = Math.round(info.height * ratio);
+  const ratio = Math.min(1, SCAN_SOURCE_MAX_EDGE / Math.max(info.width, info.height)), width = Math.round(info.width * ratio), height = Math.round(info.height * ratio);
   await resize(width, height);
   const ctx = uni.createCanvasContext(canvasId, scope); ctx.drawImage(info.path || photo.url, 0, 0, width, height);
   await new Promise(resolve => ctx.draw(false, resolve));
@@ -31,13 +32,25 @@ export async function processDeviceScan(photo, canvasId, scope, resize) {
   const corners = detected?.corners || detectPaperCorners({data:small,width:sw,height:sh}, {markersOnly:true})?.map(p=>({x:p.x/(sw-1),y:p.y/(sh-1)}));
   const processor = createScanProcessor();
   let processed;
-  try { processed = await processor.process(pixels, corners, {maxEdge:1600, sourceCodeFallback: !detected}); }
+  try { processed = await processor.process(pixels, corners, {maxEdge:SCAN_OUTPUT_MAX_EDGE, sourceCodeFallback: !detected}); }
   finally { processor.dispose(); }
   const { image: outputPixels, code } = processed;
   const outputWidth=outputPixels.width, outputHeight=outputPixels.height, corrected=!!corners;
   if (outputWidth !== width || outputHeight !== height) await resize(outputWidth, outputHeight);
   await call("canvasPutImageData",{canvasId,x:0,y:0,width:outputWidth,height:outputHeight,data:outputPixels.data},scope);
-  const image = await call("canvasToTempFilePath",{canvasId,width:outputWidth,height:outputHeight,destWidth:outputWidth,destHeight:outputHeight,fileType:"jpg",quality:.8},scope);
-  const saved = await call("saveFile",{tempFilePath:image.tempFilePath});
+  let image;
+  for (const quality of SCAN_JPEG_QUALITIES) {
+    image = await call("canvasToTempFilePath",{canvasId,width:outputWidth,height:outputHeight,destWidth:outputWidth,destHeight:outputHeight,fileType:"jpg",quality},scope);
+    let info;
+    try { info = await call("getFileInfo", {filePath:image.tempFilePath}); }
+    catch (error) { uni.getFileSystemManager().unlink({filePath:image.tempFilePath,fail:()=>{}}); throw error; }
+    if (info.size <= MAX_SCAN_BYTES) break;
+    uni.getFileSystemManager().unlink({filePath:image.tempFilePath,fail:()=>{}});
+    image = null;
+  }
+  if (!image) throw new Error("扫描图片仍过大，请减少画面杂物后重试。");
+  let saved;
+  try { saved = await call("saveFile",{tempFilePath:image.tempFilePath}); }
+  catch (error) { uni.getFileSystemManager().unlink({filePath:image.tempFilePath,fail:()=>{}}); throw error; }
   return {id:paperId("scan"),photo:{...photo,url:saved.savedFilePath},code,corrected,manual:false};
 }

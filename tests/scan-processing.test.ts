@@ -51,3 +51,20 @@ test('打包像素缩图保留通道及透明度，不改变原图',()=>{
  for(let y=0;y<4;y++)for(let x=0;x<4;x++)for(let c=0;c<4;c++)assert.equal(out.data[(y*4+x)*4+c],data[((y*2)*8+x*2)*4+c]);
  assert.deepEqual(data,original);
 });
+
+test('扫描默认保留2400像素细节，不确定全图同样限制输出且不改变方向',async()=>{
+ const q=[{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}];
+ const image=blank(2600,1840);
+ // Fine, connected 2px rules are useful detail rather than invented upscaling.
+ for(let y=500;y<502;y++)for(let x=300;x<2300;x++){
+  const i=(y*image.width+x)*4;image.data[i]=image.data[i+1]=image.data[i+2]=20;
+ }
+ const corrected=await processScanPixels(image,q,{readCode:false,cooperative:false});
+ assert.equal(corrected.image.width,2400);assert.ok(corrected.image.height>1600);
+ const y=Math.round(501/1839*(corrected.image.height-1));
+ assert.ok(corrected.image.data[(y*2400+1000)*4]<65,'fine rule survives at the larger real output size');
+ const full=await processScanPixels(blank(2600,1840),null,{readCode:false,cooperative:false});
+ assert.equal(full.image.width,2400);assert.ok(Math.abs(full.image.width/full.image.height-2600/1840)<.001);
+ const small=await processScanPixels(blank(300,400),q,{readCode:false});
+ assert.ok(small.image.width<=300&&small.image.height<=400,'small sources are not enlarged');
+});
