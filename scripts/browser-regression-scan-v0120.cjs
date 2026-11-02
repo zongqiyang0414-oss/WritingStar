@@ -30,14 +30,17 @@ function stored() {
     const bind=async code=>{await page.locator('.binding-login').click();await page.locator('.binding-code input').fill(code);await button('查看绑定信息').click();await button(/^\s*确认\s*$/,page.locator('.binding-view')).click();await page.locator('.greeting').waitFor();};
     const noOverflow=async()=>{for(const width of [320,390,1280]){await page.setViewportSize({width,height:900});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`overflow at ${width}`);}await page.setViewportSize({width:390,height:900});};
     await page.addInitScript(() => {
-      window.__capture = { paper: '', present: true, streams: [], slowOutline: true, livePngExports: 0, shots: 0 };
+      window.__capture = { paper: '', present: true, streams: [], slowOutline: true, livePngExports: 0, cropPngExports:0, shots: 0 };
+      const draw=CanvasRenderingContext2D.prototype.drawImage;
+      CanvasRenderingContext2D.prototype.drawImage=function(source,...args){this.canvas.__documentCrop=args.length===8;return draw.call(this,source,...args);};
       const encode=HTMLCanvasElement.prototype.toDataURL;
       HTMLCanvasElement.prototype.toDataURL=function(type,...args){
-        const capture=this.width===960&&this.height===720&&window.__capture.streams.length;
+        const capture=!this.__documentCrop&&this.width===960&&this.height===720&&window.__capture.streams.length;
+        if(this.__documentCrop&&type==='image/png')window.__capture.cropPngExports++;
         if(capture)window.__capture.shots++;
         // Reproduce an outline export exceeding the old 650ms reset. The
         // physical page stays still; rendering must not prevent the shutter.
-        if(type==='image/png' && !capture && window.__capture.slowOutline){if(window.__capture.streams.length)window.__capture.livePngExports++;const until=performance.now()+680;while(performance.now()<until){}}
+        if(type==='image/png' && !capture && !this.__documentCrop && window.__capture.slowOutline){if(window.__capture.streams.length)window.__capture.livePngExports++;const until=performance.now()+680;while(performance.now()<until){}}
         return encode.call(this,type,...args);
       };
       Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable:true, value: async () => {
@@ -83,6 +86,7 @@ function stored() {
     const firstCaptureMs=Date.now()-autoStarted;
     assert.ok(firstCaptureMs<8000,'outline export must not keep resetting a stationary page');
     assert.equal(await page.evaluate(()=>window.__capture.livePngExports),0,'live border uses vectors, never per-frame PNG encoding');
+    assert.equal(await page.evaluate(()=>window.__capture.cropPngExports),1,'one PNG crop is created for the first accepted photograph');
     await page.evaluate(()=>window.__capture.slowOutline=false);
     console.log(`Stationary page captured with vector outline: ${firstCaptureMs}ms including opening camera and processing; no per-frame PNG export.`);
     assert.match(await page.locator('.scan-count').innerText(),/1 \/ 60/);
@@ -117,7 +121,7 @@ function stored() {
     await button(/^完成 \d+ 页$/).click();await page.locator('.scan-page-card').first().waitFor();
     assert.equal(await page.locator('.scan-page-card').count(),2);
     assert.match(await page.locator('.scan-page-card').first().innerText(),/小禾.*第 1 页/);
-    assert.match(await page.locator('.scan-page-card').first().innerText(),/原照片保留/);
+    assert.match(await page.locator('.scan-page-card').first().innerText(),/已裁剪/);
     assert.ok(await page.evaluate(()=>window.__capture.streams.every(s=>s.getTracks().every(t=>t.readyState==='ended'))));
     // Album enhancement must retain QR duplicate rejection.
     const sourceFile='/tmp/writingstar-v0120-page2.png';fs.writeFileSync(sourceFile,Buffer.from(images[1].split(',')[1],'base64'));
@@ -131,7 +135,7 @@ function stored() {
     const submissions=(await page.evaluate(stored)).submissions.filter(s=>s.assignmentId===assignment.id);
     assert.equal(submissions.length,1);assert.equal(submissions[0].paper.source,'teacher-scan');
     assert.deepEqual(submissions[0].paper.pages.map(p=>p.page),[1,2]);assert.ok(submissions[0].photos.every(p=>!p.sample));
-    assert.ok(submissions[0].photos.every(p=>p.original&&p.width===960&&p.height===720));
+    assert.ok(submissions[0].photos.every(p=>p.cropped&&!p.original&&p.sourceWidth===960&&p.sourceHeight===720&&p.width>350&&p.width<960&&p.height>500&&p.height<720));
     assert.ok(submissions[0].photos.every(p=>retainedOriginals.includes(p.url)),'formal submission retains the exact reviewed original');
     await noOverflow();assert.deepEqual(errors,[]);
     console.log('Scan default automatic capture, full-camera outline alignment, same-page lock, next-page rearm, manual capture, QR identity, duplicate protection, 60-page inbox, ordered submission and camera release passed.');

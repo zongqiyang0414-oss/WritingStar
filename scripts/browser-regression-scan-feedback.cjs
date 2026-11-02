@@ -41,7 +41,11 @@ const output = name => path.resolve(__dirname, '../outputs/' + name.replace('v01
         for(let i=0;i<12;i++){c.font=(12+i%3)+'px sans-serif';c.fillText('Fine print and retained pen strokes '+i,155,225+i*28);}
         c.strokeStyle='#214ca6';c.lineWidth=4;c.beginPath();c.moveTo(160,650);c.lineTo(400,675);c.stroke();
         c.strokeStyle='#b62e38';c.beginPath();c.arc(470,710,25,0,Math.PI*2);c.stroke();
-        return canvas.captureStream(12);
+        const stream=canvas.captureStream(12),track=stream.getVideoTracks()[0],settings=track.getSettings.bind(track),stop=track.stop.bind(track);
+        window.__torch={enabled:false,calls:[]};track.getCapabilities=()=>({torch:true});
+        track.getSettings=()=>({...settings(),torch:window.__torch.enabled});
+        track.applyConstraints=async options=>{if(window.__torch.failNext){window.__torch.failNext=false;throw Error('补光切换失败测试');}window.__torch.enabled=options.advanced[0].torch;window.__torch.calls.push(window.__torch.enabled);};
+        track.stop=()=>{window.__torch.enabled=false;stop();};return stream;
       }});
     });
     await page.goto(`http://127.0.0.1:${server.address().port}/#/pages/scan/index?batch=paper&remaining=6`,{waitUntil:'networkidle'});
@@ -66,8 +70,15 @@ const output = name => path.resolve(__dirname, '../outputs/' + name.replace('v01
     captured.forEach((frame,index)=>fs.writeFileSync(path.join(frames,`frame-${String(index).padStart(3,'0')}.png`),Buffer.from(frame.data,'base64')));
     fs.writeFileSync(path.join(frames,'timing.json'),JSON.stringify(captured.map(frame=>frame.time)));
     assert.equal(await page.locator('#scan-browser-camera video').count(),1,'auto camera stays mounted during collection');
+    const flash=page.locator('.scan-flash-toggle');
+    await flash.click();await page.waitForFunction(()=>window.__torch.enabled===true);
+    assert.match(await flash.innerText(),/闪光灯 开/);
+    await page.evaluate(()=>window.__torch.failNext=true);await flash.click();await page.locator('.scan-error').waitFor();
+    assert.equal(await page.evaluate(()=>window.__torch.enabled),true);assert.match(await flash.innerText(),/闪光灯 开/,'failed off request keeps the previous on state');
+    await flash.click();assert.equal(await page.evaluate(()=>window.__torch.enabled),false);
+    await flash.click();await page.screenshot({path:output('v016-photo-flash-20261030.png')});
     await page.locator('.scan-side-action').filter({hasText:'已拍摄'}).click();
-    const viewer=page.locator('.scan-image-viewer');await viewer.waitFor();
+    const viewer=page.locator('.scan-image-viewer');await viewer.waitFor();assert.equal(await page.evaluate(()=>window.__torch.enabled),false,'review/track stop extinguishes the light');
     const image=page.locator('.scan-zoom-image');
     await page.waitForFunction(()=>document.querySelector('.scan-zoom-image img')?.naturalWidth>0);
     const touch=(type,points)=>cdp.send('Input.dispatchTouchEvent',{type,touchPoints:points.map(([x,y,id])=>({x,y,id,radiusX:3,radiusY:3}))});

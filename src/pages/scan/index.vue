@@ -6,7 +6,8 @@ import { createScanJobs, scanCallback } from "../../platform/scanAsync.js";
 import ScanImageViewer from "../../components/ScanImageViewer.vue";
 import { LivePaperDetector, selectCaptureDetection } from "../../platform/paperScanCapture.js";
 import { AutoScanGate } from "../../platform/autoScan.js";
-import { fitRect } from "../../platform/scanGeometry.js";
+import { clamp, fitRect, validQuad } from "../../platform/scanGeometry.js";
+import { photoCropQuad } from "../../platform/photoCrop.js";
 import { MAX_PHOTOS } from "../../platform/photos.js";
 import { decodePaperCode } from "../../services/paperWorkflow.js";
 import { nativeScanError } from "../../platform/scanAccess.js";
@@ -21,9 +22,14 @@ const errorAction = ref(""), errorDetail = ref("");
 const realtime = ref(true), starting = ref(false), error = ref(""), notice = ref("将整张作业放入画面，四周留出一些背景");
 const outlineUrl = ref(""), progress = ref(0), waiting = ref(false), pages = shallowRef([]), selected = ref(0), capacity = ref(MAX_PHOTOS);
 const paperBatch = ref(false);
+const flashOn = ref(false), flashBusy = ref(false), flashUnavailable = ref(false);
+const nativeFlash = computed(() => flashOn.value ? "torch" : "off");
 const importQueue = shallowRef([]), importStatus = ref(""), processingStage = ref("");
 const importsPaused = ref(false), jobs = createScanJobs();
 const stage = ref({ width: 300, height: 400, left: 0, top: 0 });
+const cropCorners = ref([]);
+const cropFit = computed(() => current.value ? fitRect(current.value.width, current.value.height, stage.value.width, stage.value.height) : stage.value);
+const cropReviewCount = computed(() => pages.value.filter(page => page.needsReview).length);
 const captureFlight = shallowRef(null), thumbnailPulse = ref(false);
 const flightStyle = computed(() => {
   const flight = captureFlight.value;
@@ -42,6 +48,7 @@ let renderer, rendererPromise, nativeContext, browserCamera, stopFrames, channel
 let epoch = 0, lastFrame = 0, drawing = false, lastDetection = null, choosing = false;
 let detectionErrors = 0, lastDetectionTime = 0, outlineDrawing = false;
 let flightStart, flightEnd, pulseEnd, flightResolve, flightSequence = 0;
+let draggingCrop = -1;
 
 onLoad(options => {
   paperBatch.value = options?.batch === "paper";
@@ -83,6 +90,7 @@ function releaseCamera() {
   cancelCaptureFeedback();
   epoch++; stopFrames?.(); stopFrames = null; browserCamera?.close(); browserCamera = null;
   nativeContext = null; cameraMounted.value = false; cameraReady.value = false; starting.value = false;
+  flashOn.value = false; flashBusy.value = false;
   lastDetection = null; lastDetectionTime = 0; lastFrame = 0; detectionErrors = 0; liveDetector.reset(); gate.restart(); progress.value = 0; waiting.value = gate.locked; clearOutline();
 }
 function interruptProcessing(reason) {
@@ -170,6 +178,7 @@ async function startCamera() {
   if (!initialized.value || disposed || !foreground || starting.value || busy.value || full.value) return;
   releaseCamera();
   mode.value = "live"; clearError(); starting.value = true; realtime.value = true;
+  flashUnavailable.value = false;
   notice.value = "正在打开相机…";
   const token = epoch;
   try {
@@ -206,7 +215,26 @@ function resumeNativeFrames() {
     notice.value = "此设备暂不支持实时框选；可直接拍摄原照片";
   });
 }
-function cameraError(event) { releaseCamera(); showFailure(event?.detail || event); }
+function cameraError(event) {
+  const failure = event?.detail || event;
+  if (flashOn.value && /torch|flash|闪光|补光/i.test(failure?.errMsg || failure?.message || "")) {
+    flashOn.value = false; flashUnavailable.value = true; error.value = "此设备暂不支持补光灯，可继续拍照。"; return;
+  }
+  releaseCamera(); showFailure(failure);
+}
+async function toggleFlash() {
+  if (!cameraReady.value || busy.value || flashBusy.value || flashUnavailable.value) return;
+  const token = epoch, previouslyOn = flashOn.value, enabled = !previouslyOn;
+  flashBusy.value = true; clearError();
+  try {
+    // #ifdef H5
+    await browserCamera.setTorch(enabled);
+    // #endif
+    if (token === epoch && cameraReady.value && !disposed) flashOn.value = enabled;
+  } catch (failure) {
+    if (token === epoch && !disposed) { flashOn.value = previouslyOn; flashUnavailable.value = failure.code === "TORCH_UNSUPPORTED"; error.value = failure.message || "补光灯未能切换，请重试。"; }
+  } finally { if (token === epoch) flashBusy.value = false; }
+}
 function cameraStopped() { if (cameraMounted.value) { releaseCamera(); notice.value = "相机已暂停，点击继续开启"; } }
 async function settings() {
   try { await openScanSettings(); if (foreground) await startCamera(); }
@@ -225,7 +253,7 @@ async function privacyContract() {
   try { await openScanPrivacyContract(); }
   catch (failure) { showFailure(failure); }
 }
-function copyError() { uni.setClipboardData({ data: `写字星 v0.21.0 扫描
+function copyError() { uni.setClipboardData({ data: `写字星 v0.22.0 拍照
 ${error.value}
 ${errorDetail.value}`, fail: () => uni.showModal({ title: "请长按复制错误详情", showCancel: false,
   content: errorDetail.value || error.value }) }); }
@@ -278,7 +306,7 @@ async function updateLiveOutline(detection, frame, token) {
   // #endif
   try {
     await ensureRenderer();
-    const path = await renderer.drawOutline(detection.corners, frame.width, frame.height, stage.value, cover, detection.autoEligible !== false);
+    const path = await renderer.drawOutline(photoCropQuad(detection.corners), frame.width, frame.height, stage.value, cover, detection.autoEligible !== false);
     // Native PNG export may finish after newer frames. Do not restore an old
     // outline after the page moved, disappeared or the camera was released.
     if (token !== epoch || disposed || !lastDetection || detection.corners.some((p, i) => Math.hypot(p.x - lastDetection.corners[i].x, p.y - lastDetection.corners[i].y) > .03)) {
@@ -327,8 +355,8 @@ async function capture(fromAutomatic = false) {
 async function processSource(source, fromAutomatic, token, fromImport = false, previewDetection = null, sameFrame = false) {
   processingStage.value = "正在读取照片信息…";
   await ensureRenderer();
-  // Small analysis pixels are used only for framing/code recognition. The
-  // original camera/picker file remains the displayed and persisted photo.
+  // Small pixels only locate the sheet/read its code. The actual crop below
+  // is drawn directly from the complete photograph at its native resolution.
   const image = await renderer.readAnalysis(source);
   if (token !== epoch || disposed) throw new Error("拍照已暂停，请重新拍摄。");
   const detection = selectCaptureDetection(image, previewDetection, sameFrame);
@@ -356,13 +384,30 @@ async function processSource(source, fromAutomatic, token, fromImport = false, p
   const captureCorners = quad?.map(p => ({ ...p })) || null;
   // Native capture/picker APIs may reuse temp URIs. Copy original bytes to an
   // owned unique URI, without encoding, so earlier pages cannot be overwritten.
+  const inputSource = source;
   source = await renderer.keepOriginal(source);
-  if (cancelled()) { renderer.remove(source); throw new Error("拍照已暂停，请重新拍摄。"); }
-  const output = { source, code, corrected: false, width, height, previewWidth: width, previewHeight: height,
-    photo: { id: `photo-${Date.now()}-${Math.random().toString(36).slice(2)}`, url: source,
-      name: "作业原照片", sample: false, original: true, width, height, captureCorners } };
+  let cropped;
+  try {
+    if (quad && !cancelled()) {
+      processingStage.value = "正在裁剪文档范围…";
+      try { cropped = await renderer.cropOriginal(source, photoCropQuad(quad)); }
+      catch (failure) { if (cancelled()) throw failure; /* Keep original for deferred crop review. */ }
+    }
+    if (cancelled()) throw new Error("拍照已暂停，请重新拍摄。");
+  } catch (failure) {
+    if (source !== inputSource) renderer.remove(source);
+    if (cropped) renderer.remove(cropped.url);
+    throw failure;
+  }
+  const photoWidth = cropped?.width || width, photoHeight = cropped?.height || height;
+  const output = { source, code, corrected: false, needsReview: !cropped, width, height, previewWidth: photoWidth, previewHeight: photoHeight,
+    photo: { id: `photo-${Date.now()}-${Math.random().toString(36).slice(2)}`, url: cropped?.url || source,
+      name: "作业照片", sample: false, original: !cropped, cropped: !!cropped, width: photoWidth, height: photoHeight, captureCorners,
+      sourceWidth: width, sourceHeight: height,
+      ...(cropped && {cropBounds:{left:cropped.left,top:cropped.top,width:cropped.width,height:cropped.height}}) } };
   pages.value = [...pages.value, output]; selected.value = pages.value.length - 1;
-  notice.value = "原照片已保留，请换上下一张";
+  if (inputSource !== source) renderer.remove(inputSource);
+  notice.value = cropped ? "已裁剪保存，请换上下一张" : "照片已保留，结束后可调整裁剪；请换上下一张";
   if (!fromImport) {
     const feedback = animateCapture(output, token);
     if (!fromAutomatic || full.value) await feedback;
@@ -414,6 +459,62 @@ function reviewPage(index) {
   if (busy.value || !pages.value[index]) return;
   releaseCamera(); selected.value = index; mode.value = "review"; error.value = "";
 }
+async function editCrop() {
+  if (!current.value || busy.value) return;
+  releaseCamera(); clearError();
+  const entry = current.value, bounds = entry.photo.cropBounds;
+  cropCorners.value = bounds ? [
+    {x:bounds.left/entry.width,y:bounds.top/entry.height},
+    {x:(bounds.left+bounds.width)/entry.width,y:bounds.top/entry.height},
+    {x:(bounds.left+bounds.width)/entry.width,y:(bounds.top+bounds.height)/entry.height},
+    {x:bounds.left/entry.width,y:(bounds.top+bounds.height)/entry.height},
+  ] : entry.photo.captureCorners ? photoCropQuad(entry.photo.captureCorners) : [{x:.03,y:.03},{x:.97,y:.03},{x:.97,y:.97},{x:.03,y:.97}];
+  mode.value = "crop"; await nextTick(); await measure();
+}
+function cropPointStyle(point) { return {left:`${cropFit.value.left+point.x*cropFit.value.width}px`,top:`${cropFit.value.top+point.y*cropFit.value.height}px`}; }
+function cropEdgeStyle(point,index) {
+  const end = cropCorners.value[(index+1)%4], dx=(end.x-point.x)*cropFit.value.width, dy=(end.y-point.y)*cropFit.value.height;
+  return {...cropPointStyle(point),width:`${Math.hypot(dx,dy)}px`,transform:`rotate(${Math.atan2(dy,dx)}rad)`};
+}
+function moveCrop(event) {
+  if (draggingCrop < 0 || busy.value || mode.value !== "crop") return;
+  const touch=event.touches?.[0] || event, q=cropCorners.value;
+  const x=clamp((touch.clientX-stage.value.left-cropFit.value.left)/cropFit.value.width);
+  const y=clamp((touch.clientY-stage.value.top-cropFit.value.top)/cropFit.value.height);
+  const leftSide=draggingCrop===0||draggingCrop===3, topSide=draggingCrop<2;
+  const left=leftSide?Math.min(x,q[1].x-.08):q[0].x, right=leftSide?q[1].x:Math.max(x,q[0].x+.08);
+  const top=topSide?Math.min(y,q[2].y-.08):q[0].y, bottom=topSide?q[2].y:Math.max(y,q[0].y+.08);
+  cropCorners.value=[{x:left,y:top},{x:right,y:top},{x:right,y:bottom},{x:left,y:bottom}];
+}
+async function confirmCrop() {
+  if (busy.value || !current.value || !validQuad(cropCorners.value,.005)) return;
+  const entry=current.value,index=selected.value,token=epoch,quad=cropCorners.value.map(p=>({...p}));
+  const cancelled=()=>disposed||token!==epoch||!foreground;
+  busy.value=true;clearError();processingStage.value="正在裁剪文档范围…";
+  try {
+    await jobs.run(async()=>{
+      const image=await renderer.readAnalysis(entry.source);
+      let code="";
+      if(paperBatch.value){
+        try{const result=await processor.process(image,quad,{identifyOnly:true,cancelled});decodePaperCode(result.code);code=result.code.trim();}
+        catch(failure){if(cancelled())throw failure;}
+      }
+      const cropped=await renderer.cropOriginal(entry.source,quad);
+      if(cancelled()){renderer.remove(cropped.url);throw new Error("裁剪已暂停，请重试。");}
+      const photo={...entry.photo,url:cropped.url,original:false,cropped:true,width:cropped.width,height:cropped.height,captureCorners:quad,
+        cropBounds:{left:cropped.left,top:cropped.top,width:cropped.width,height:cropped.height}};
+      pages.value=pages.value.map((page,i)=>i===index?{...page,code,photo,needsReview:false,previewWidth:cropped.width,previewHeight:cropped.height}:page);
+      if(entry.photo.url!==entry.source)renderer.remove(entry.photo.url);
+      mode.value="review";
+    },{onInterrupt:interruptProcessing});
+  } catch(failure){if(!disposed)showFailure(failure);}
+  finally{busy.value=false;processingStage.value="";}
+}
+function keepWholePage() {
+  if (busy.value || !current.value?.needsReview) return;
+  pages.value=pages.value.map((page,index)=>index===selected.value?{...page,needsReview:false}:page);
+  clearError();
+}
 function removePage() {
   const entry = current.value;
   if (!entry || busy.value) return;
@@ -424,7 +525,9 @@ function removePage() {
 }
 async function finish() {
   if (!pages.value.length || busy.value || saving.value || delivered.value) return;
-  if (!channel?.emit) { error.value = "请从作业提交页进入拍照，以便保存原照片。"; return; }
+  if (!channel?.emit) { error.value = "请从作业提交页进入拍照，以便保存照片。"; return; }
+  const pendingCrop=pages.value.findIndex(page=>page.needsReview);
+  if(pendingCrop>=0){reviewPage(pendingCrop);error.value="此页裁剪范围未确认，请调整裁剪或选择保留整张。";return;}
   releaseCamera(); busy.value = saving.value = true; error.value = "";
   const token = epoch;
   try {
@@ -433,7 +536,7 @@ async function finish() {
       id: photo.id, photo, code: pages.value[index].code || "", corrected: pages.value[index].corrected !== false, manual: false,
     })) : saved;
     channel.emit("scanned", result); delivered.value = true;
-    uni.navigateBack({ fail: () => { error.value = "原照片已添加，请返回作业提交页。"; } });
+    uni.navigateBack({ fail: () => { error.value = "照片已添加，请返回作业提交页。"; } });
   } catch (failure) {
     if (!disposed) error.value = failure.message || "保存失败，原照片仍在，请重试。";
   } finally { busy.value = saving.value = false; }
@@ -452,18 +555,19 @@ function leave() {
   <view class="scanner-page">
     <view class="scan-header">
       <button class="scan-icon-button" aria-label="退出扫描" :disabled="busy" @click="leave">×</button>
-      <view class="scan-heading"><text class="scan-title">作业拍照</text><text class="scan-subtitle">{{ mode === 'review' ? '查看原照片' : '自动框选 · 原图保存' }}</text></view>
+      <view class="scan-heading"><text class="scan-title">作业拍照</text><text class="scan-subtitle">{{ mode === 'crop' ? '调整裁剪范围' : mode === 'review' ? '查看裁剪照片' : '自动框选 · 按框裁剪' }}</text></view>
       <text class="scan-count">{{ pages.length }} / {{ capacity }} 页</text>
     </view>
-    <view class="scan-status" role="status">{{ mode === 'live' ? frameText : busy ? (saving ? '正在保存原照片…' : processingText) : '双指放大、拖动查看笔迹，轻点查看全图' }}</view>
-    <view class="scan-original-note">框线仅辅助取景，照片按原图保存</view>
-    <view id="scan-stage" class="scan-stage">
+    <view class="scan-status" role="status">{{ mode === 'live' ? frameText : busy ? (saving ? '正在保存照片…' : processingText) : mode === 'crop' ? '拖动四个角调整保留范围' : '双指放大、拖动查看笔迹，轻点查看全图' }}</view>
+    <view class="scan-original-note">{{ mode === 'live' && flashOn ? '闪光灯常亮补光 · 按文档范围裁剪' : '保留字迹颜色和细节，仅裁去周边背景' }}</view>
+    <view v-if="cropReviewCount && mode !== 'crop'" class="scan-review-note">{{ cropReviewCount }} 页已保留，结束后可检查裁剪范围</view>
+    <view id="scan-stage" class="scan-stage" @touchmove.stop.prevent="moveCrop" @touchend="draggingCrop=-1" @touchcancel="draggingCrop=-1" @mousemove="moveCrop" @mouseup="draggingCrop=-1" @mouseleave="draggingCrop=-1">
       <!-- #ifdef H5 -->
       <view v-show="mode === 'live'" id="scan-browser-camera" class="scan-camera" />
       <!-- #endif -->
       <template v-if="mode === 'live'">
         <!-- #ifdef MP-WEIXIN -->
-        <camera v-if="cameraMounted" id="scan-camera" class="scan-camera" device-position="back" flash="off" frame-size="medium" resolution="high" @initdone="nativeReady" @error="cameraError" @stop="cameraStopped">
+        <camera v-if="cameraMounted" id="scan-camera" class="scan-camera" device-position="back" :flash="nativeFlash" frame-size="medium" resolution="high" @initdone="nativeReady" @error="cameraError" @stop="cameraStopped">
           <cover-image v-if="outlineUrl" class="scan-outline" :src="outlineUrl" />
         </camera>
         <!-- #endif -->
@@ -483,6 +587,11 @@ function leave() {
         </view>
       </template>
       <ScanImageViewer v-else-if="mode === 'review' && current" :key="current.photo.id" :src="current.photo.url" :urls="pages.map(page => page.photo.url)" />
+      <template v-else-if="mode === 'crop' && current">
+        <image class="scan-result scan-crop-source" :src="current.source" mode="aspectFit" />
+        <view v-for="(point,index) in cropCorners" :key="'edge'+index" class="scan-crop-edge" :style="cropEdgeStyle(point,index)" />
+        <view v-for="(point,index) in cropCorners" :key="index" class="scan-crop-corner" :style="cropPointStyle(point)" @touchstart.stop.prevent="draggingCrop=index" @mousedown.stop.prevent="draggingCrop=index">{{ index+1 }}</view>
+      </template>
     </view>
     <view v-if="error" class="scan-error" role="alert">
       <view>{{ error }}</view>
@@ -504,7 +613,7 @@ function leave() {
       <template v-if="mode === 'live'">
         <view class="scan-mode-row">
           <button :class="['scan-mode-toggle', { active: automatic }]" :disabled="busy || !realtime" :aria-pressed="automatic" @click="toggleAutomatic"><text class="scan-toggle-dot" />自动拍照 {{ automatic ? '已开启' : '已关闭' }}</button>
-          <text class="scan-muted">{{ automatic ? '放稳后自动拍摄' : '点击按钮拍摄' }}</text>
+          <button class="scan-flash-toggle" :class="{active:flashOn}" :disabled="busy || !cameraReady || flashBusy || flashUnavailable" :aria-pressed="flashOn" @click="toggleFlash">{{ flashUnavailable ? '补光不可用' : flashBusy ? '正在切换…' : '闪光灯 '+(flashOn ? '开' : '关') }}</button>
         </view>
         <view class="scan-progress"><view :style="{ width: automatic && !waiting ? Math.round(progress * 100) + '%' : '0%' }" /></view>
         <view class="scan-actions">
@@ -516,8 +625,12 @@ function leave() {
       </template>
       <template v-else-if="mode === 'review'">
         <view class="scan-pagination"><button :disabled="busy || selected === 0" @click="selected--">‹ 上一页</button><text>{{ selected + 1 }} / {{ pages.length }}</text><button :disabled="busy || selected >= pages.length - 1" @click="selected++">下一页 ›</button></view>
-        <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy" @click="removePage">删除此页</button></view>
+        <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy" @click="editCrop">调整裁剪</button><button class="scan-secondary" :disabled="busy" @click="removePage">删除此页</button></view>
+        <button v-if="current?.needsReview" class="scan-text-button" :disabled="busy" @click="keepWholePage">此页保留整张</button>
         <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy || full" @click="startCamera">继续拍照</button><button class="scan-primary" :disabled="busy || delivered" @click="finish">完成 {{ pages.length }} 页</button></view>
+      </template>
+      <template v-else-if="mode === 'crop'">
+        <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy" @click="mode='review'">取消裁剪</button><button class="scan-primary" :disabled="busy" @click="confirmCrop">保存裁剪</button></view>
       </template>
     </view>
     <!-- #ifdef H5 -->
@@ -545,8 +658,8 @@ function leave() {
 .scan-empty-symbol { font-size: 48px; color: #49d4b4; }
 .scan-controls { flex-shrink: 0; padding: 14px 22px 18px; }
 .scan-mode-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-.scan-mode-toggle { display: flex; align-items: center; gap: 7px; padding: 6px 10px; margin: 0; background: #293b33; color: #e4eee8; border-radius: 20px; font-size: 12px; line-height: 20px; }
-.scan-mode-toggle.active { background: #125c49; color: #baffea; }
+.scan-mode-toggle, .scan-flash-toggle { display: flex; align-items: center; gap: 7px; padding: 6px 10px; margin: 0; background: #293b33; color: #e4eee8; border-radius: 20px; font-size: 12px; line-height: 20px; }
+.scan-mode-toggle.active, .scan-flash-toggle.active { background: #125c49; color: #baffea; }
 .scan-toggle-dot { width: 7px; height: 7px; border-radius: 50%; background: #7e978d; }
 .scan-mode-toggle.active .scan-toggle-dot { background: #35efbd; }
 .scan-progress { height: 3px; margin: 9px 0 10px; background: #233a30; overflow: hidden; border-radius: 4px; }
@@ -578,6 +691,9 @@ function leave() {
 .scan-review-actions { display: flex; gap: 10px; margin-top: 10px; }
 .scan-review-actions button { flex: 1; }
 .scan-original-note { padding: 0 14px 8px; text-align: center; color: #a9bcb5; font-size: 11px; }
+.scan-review-note { padding: 5px 14px; text-align: center; color: #ffe4a3; background: #393422; font-size: 12px; }
+.scan-crop-edge { position: absolute; height: 2px; background: #00efb9; transform-origin: left center; pointer-events: none; }
+.scan-crop-corner { position: absolute; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; margin: -18px 0 0 -18px; border-radius: 50%; border: 2px solid #fff; background: #008e71; color: #fff; font-size: 14px; }
 .scan-hidden-canvas { position: fixed; left: -5000px; top: -5000px; width: 2px; height: 2px; pointer-events: none; }
 /* #ifdef MP-WEIXIN */
 .scan-header { padding-right: 104px; }

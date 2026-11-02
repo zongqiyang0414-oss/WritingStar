@@ -41,7 +41,7 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
     },
     getContext() {
       const target = this;
-      return { drawImage(image) { target.source = image.path; }, getImageData(_x, _y, width, height) {
+      return { drawImage(image,...args) { target.source = image.path; target.drawArgs = args; }, getImageData(_x, _y, width, height) {
         return uncertainStill && target.source?.includes('capture') ? {width,height,data:new Uint8ClampedArray(width*height*4).fill(255)} : pixels(width, height);
       },
         createImageData(width, height) { return pixels(width, height); }, putImageData() {},
@@ -66,8 +66,9 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
     }; },
     canvasToTempFilePath(options) {
       assert.notEqual(options.fileType,'jpg','photo pipeline must never export a replacement JPEG');
-      const file = options.fileType === 'jpg' ? '/tmp/output.jpg' : '/tmp/outline.png';
-      files.set(file,{width:options.destWidth,height:options.destHeight});
+      const file = '/tmp/reused-export.png';
+      const image=files.get(options.canvas.source);
+      files.set(file,{width:options.destWidth,height:options.destHeight,bytes:image?.bytes,sourcePath:options.canvas.source,drawArgs:options.canvas.drawArgs});
       options.success({ tempFilePath: file });
     },
     getFileInfo(options) { options.success({ size: 10000 }); },
@@ -198,6 +199,17 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   assert.match(JSON.stringify(system.render()), /原照片|review/);
   system.close();
 
+  const lighting=createPage();
+  const lightTag=template.match(/<button\b[^>]*scan-flash-toggle[^>]+>/)[0];
+  await lighting.render()[event(start,'bindtap')]();lighting.render()[event(camera,'bindinitdone')]();
+  assert.equal(lighting.render()[event(camera,'flash')],'off');
+  await lighting.render()[event(lightTag,'bindtap')]();assert.equal(lighting.render()[event(camera,'flash')],'torch');
+  await lighting.render()[event(lightTag,'bindtap')]();assert.equal(lighting.render()[event(camera,'flash')],'off');
+  await lighting.render()[event(lightTag,'bindtap')]();
+  lighting.render()[event(camera,'binderror')]({detail:{errMsg:'camera:fail torch unavailable'}});
+  assert.equal(lighting.render()[event(camera,'flash')],'off');assert.equal(lighting.render()[event(camera,'wx:if')],true,'unsupported flash does not terminate camera');
+  lighting.close();
+
   // Actual compiled capture -> process -> result -> tap workflow. The iOS
   // camera keeps running after automatic capture, but controls must unlock.
   const successful = createPage({paper:true,qrData:'https://school.example/instructions'});
@@ -221,19 +233,27 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   assert.equal(successful.render()[event(continueTag,'disabled')],false);
   await successful.render()[event(continueTag,'bindtap')](); successful.render()[event(camera,'bindinitdone')]();
   await successful.render()[event(shutter,'bindtap')]();assert.equal(successful.count,4,'manual shutter still works after opening and returning from continuous scan');
-  assert.doesNotMatch(template,/调整边角|成片形状|确认并处理|<picker/,'photo capture exposes no resampling controls');
+  assert.doesNotMatch(template,/成片形状|确认并处理|<picker/,'crop does not restore arbitrary paper aspect ratios');
+  const editTag=template.match(/<button\b[^>]+>调整裁剪/)[0],saveCropTag=template.match(/<button\b[^>]+>保存裁剪/)[0];
+  await successful.render()[event(editTag,'bindtap')]();
+  await successful.render()[event(saveCropTag,'bindtap')]();
+  assert.equal(successful.count,4,'recropping replaces the current page');
   const completeTag=template.match(/<button\b[^>]+>完成 /)[0];
   await successful.render()[event(completeTag,'bindtap')]();
   const originals=successful.delivered[0].rows;
   assert.equal(originals.length,4);
   assert.equal(new Set(originals.map(row=>row.photo.url)).size,4,'reused native temp URI still produces independent originals');
   for(const [index,row] of originals.entries()){
-    assert.equal(row.corrected,false);assert.equal(row.photo.original,true);assert.equal(row.photo.width,3024);assert.equal(row.photo.height,4032);
-    assert.ok(row.photo.url.endsWith('.png'),'PNG original format retained');
-    assert.equal(successful.copies.find(copy=>copy.destPath===row.photo.url).bytes,'camera-original-'+(index+1),'original content retained across later captures');
+    assert.equal(row.corrected,false);assert.equal(row.photo.original,false);assert.equal(row.photo.cropped,true);
+    assert.ok(row.photo.width>2000&&row.photo.width<3024);assert.ok(row.photo.height>3000&&row.photo.height<4032,'crop retains source-resolution pixels beyond retired 2400px limit');
+    assert.ok(row.photo.url.endsWith('.png'),'cropped file is lossless PNG');
+    const crop=successful.copies.find(copy=>copy.destPath===row.photo.url);
+    assert.equal(crop.bytes,'camera-original-'+(index+1),'crop always reads its original camera file');
+    assert.deepEqual(Array.from(crop.drawArgs.slice(2,4)),Array.from(crop.drawArgs.slice(6,8)),'copy source/destination size is identical');
     assert.equal(row.code,'','shared generic QR is not treated as a student identity');
   }
-  assert.equal(successful.copies.length,4,'successful finish hands off existing originals without another batch copy');
+  assert.equal(successful.copies.filter(copy=>copy.destPath.includes('/photo-original-')).length,4);
+  assert.equal(successful.copies.filter(copy=>copy.destPath.includes('/photo-crop-')).length,5,'finish hands off existing crops without another copy');
   successful.close();
 
   const uncertain=createPage({paper:true,uncertainStill:true});
@@ -242,6 +262,9 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   await until(()=>uncertain.count===1&&!uncertain.render()[event(shutter,'disabled')],'uncertain auto crop must preserve a page and continue');
   assert.equal(uncertain.render()[event(camera,'wx:if')],true);
   const finishTag=template.match(/<button\b[^>]*scan-finish[^>]+>/)[0];await uncertain.render()[event(finishTag,'bindtap')]();
+  assert.equal(uncertain.delivered.length,0,'uncertain crop is reviewed at batch end, never guessed');
+  const wholeTag=template.match(/<button\b[^>]+>此页保留整张/)[0];
+  await uncertain.render()[event(wholeTag,'bindtap')]();await uncertain.render()[event(completeTag,'bindtap')]();
   assert.equal(uncertain.delivered[0].rows[0].corrected,false,'uncertain page is not mislabeled as automatically corrected');
   assert.equal(uncertain.delivered[0].rows[0].photo.original,true);
   assert.equal(uncertain.delivered[0].rows[0].code,'','uncertain full-frame photo must not assign a background student code');
@@ -287,5 +310,5 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   assert.equal(touchHost.previews[0].current,'/tmp/scan-test.jpg');
   assert.equal(touchHost.previews[0].urls.length,2);
   touchHost.close();
-  console.log('WeChat compiled original-photo checks passed: native consent, picker lifecycle, continuous three-page auto capture without confirmation, uncertain full-frame retention, unchanged original bytes/dimensions/format, no photo JPEG export, unique originals and ownership handoff, thumbnail/review/continue/manual capture, frame pause/resume, stopped photo, export timeout/late cleanup, no blocking capture layer, native pinch and full-image preview.');
+  console.log('WeChat compiled original-photo checks passed: native consent, picker lifecycle, continuous three-page auto capture without confirmation, uncertain full-frame retention, source-resolution lossless crops/recrop, no photo JPEG export, unique file handoff, torch toggle/unavailable recovery, thumbnail/review/continue/manual capture, frame pause/resume, stopped photo, export timeout/late cleanup, no blocking capture layer, native pinch and full-image preview.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

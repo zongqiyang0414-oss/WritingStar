@@ -78,6 +78,10 @@ export interface Photo {
   sample: boolean;
   /** Original selected/captured bytes; analysis previews never replace this file. */
   original?: boolean;
+  cropped?: boolean;
+  cropBounds?: { left: number; top: number; width: number; height: number };
+  sourceWidth?: number;
+  sourceHeight?: number;
   width?: number;
   height?: number;
   captureCorners?: { x: number; y: number }[] | null;

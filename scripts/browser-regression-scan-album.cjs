@@ -46,16 +46,49 @@ const server = http.createServer((req,res) => {
     await button('删除此页').waitFor();
     assert.equal(await page.locator('.scan-ratio-picker').count(),0,'no shape/resampling controls');
     const retained=[];
+    const digest=value=>createHash('sha256').update(Buffer.from(value.split(',')[1]||'','base64')).digest('hex');
     for(let index=2;index>=0;index--){
       const src=await page.locator('.scan-result img').getAttribute('src');
-      const digest=value=>createHash('sha256').update(Buffer.from(value.split(',')[1]||'','base64')).digest('hex');
-      assert.equal(digest(src),digest(images[index]),'selected file bytes survive import and review unchanged');
-      const dimensions=await page.locator('.scan-result img').evaluate(img=>({width:img.naturalWidth,height:img.naturalHeight}));
-      retained.unshift({bytes:files[index].buffer.length,...dimensions});
-      if(index){await button('上一页').click();await page.waitForFunction(previous=>document.querySelector('.scan-result img')?.src!==previous,src);}
+      await page.waitForFunction(()=>document.querySelector('.scan-zoom-image img')?.complete&&document.querySelector('.scan-zoom-image img')?.naturalWidth>0);
+      const dimensions=await page.locator('.scan-zoom-image img').evaluate(img=>({width:img.naturalWidth,height:img.naturalHeight}));
+      await button('调整裁剪').click();await page.locator('.scan-crop-source img').waitFor();await page.waitForFunction(()=>document.querySelector('.scan-crop-source img')?.complete&&document.querySelector('.scan-crop-source img')?.naturalWidth>0);
+      const original=await page.locator('.scan-crop-source img').getAttribute('src');
+      assert.equal(digest(original),digest(images[index]),'recrop always uses the unchanged complete input');
+      if(index!==1){
+        assert.ok(dimensions.width<(index===0?3000:720)&&dimensions.height<(index===0?4000:960),'desk is cropped away');
+        const check=await page.evaluate(async ({cropped,original})=>{
+          const load=async src=>{const img=new Image();await new Promise(r=>{img.onload=r;img.src=src;});const c=document.createElement('canvas');c.width=img.width;c.height=img.height;c.getContext('2d').drawImage(img,0,0);return c;};
+          const full=await load(original),out=await load(cropped),area=document.querySelector('#scan-stage').getBoundingClientRect();
+          const handle=document.querySelector('.scan-crop-corner').getBoundingClientRect(),scale=Math.min(area.width/full.width,area.height/full.height);
+          const left=Math.round((handle.x+handle.width/2-area.x-(area.width-full.width*scale)/2)/scale);
+          const top=Math.round((handle.y+handle.height/2-area.y-(area.height-full.height*scale)/2)/scale);
+          const expected=full.getContext('2d').getImageData(left,top,out.width,out.height).data,actual=out.getContext('2d').getImageData(0,0,out.width,out.height).data;
+          let mismatch=0;for(let i=0;i<actual.length;i++)if(actual[i]!==expected[i]){mismatch++;if(mismatch>10)break;}
+          return {mismatch,left,top,width:out.width,height:out.height};
+        },{cropped:src,original});
+        assert.equal(check.mismatch,0,'PNG crop preserves every decoded channel at its source pixel location');
+      }else assert.equal(digest(src),digest(original),'uncertain borders keep the original until crop review');
+      retained.unshift({...dimensions,bytes:Buffer.from(src.split(',')[1],'base64').length});
+      await button('取消裁剪').click();
+      if(index){await button('上一页').click();await page.waitForFunction(previous=>document.querySelector('.scan-zoom-image img')?.src!==previous,src);}
     }
-    assert.deepEqual(retained[0],{bytes:files[0].buffer.length,width:3000,height:4000});
-    await page.screenshot({path:path.resolve(__dirname,`../outputs/scan-album-original-${artifactVersion}-${artifactDate}.png`)});
+    assert.ok(retained[0].height>3000,'full-resolution crop exceeds the retired output cap');
+    await button('下一页').click();await button('调整裁剪').click();
+    await page.waitForFunction(()=>document.querySelector('.scan-crop-source img')?.complete&&document.querySelector('.scan-crop-source img')?.naturalWidth>0);
+    const whole=await page.locator('.scan-crop-source img').getAttribute('src');
+    const sourceSize=await page.locator('.scan-crop-source img').evaluate(img=>({width:img.naturalWidth,height:img.naturalHeight}));
+    const area=await page.locator('#scan-stage').boundingBox(),scale=Math.min(area.width/sourceSize.width,area.height/sourceSize.height);
+    const fitted={left:area.x+(area.width-sourceSize.width*scale)/2,top:area.y+(area.height-sourceSize.height*scale)/2,width:sourceSize.width*scale,height:sourceSize.height*scale};
+    for(const [corner,x,y] of [[0,.2,.14],[2,.8,.86]]){
+      const point=await page.locator('.scan-crop-corner').nth(corner).boundingBox();
+      await page.mouse.move(point.x+point.width/2,point.y+point.height/2);await page.mouse.down();await page.mouse.move(fitted.left+x*fitted.width,fitted.top+y*fitted.height,{steps:4});await page.mouse.up();
+    }
+    await page.screenshot({path:path.resolve(__dirname,`../outputs/scan-crop-${artifactVersion}-${artifactDate}.png`)});
+    await button('保存裁剪').click();await button('调整裁剪').waitFor();
+    const manual=await page.locator('.scan-zoom-image img').evaluate(img=>({width:img.naturalWidth,height:img.naturalHeight}));
+    assert.ok(manual.width>420&&manual.width<440&&manual.height>680&&manual.height<705,'manual rectangle affects the real output');
+    await button('调整裁剪').click();assert.equal(digest(await page.locator('.scan-crop-source img').getAttribute('src')),digest(whole));await button('取消裁剪').click();
+    assert.match(await page.locator('.scan-count').innerText(),/^3/,'recrop replaces rather than appends');
     // Hold an actual scanner image decode, then click Stop. Existing pages
     // stay usable, the late image cannot append, and the same queue can resume.
     await page.evaluate(()=>{
@@ -85,6 +118,6 @@ const server = http.createServer((req,res) => {
     await page.locator('.scan-error').waitFor();assert.match(await page.locator('.scan-error').innerText(),/还可添加 2 页/);
     assert.match(await page.locator('.scan-count').innerText(),/^0/,'over-limit choice does not partially import');
     assert.deepEqual(errors,[]);
-    console.log('Original album: exact file bytes/order/3000x4000 dimensions, no shape controls, cancel/late decode/resume and capacity checks passed.',retained);
+    console.log('Photo crop: complete original retained for edits, full-resolution exact crop pixels, manual bounds, no aspect forcing, cancel/resume and capacity checks passed.',retained);
   } finally {await browser?.close();server.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

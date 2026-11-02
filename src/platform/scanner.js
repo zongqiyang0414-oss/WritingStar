@@ -2,6 +2,10 @@ import { SCAN_SOURCE_MAX_EDGE, MAX_SCAN_BYTES, SCAN_JPEG_QUALITIES } from "./sca
 import { fitRect } from "./scanGeometry.js";
 import { browserScanError, nativeScanError, scanAccessError } from "./scanAccess.js";
 import { scanCallback } from "./scanAsync.js";
+import { photoCropBounds } from "./photoCrop.js";
+// #ifdef H5
+import { applyCameraTorch } from "./cameraFlash.js";
+// #endif
 
 const api = (method, options = {}) => new Promise((resolve, reject) => uni[method]({ ...options, success: resolve, fail: reject }));
 
@@ -127,7 +131,7 @@ export async function createScanRenderer(instance) {
     // #endif
     check(token);
   }
-  async function uniqueImage(path, prefix, token, extension = "jpg") {
+  async function uniqueImage(path, prefix, token, extension = "jpg", removeInput = true) {
     // #ifdef H5
     if (prefix === "photo-original" && path.startsWith("blob:")) {
       const original = await scanCallback((resolve,reject) => {
@@ -136,7 +140,7 @@ export async function createScanRenderer(instance) {
           reader.onerror = () => reject(new Error("原照片读取失败，请重新选择。")); reader.readAsDataURL(blob);
         }).catch(reject);
       });
-      check(token); remove(path);
+      check(token); if (removeInput) remove(path);
       return original;
     }
     return path;
@@ -151,7 +155,7 @@ export async function createScanRenderer(instance) {
       transient.add(target);
       try { check(token); } catch (error) { remove(target); throw error; }
       return target;
-    } finally { remove(path); }
+    } finally { if (removeInput) remove(path); }
     // #endif
   }
   async function read(path, canvas = work, maxEdge = SCAN_SOURCE_MAX_EDGE) {
@@ -206,6 +210,33 @@ export async function createScanRenderer(instance) {
       throw new Error("扫描图片较大，请缩小拍摄范围后重试。");
     });
   }
+  async function cropOriginal(path, corners) {
+    const token = revision;
+    return serializeImage(async () => {
+      check(token);
+      let img;
+      // #ifdef H5
+      img = new Image();
+      // #endif
+      // #ifdef MP-WEIXIN
+      img = work.createImage();
+      // #endif
+      await scanCallback((resolve,reject) => {
+        img.onload = resolve; img.onerror = () => reject(new Error("原照片读取失败，请重新选择。")); img.src = path;
+      });
+      check(token);
+      const bounds = photoCropBounds(corners, img.width, img.height);
+      work.width = bounds.width; work.height = bounds.height;
+      const ctx = work.getContext("2d");
+      ctx.drawImage(img, bounds.left, bounds.top, bounds.width, bounds.height, 0, 0, bounds.width, bounds.height);
+      await flush(work, token);
+      // PNG is lossless. In particular, do not reuse the old 2400px/1.5MiB
+      // scan export path, which could shrink/recompress this original crop.
+      const url = await uniqueImage(await encode(work, "png"), "photo-crop", token, "png");
+      check(token);
+      return {url, ...bounds};
+    });
+  }
   async function exportPreview(image) {
     if (!shape) throw new Error("当前设备暂不支持成片预览。");
     const token = revision;
@@ -236,7 +267,11 @@ export async function createScanRenderer(instance) {
     corners.forEach((p, i) => ctx[i ? "lineTo" : "moveTo"](rect.left + p.x * rect.width, rect.top + p.y * rect.height));
     ctx.closePath(); ctx.fillStyle = confirmed ? "rgba(0,214,178,0.16)" : "rgba(255,192,80,0.12)"; ctx.fill();
     ctx.strokeStyle = confirmed ? "#00d6b2" : "#ffc050"; ctx.lineWidth = 2; ctx.stroke();
-    return encode(outline, "png");
+    const token = revision;
+    return serializeImage(async () => {
+      check(token);
+      return uniqueImage(await encode(outline, "png"), "outline", token, "png");
+    });
   }
   async function persist(path) {
     // #ifdef H5
@@ -245,7 +280,7 @@ export async function createScanRenderer(instance) {
     // #ifdef MP-WEIXIN
     // The original capture is already a unique byte-for-byte copy owned by
     // this page. Handoff after the whole batch succeeds avoids a second copy.
-    if (transient.has(path) && path.startsWith(`${wx.env.USER_DATA_PATH}/photo-original-`)) return path;
+    if (transient.has(path) && (path.startsWith(`${wx.env.USER_DATA_PATH}/photo-original-`) || path.startsWith(`${wx.env.USER_DATA_PATH}/photo-crop-`))) return path;
     // copyFile preserves the temp preview. saveFile moves it, which would make a
     // partially failed multi-page save impossible to retry after rollback.
     const extension = path.match(/\.(jpe?g|png|webp)(?:\?|$)/i)?.[1]?.toLowerCase() || "jpg";
@@ -258,8 +293,8 @@ export async function createScanRenderer(instance) {
     catch { throw new Error("扫描件保存失败，请检查设备存储后重试。"); }
     // #endif
   }
-  return { read, readAnalysis: path => read(path, work, 1600), exportImage, readPreview: path => read(path, shape, 600), exportPreview, drawOutline, persist, remove,
-    keepOriginal: path => uniqueImage(path, "photo-original", revision, path.match(/\.(jpe?g|png|webp)(?:\?|$)/i)?.[1]?.toLowerCase() || "jpg"),
+  return { read, readAnalysis: path => read(path, work, 1600), cropOriginal, exportImage, readPreview: path => read(path, shape, 600), exportPreview, drawOutline, persist, remove,
+    keepOriginal: path => uniqueImage(path, "photo-original", revision, path.match(/\.(jpe?g|png|webp)(?:\?|$)/i)?.[1]?.toLowerCase() || "jpg", false),
     retain: paths => paths.forEach(path => transient.delete(path)),
     cancelPending() { revision++; jpegQueue = Promise.resolve(); },
     track: path => transient.add(path),
@@ -355,7 +390,7 @@ export async function openBrowserCamera(host, onFrame) {
   // video on a portrait phone. The outline uses the same contain transform.
   video.style.cssText = "width:100%;height:100%;object-fit:contain;display:block";
   video.srcObject = stream; host.appendChild(video);
-  let timer, closed = false;
+  let timer, closed = false, captureMatchesVideo = false;
   const close = () => { closed = true; clearInterval(timer); stream.getTracks().forEach(track => track.stop()); video.srcObject = null; video.remove(); };
   try { await video.play(); }
   catch { close(); throw new Error("相机预览启动失败，请点击重新开启。"); }
@@ -367,25 +402,30 @@ export async function openBrowserCamera(host, onFrame) {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     onFrame(ctx.getImageData(0, 0, canvas.width, canvas.height));
   }, 200);
-  return { close, matchesFrame(width, height) {
+  return { close, async setTorch(enabled) {
+    if (closed) throw new Error("相机已关闭，请重新开启。");
+    await applyCameraTorch(stream.getVideoTracks?.()[0], enabled);
+    if (closed) throw new Error("相机已关闭，请重新开启。");
+  }, matchesFrame(width, height) {
     // Analysis sizes are rounded to whole pixels; allow that sub-pixel aspect
     // error, while rejecting a changed camera orientation or stream format.
-    return width > 0 && height > 0 && Math.abs(width / height - video.videoWidth / video.videoHeight) < .005;
+    return captureMatchesVideo && width > 0 && height > 0 && Math.abs(width / height - video.videoWidth / video.videoHeight) < .005;
   }, async capture() {
     if (closed || !video.videoWidth || video.readyState < 2) throw new Error("相机还未就绪，请稍后重试。");
     const track = stream.getVideoTracks?.()[0];
     if (track && typeof ImageCapture !== "undefined") {
       const blob = await scanCallback((resolve, reject) => new ImageCapture(track).takePhoto().then(resolve,reject), {timeout:6000}).catch(() => null);
       if (closed) throw new Error("拍照已暂停，请重新拍摄。");
-      if (blob) return new Promise((resolve,reject) => {
+      if (blob) { captureMatchesVideo = false; return new Promise((resolve,reject) => {
         const reader = new FileReader(); reader.onload = () => resolve(String(reader.result));
         reader.onerror = () => reject(new Error("照片读取失败，请重新拍摄。")); reader.readAsDataURL(blob);
-      });
+      }); }
     }
     // Browsers without still-photo capture retain the actual video frame at
     // its full dimensions. PNG avoids a lossy JPEG encode of that frame.
     const shot = document.createElement("canvas"); shot.width = video.videoWidth; shot.height = video.videoHeight;
     shot.getContext("2d").drawImage(video, 0, 0);
+    captureMatchesVideo = true;
     return shot.toDataURL("image/png");
   } };
 }
