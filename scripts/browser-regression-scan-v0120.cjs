@@ -6,6 +6,7 @@ const http = require('node:http');
 const { chromium } = require(process.env.WRITINGSTAR_PLAYWRIGHT_MODULE || 'playwright');
 const root = path.resolve(__dirname, '../dist/build/h5');
 const artifactVersion = process.env.WRITINGSTAR_SCAN_ARTIFACT_VERSION || 'v014';
+const artifactDate = process.env.WRITINGSTAR_SCAN_ARTIFACT_DATE || '20261030';
 const types = {'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.svg':'image/svg+xml'};
 const server = http.createServer((req,res) => {
   const file = path.resolve(root, '.' + (new URL(req.url,'http://localhost').pathname === '/' ? '/index.html' : decodeURIComponent(new URL(req.url,'http://localhost').pathname)));
@@ -86,7 +87,7 @@ function stored() {
     await page.waitForTimeout(1800);
     assert.match(await page.locator('.scan-count').innerText(),/^1/,'the same paper must not be captured again');
     assert.equal(await page.locator('#scan-browser-camera video').count(),1,'automatic capture keeps the camera live');
-    await page.screenshot({path:path.resolve(__dirname,`../outputs/${artifactVersion}-scan-auto-20261030.png`)});
+    await page.screenshot({path:path.resolve(__dirname,`../outputs/${artifactVersion}-scan-auto-${artifactDate}.png`)});
     // Removing a page and introducing the next page automatically rearms capture.
     await page.evaluate(()=>window.__capture.present=false);await page.waitForTimeout(1500);
     await page.evaluate(image=>window.__capture.paper=image,images[1]);
@@ -97,7 +98,7 @@ function stored() {
     await page.locator('.scan-side-action').filter({hasText:'已扫描'}).click();
     await button('调整边角').waitFor();
     assert.ok((await page.locator('.scan-result img').getAttribute('src')).startsWith('data:image/jpeg;'));
-    await page.screenshot({path:path.resolve(__dirname,`../outputs/${artifactVersion}-scan-result-20261030.png`)});
+    await page.screenshot({path:path.resolve(__dirname,`../outputs/${artifactVersion}-scan-result-${artifactDate}.png`)});
     // The manual switch stops automatic capture; the shutter still creates a page.
     await button('继续扫描').click();await page.locator('.scan-outline').waitFor();
     await page.locator('.scan-mode-toggle').click();assert.match(await page.locator('.scan-mode-toggle').innerText(),/已关闭/);

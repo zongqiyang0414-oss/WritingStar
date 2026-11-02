@@ -70,6 +70,25 @@ export function projectiveMap(q) {
     };
   };
 }
+
+// Recover the metric of a rectangular sheet, rather than using foreshortened
+// edge lengths. Assume square camera pixels and a principal point at the image
+// centre. Orthogonal vanishing directions determine focal length when possible;
+// a conservative camera estimate covers an almost affine/one-axis view.
+export function documentAspectRatio(points, imageWidth, imageHeight) {
+  const m = projectiveCoefficients(points), cx = (imageWidth - 1) / 2, cy = (imageHeight - 1) / 2;
+  const ax = m.xx - cx * m.g, ay = m.yx - cy * m.g;
+  const bx = m.xy - cx * m.h, by = m.yy - cy * m.h;
+  const edge = Math.max(imageWidth, imageHeight);
+  let focalSquared = edge * edge;
+  if (Math.abs(m.g * m.h) > 1e-7) {
+    const estimated = -(ax * bx + ay * by) / (m.g * m.h);
+    if (estimated >= (edge * .35) ** 2 && estimated <= (edge * 5) ** 2) focalSquared = estimated;
+  }
+  const ratio = Math.sqrt((ax * ax + ay * ay + focalSquared * m.g * m.g)
+    / (bx * bx + by * by + focalSquared * m.h * m.h));
+  return clamp(ratio, .2, 5);
+}
 export function fitRect(width, height, boxWidth, boxHeight, cover = false) {
   const scale = (cover ? Math.max : Math.min)(boxWidth / width, boxHeight / height);
   return { width: width * scale, height: height * scale, left: (boxWidth - width * scale) / 2, top: (boxHeight - height * scale) / 2 };

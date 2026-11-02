@@ -2,8 +2,8 @@
   "name": "写字星交互原型",
   "appid": "",
   "description": "写字星教师、学生与学校管理前端原型",
-  "versionName": "0.16.0",
-  "versionCode": 160,
+  "versionName": "0.17.0",
+  "versionCode": 170,
   "transformPx": false,
   "h5": {
     "title": "写字星",
@@ -12,6 +12,7 @@
     }
   },
   "mp-weixin": {
+    "workers": "workers",
     "appid": "wxe3fefef9eaab17c3",
     "setting": {
       "urlCheck": true

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, getCurrentInstance, nextTick, ref, shallowRef, watch } from "vue";
 import { onHide, onLoad, onReady, onResize, onShow, onUnload } from "@dcloudio/uni-app";
-import { processScanPixels } from "../../platform/scanProcessing.js";
+import { createScanProcessor } from "../../platform/scanProcessor.js";
 import ScanImageViewer from "../../components/ScanImageViewer.vue";
 import { LivePaperDetector, selectCaptureDetection } from "../../platform/paperScanCapture.js";
 import { AutoScanGate } from "../../platform/autoScan.js";
@@ -21,6 +21,9 @@ const outlineUrl = ref(""), progress = ref(0), waiting = ref(false), pages = sha
 const paperBatch = ref(false);
 const importQueue = shallowRef([]), importStatus = ref(""), processingStage = ref("");
 const pending = shallowRef(null), corners = ref([]), stage = ref({ width: 300, height: 400, left: 0, top: 0 });
+const ratioIndex = ref(0);
+const ratioOptions = ["自动估算", "A4 / A5 竖版", "A4 / A5 横版", "正方形"];
+const ratioValues = [0, 210 / 297, 297 / 210, 1];
 const captureFlight = shallowRef(null), thumbnailPulse = ref(false);
 const flightStyle = computed(() => {
   const flight = captureFlight.value;
@@ -34,6 +37,7 @@ const processingText = computed(() => [importStatus.value, processingStage.value
 const frameText = computed(() => busy.value ? processingText.value : full.value ? "本次页数已满，请检查后完成" : waiting.value && automatic.value ? "本页已扫描，请移开后放入下一张" : notice.value);
 const gate = new AutoScanGate();
 const liveDetector = new LivePaperDetector();
+const processor = createScanProcessor();
 const initialized = ref(false), delivered = ref(false);
 let renderer, rendererPromise, nativeContext, browserCamera, stopFrames, channel, foreground = true, disposed = false, resumePicker;
 let epoch = 0, lastFrame = 0, drawing = false, lastDetection = null, dragging = -1, replacing = -1, choosing = false;
@@ -61,7 +65,7 @@ onResize(async () => { cancelCaptureFeedback(); await nextTick(); if (!disposed)
 watch([mode, error, () => pages.value.length, waiting], async () => { await nextTick(); if (!disposed) await measure(); });
 onHide(() => { foreground = false; releaseCamera(); });
 onUnload(() => {
-  disposed = true; resumePicker?.(); releaseCamera(); renderer?.dispose();
+  disposed = true; resumePicker?.(); releaseCamera(); processor.dispose(); renderer?.dispose();
 });
 
 function measure() {
@@ -75,6 +79,7 @@ function clearOutline() {
   if (old) renderer?.remove(old);
 }
 function releaseCamera() {
+  processor.cancel();
   cancelCaptureFeedback();
   epoch++; stopFrames?.(); stopFrames = null; browserCamera?.close(); browserCamera = null;
   nativeContext = null; cameraMounted.value = false; cameraReady.value = false; starting.value = false;
@@ -194,7 +199,7 @@ async function privacyContract() {
   try { await openScanPrivacyContract(); }
   catch (failure) { showFailure(failure); }
 }
-function copyError() { uni.setClipboardData({ data: `写字星 v0.14.0 扫描
+function copyError() { uni.setClipboardData({ data: `写字星 v0.17.0 扫描
 ${error.value}
 ${errorDetail.value}`, fail: () => uni.showModal({ title: "请长按复制错误详情", showCancel: false,
   content: errorDetail.value || error.value }) }); }
@@ -313,14 +318,14 @@ async function processSource(source, fromAutomatic, token, fromImport = false, p
   if (token !== epoch || disposed || !foreground) return;
   if (!fromImport && (!fromAutomatic || full.value)) { busy.value = false; reviewPage(selected.value); }
 }
-async function makePage(source, image, quad, token) {
+async function makePage(source, image, quad, token, aspectRatio = 0) {
   const cancelled = () => disposed || token !== epoch || !foreground;
-  const { image: enhanced, code } = await processScanPixels(image, quad, { cancelled, readCode: paperBatch.value,
+  const { image: enhanced, code } = await processor.process(image, quad, { cancelled, aspectRatio, readCode: paperBatch.value,
     onStage: text => { if (!cancelled()) processingStage.value = text; } });
   processingStage.value = "正在生成扫描件…";
   const url = await renderer.exportImage(enhanced);
   if (cancelled()) { renderer.remove(url); throw new Error("扫描已暂停，请重试。"); }
-  return { source, code, width: image.width, height: image.height, previewWidth: enhanced.width, previewHeight: enhanced.height, corners: quad.map(p => ({ ...p })),
+  return { source, code, aspectRatio, width: image.width, height: image.height, previewWidth: enhanced.width, previewHeight: enhanced.height, corners: quad.map(p => ({ ...p })),
     photo: { id: `scan-${Date.now()}-${Math.random().toString(36).slice(2)}`, url, name: "作业扫描件.jpg", sample: false } };
 }
 async function importPage(sourceType = "album") {
@@ -365,6 +370,7 @@ function reviewPage(index) {
 }
 async function editSource(entry, index) {
   releaseCamera(); replacing = index; pending.value = entry; mode.value = "corners";
+  ratioIndex.value = Math.max(0, ratioValues.indexOf(entry.aspectRatio || 0));
   corners.value = entry.corners?.map(p => ({ ...p })) || [{ x: 0.06, y: 0.06 }, { x: 0.94, y: 0.06 }, { x: 0.94, y: 0.94 }, { x: 0.06, y: 0.94 }];
   await nextTick(); await measure();
 }
@@ -385,7 +391,7 @@ async function confirmCorners() {
   busy.value = true; error.value = ""; const token = epoch;
   try {
     const source = pending.value.source, image = await renderer.read(source);
-    const output = await makePage(source, image, corners.value, token);
+    const output = await makePage(source, image, corners.value, token, ratioValues[ratioIndex.value]);
     const updated = [...pages.value];
     if (replacing >= 0) { renderer.remove(updated[replacing].photo.url); updated[replacing] = output; selected.value = replacing; }
     else { updated.push(output); selected.value = updated.length - 1; }
@@ -514,10 +520,13 @@ function leave() {
       </template>
       <template v-else-if="mode === 'review'">
         <view class="scan-pagination"><button :disabled="busy || selected === 0" @click="selected--">‹ 上一页</button><text>{{ selected + 1 }} / {{ pages.length }}</text><button :disabled="busy || selected >= pages.length - 1" @click="selected++">下一页 ›</button></view>
-        <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy" @click="editSource(current, selected)">调整边角</button><button class="scan-secondary" :disabled="busy" @click="removePage">删除此页</button></view>
+        <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy" @click="editSource(current, selected)">调整边角与比例</button><button class="scan-secondary" :disabled="busy" @click="removePage">删除此页</button></view>
         <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy || full" @click="startCamera">继续扫描</button><button class="scan-primary" :disabled="busy || delivered" @click="finish">完成 {{ pages.length }} 页</button></view>
       </template>
       <template v-else>
+        <picker class="scan-ratio-picker" :range="ratioOptions" :value="ratioIndex" :disabled="busy" @change="ratioIndex = Number($event.detail.value)">
+          <view>纸张比例：{{ ratioOptions[ratioIndex] }} <text>更改 ›</text></view>
+        </picker>
         <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy" @click="cancelCorners">{{ importQueue.length ? '跳过此张' : '取消调整' }}</button><button class="scan-primary" :disabled="busy" @click="confirmCorners">确认并处理</button></view>
       </template>
     </view>
@@ -581,6 +590,8 @@ function leave() {
 .scan-pagination button { color: #e4eee8; background: transparent; font-size: 12px; margin: 0; padding: 6px 0; }
 .scan-review-actions { display: flex; gap: 10px; margin-top: 10px; }
 .scan-review-actions button { flex: 1; }
+.scan-ratio-picker { padding: 9px 0; font-size: 13px; color: #e6f5ee; }
+.scan-ratio-picker text { margin-left: 8px; color: #6ee2c1; }
 .scan-edit-edge { position: absolute; height: 2px; transform-origin: left center; background: #00efb9; pointer-events: none; }
 .scan-corner { position: absolute; width: 36px; height: 36px; margin-left: -18px; margin-top: -18px; border-radius: 50%; border: 2px solid #fff; background: #008e71; color: #fff; font-size: 14px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 9px #0008; touch-action: none; }
 .scan-hidden-canvas { position: fixed; left: -5000px; top: -5000px; width: 2px; height: 2px; pointer-events: none; }

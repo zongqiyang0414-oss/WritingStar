@@ -8,7 +8,7 @@ function checkCancelled(cancelled) { if (cancelled()) throw new Error("扫描已
 // White-document Retinex: estimate the illumination/colour of the paper,
 // then recover reflectance in each channel. Ink is excluded from the estimate;
 // no OCR, generated pixels, binary threshold or global greyscale conversion.
-export async function enhanceDocument(image, cancelled = () => false) {
+export async function enhanceDocument(image, cancelled = () => false, { cooperative = true } = {}) {
   const { width, height, data } = image;
   if (!width || !height || !data || data.length < width * height * 4) throw new Error("无法读取扫描图片，请重新选择。");
   checkCancelled(cancelled);
@@ -21,7 +21,7 @@ export async function enhanceDocument(image, cancelled = () => false) {
   const stride = Math.max(1, Math.floor(cell / 8));
   let yieldAt = clock() + 10;
   for (let cy = 0; cy < rows; cy++) {
-    if (clock() >= yieldAt) { checkCancelled(cancelled); await nextTick(); yieldAt = clock() + 10; }
+    if (cooperative && clock() >= yieldAt) { checkCancelled(cancelled); await nextTick(); yieldAt = clock() + 10; }
     for (let cx = 0; cx < columns; cx++) {
       histogram.fill(0);
       const x0 = cx * cell, x1 = Math.min(width, x0 + cell), y0 = cy * cell, y1 = Math.min(height, y0 + cell);
@@ -85,7 +85,7 @@ export async function enhanceDocument(image, cancelled = () => false) {
       if (!touchesFrame && tail >= 2 && tail < size * .12 && boundary && inside / tail < outside / boundary * .82)
         for (let n = 0; n < tail; n++) reliable[queue[n]] = 0;
     }
-    if (clock() >= yieldAt) { checkCancelled(cancelled); await nextTick(); yieldAt = clock() + 10; }
+    if (cooperative && clock() >= yieldAt) { checkCancelled(cancelled); await nextTick(); yieldAt = clock() + 10; }
   }
   // Propagate paper through excluded foreground cells; each pass only reads
   // the preceding pass. Broad coloured artwork therefore keeps its colour,
@@ -94,7 +94,7 @@ export async function enhanceDocument(image, cancelled = () => false) {
     const available = reliable.slice();
     let missing = 0;
     for (let y = 0; y < rows; y++) {
-      if (clock() >= yieldAt) { checkCancelled(cancelled); await nextTick(); yieldAt = clock() + 10; }
+      if (cooperative && clock() >= yieldAt) { checkCancelled(cancelled); await nextTick(); yieldAt = clock() + 10; }
       for (let x = 0; x < columns; x++) {
         const i = y * columns + x;
         if (available[i]) continue;
@@ -126,7 +126,7 @@ export async function enhanceDocument(image, cancelled = () => false) {
     dilated[y * columns + x] = value;
   }
   for (let y = 0; y < rows; y++) {
-    if (clock() >= yieldAt) { checkCancelled(cancelled); await nextTick(); yieldAt = clock() + 10; }
+    if (cooperative && clock() >= yieldAt) { checkCancelled(cancelled); await nextTick(); yieldAt = clock() + 10; }
     for (let x = 0; x < columns; x++) {
       let value = 255;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++)
@@ -145,31 +145,42 @@ export async function enhanceDocument(image, cancelled = () => false) {
   const tone = new Uint8ClampedArray(1025);
   for (let i = 0; i <= 1024; i++) tone[i] = 255 * Math.pow(clamp((i / 1024 - .012) / .98), 1.12);
   const fields = [red, green, blue], floors = [wr * .28, wg * .28, wb * .28];
+  // Horizontal interpolation changes only at a lighting-grid row boundary.
+  // Cache two RGB rows instead of doing twelve field reads per output pixel.
+  let cachedRow = -1;
+  const upper = fields.map(() => new Float32Array(width)), lower = fields.map(() => new Float32Array(width));
   for (let y = 0; y < height; y++) {
-    if (y % 8 === 0 && clock() >= yieldAt) { checkCancelled(cancelled); await nextTick(); yieldAt = clock() + 10; }
+    if (cooperative && y % 8 === 0 && clock() >= yieldAt) { checkCancelled(cancelled); await nextTick(); yieldAt = clock() + 10; }
     const gy = clamp((y + .5) / cell - .5, 0, rows - 1), iy = Math.floor(gy), dy = gy - iy;
     const top = iy * columns, bottom = Math.min(iy + 1, rows - 1) * columns;
-    for (let x = 0; x < width; x++) {
-      const dx = mix[x], a = (1 - dx) * (1 - dy), b = dx * (1 - dy), c = (1 - dx) * dy, d = dx * dy;
-      const i = (y * width + x) * 4;
-      for (let channel = 0; channel < 3; channel++) {
-        const field = fields[channel];
-        const paper = Math.max(floors[channel], field[top + left[x]] * a + field[top + right[x]] * b + field[bottom + left[x]] * c + field[bottom + right[x]] * d);
-        data[i + channel] = tone[Math.min(1024, Math.round(data[i + channel] / paper * 1024))];
+    if (cachedRow !== iy) {
+      for (let channel = 0; channel < 3; channel++) for (let x = 0; x < width; x++) {
+        const field = fields[channel], dx = mix[x];
+        upper[channel][x] = field[top + left[x]] * (1 - dx) + field[top + right[x]] * dx;
+        lower[channel][x] = field[bottom + left[x]] * (1 - dx) + field[bottom + right[x]] * dx;
       }
+      cachedRow = iy;
+    }
+    const ur = upper[0], ug = upper[1], ub = upper[2], lr = lower[0], lg = lower[1], lb = lower[2];
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      data[i] = tone[Math.min(1024, Math.round(data[i] / Math.max(floors[0], ur[x] + (lr[x] - ur[x]) * dy) * 1024))];
+      data[i + 1] = tone[Math.min(1024, Math.round(data[i + 1] / Math.max(floors[1], ug[x] + (lg[x] - ug[x]) * dy) * 1024))];
+      data[i + 2] = tone[Math.min(1024, Math.round(data[i + 2] / Math.max(floors[2], ub[x] + (lb[x] - ub[x]) * dy) * 1024))];
     }
   }
   // Conservative edge restoration in the reflectance image. Three original
   // rows prevent feedback from previously sharpened pixels; connected dark
   // strokes get sharper without sharpening isolated bright-paper sensor noise.
   let previous = new Uint8ClampedArray(width * 4), current = data.slice(0, width * 4), next = data.slice(width * 4, width * 8);
+  const fillLight = (pixels, values) => { for (let x = 0; x < width; x++) values[x] = luminance(pixels[x * 4], pixels[x * 4 + 1], pixels[x * 4 + 2]); };
+  let previousLight = new Float32Array(width), currentLight = new Float32Array(width), nextLight = new Float32Array(width);
+  fillLight(current, currentLight); fillLight(next, nextLight);
   for (let y = 0; y < height; y++) {
-    if (y % 8 === 0 && clock() >= yieldAt) { checkCancelled(cancelled); await nextTick(); yieldAt = clock() + 10; }
+    if (cooperative && y % 8 === 0 && clock() >= yieldAt) { checkCancelled(cancelled); await nextTick(); yieldAt = clock() + 10; }
     if (y > 0 && y < height - 1) for (let x = 1; x < width - 1; x++) {
       const i = x * 4;
-      const value = luminance(current[i], current[i + 1], current[i + 2]);
-      const l = luminance(current[i - 4], current[i - 3], current[i - 2]), r = luminance(current[i + 4], current[i + 5], current[i + 6]);
-      const u = luminance(previous[i], previous[i + 1], previous[i + 2]), d = luminance(next[i], next[i + 1], next[i + 2]);
+      const value = currentLight[x], l = currentLight[x - 1], r = currentLight[x + 1], u = previousLight[x], d = nextLight[x];
       const average = (l + r + u + d) / 4;
       if (value >= average || Math.min(Math.abs(l - value), Math.abs(r - value), Math.abs(u - value), Math.abs(d - value)) >= 12) continue;
       const darken = Math.min(14, (average - value) * .3), gain = Math.max(0, value - darken) / Math.max(1, value);
@@ -177,7 +188,8 @@ export async function enhanceDocument(image, cancelled = () => false) {
       data[target] = current[i] * gain; data[target + 1] = current[i + 1] * gain; data[target + 2] = current[i + 2] * gain;
     }
     const spare = previous; previous = current; current = next; next = spare;
-    if (y + 2 < height) next.set(data.subarray((y + 2) * width * 4, (y + 3) * width * 4));
+    const spareLight = previousLight; previousLight = currentLight; currentLight = nextLight; nextLight = spareLight;
+    if (y + 2 < height) { next.set(data.subarray((y + 2) * width * 4, (y + 3) * width * 4)); fillLight(next, nextLight); }
   }
   checkCancelled(cancelled);
   return image;

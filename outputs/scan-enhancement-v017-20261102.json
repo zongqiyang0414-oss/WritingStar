@@ -1,0 +1,12 @@
+{
+  "baseline": "2285efe (v0.16.0)",
+  "version": "0.17.0",
+  "dimensions": [
+    1272,
+    1800
+  ],
+  "scope": "Development-host enhancement only; one warmup and median of three; excludes capture, detection, rectify, worker transfer, JPEG and device runtime. Not a phone timing.",
+  "oldMedianMs": 122.14,
+  "newMedianMs": 92.48,
+  "maxChannelDifference": 0
+}

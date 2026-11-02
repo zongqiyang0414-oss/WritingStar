@@ -1,13 +1,13 @@
 {
   "name": "writingstar",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "scripts": {
     "build:h5": "uni build",
     "test": "node --import tsx --test --test-isolation=none tests/*.test.ts",
     "type-check": "vue-tsc --noEmit",
     "dev:h5": "uni --host 127.0.0.1 --port 5173",
     "dev": "uni --host 127.0.0.1 --port 5173",
-    "build:mp-weixin": "uni build -p mp-weixin && node scripts/prepare-weixin-preview.mjs && node scripts/verify-weixin-styles.mjs && node scripts/verify-weixin-state.cjs && node scripts/verify-weixin-scan.cjs",
+    "build:mp-weixin": "uni build -p mp-weixin && node scripts/build-scan-worker.mjs && node scripts/prepare-weixin-preview.mjs && node scripts/verify-weixin-styles.mjs && node scripts/verify-weixin-state.cjs && node scripts/verify-weixin-scan.cjs && node scripts/verify-scan-worker.cjs",
     "dev:preview": "npm run dev",
     "test:preview": "node --test --test-isolation=none scripts/preview-regression-v091.cjs",
     "verify:preview": "node scripts/verify-preview.mjs",

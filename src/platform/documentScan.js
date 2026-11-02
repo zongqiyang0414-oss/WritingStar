@@ -1,4 +1,4 @@
-import { clamp, convexHull, hullToQuad, orderQuad, polygonArea, validQuad, projectiveMap, projectiveCoefficients, distance } from "./scanGeometry.js";
+import { clamp, convexHull, hullToQuad, orderQuad, polygonArea, validQuad, projectiveMap, projectiveCoefficients, distance, documentAspectRatio } from "./scanGeometry.js";
 import { documentAppearance, hasInternalMaterialBoundary } from "./documentSurface.js";
 
 const luminance = (data, i) => (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
@@ -249,20 +249,23 @@ const nextTick = () => new Promise(resolve => setTimeout(resolve, 0));
 const clock = () => typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
 function checkCancelled(cancelled) { if (cancelled()) throw new Error("扫描已暂停，请重试。"); }
 
-export async function rectifyDocument(image, corners, { maxEdge = 1800, cancelled = () => false } = {}) {
+export async function rectifyDocument(image, corners, { maxEdge = 1800, aspectRatio = 0, cancelled = () => false, cooperative = true } = {}) {
   if (!validQuad(corners)) throw new Error("请按顺序框住纸张四角，边线不能交叉。");
   const sourcePoints = corners.map(p => ({ x: p.x * (image.width - 1), y: p.y * (image.height - 1) }));
   const w = Math.max(distance(sourcePoints[0], sourcePoints[1]), distance(sourcePoints[2], sourcePoints[3]));
   const h = Math.max(distance(sourcePoints[0], sourcePoints[3]), distance(sourcePoints[1], sourcePoints[2]));
-  const scale = Math.min(1, maxEdge / Math.max(w, h));
-  const width = Math.max(2, Math.round(w * scale)), height = Math.max(2, Math.round(h * scale));
+  const ratio = Number.isFinite(aspectRatio) && aspectRatio >= .2 && aspectRatio <= 5
+    ? aspectRatio : documentAspectRatio(sourcePoints, image.width, image.height);
+  const longEdge = Math.min(maxEdge, Math.max(w, h));
+  const width = Math.max(2, Math.round(longEdge * Math.min(1, ratio)));
+  const height = Math.max(2, Math.round(longEdge * Math.min(1, 1 / ratio)));
   const m = projectiveCoefficients(sourcePoints), data = new Uint8ClampedArray(width * height * 4);
   const step = 1 / (width - 1), stepX = m.xx * step, stepY = m.yx * step, stepD = m.g * step;
   const source = image.data, maxX = image.width - 1, maxY = image.height - 1;
   let yieldAt = clock() + 10;
   checkCancelled(cancelled);
   for (let y = 0; y < height; y++) {
-    if (y % 16 === 0 && clock() >= yieldAt) { checkCancelled(cancelled); await nextTick(); yieldAt = clock() + 10; }
+    if (cooperative && y % 16 === 0 && clock() >= yieldAt) { checkCancelled(cancelled); await nextTick(); yieldAt = clock() + 10; }
     const v = y / (height - 1);
     let numX = m.xy * v + m.x0, numY = m.yy * v + m.y0, denominator = m.h * v + 1;
     for (let x = 0; x < width; x++) {
