@@ -11,7 +11,7 @@ export const AI_RETRYABLE = ["failed", "unavailable"];
 export const AI_LABELS = {
   notStarted: "待AI批阅", queued: "排队中", reading: "识别作品中",
   reviewing: "双写分析中", completed: "AI已完成", failed: "批阅失败",
-  unavailable: "AI服务暂不可用", cancelled: "已转老师批阅", missing: "未提交", published: "老师已审核",
+  unavailable: "AI服务暂不可用", cancelled: "已转老师批阅", missing: "未提交", published: "教师已完成批阅",
 };
 
 export const AI_STUDENT_RETRY_LIMIT = 2;
@@ -202,7 +202,7 @@ export class AiReviewService extends AdministrationService {
   }
   async startAiReview(submissionId, role, fail = false) {
     const submission = this.authorizeAiSubmission(submissionId, role);
-    if (submission.status === "published") throw new Error("老师已完成审核，本轮不再重复AI批阅。");
+    if (submission.status === "published") throw new Error(role === "student" ? "教师已完成批阅，本轮不再重复AI批阅。" : "老师已完成审核，本轮不再重复AI批阅。");
     if (this.latest(submission.assignmentId, submission.studentId)?.id !== submission.id)
       throw new Error("请对最新提交的作品进行AI批阅。");
     if (submission.aiReview && (AI_RUNNING.includes(submission.aiReview.state) || submission.aiReview.state === "completed"))

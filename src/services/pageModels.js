@@ -135,7 +135,7 @@ export function studentGrowthModel(
       trend: history.map((submission) => ({
         id: submission.id,
         label: submission.assignment.title,
-        note: submission.published ? "已审核成绩" : "待审核成绩",
+        note: audience === "learner" ? (submission.published ? "已批阅成绩" : "等待教师反馈") : submission.published ? "已审核成绩" : "待审核成绩",
         detail: `提交：${formatDate(submission.submittedAt, true)}`,
         handwriting: submission.handwriting,
         composition: submission.composition,

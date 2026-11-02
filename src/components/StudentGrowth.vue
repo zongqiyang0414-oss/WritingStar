@@ -2,6 +2,7 @@
 import ScoreTrend from "./ScoreTrend.vue";
 import { computed } from "vue";
 import { taskStatus } from "../services/school.js";
+import { studentSubmissionLabel } from "../services/studentWorkspace.js";
 
 const props = defineProps({
   model: {},
@@ -92,7 +93,7 @@ function formatSubmittedAt(e) {
             {{ item1.assignment.title }}
           </view>
           <text :class="['badge', item1.published ? 'green' : 'amber']">
-            {{ taskStatus(item1) }}
+            {{ audience === 'learner' ? studentSubmissionLabel(item1) : taskStatus(item1) }}
           </text>
         </view>
         <view class="small subtle attempt-date">
@@ -126,7 +127,7 @@ function formatSubmittedAt(e) {
           </template>
           <template v-else>
             <view :key="1" class="tiny subtle spaced-small">
-              老师尚未完成审核，本轮暂不显示成绩。
+              教师批阅中，本轮暂不显示成绩。
             </view>
           </template>
         </template>
@@ -137,7 +138,7 @@ function formatSubmittedAt(e) {
       <view :key="1" class="empty-state card"> 这位学生还没有提交作品。 </view>
     </template>
     <view class="small subtle statistics-note">
-      每份作业只显示最新提交的成绩；最新作品待审核时暂不计入均分。
+      每份作业只显示最新提交的成绩；最新作品等待教师反馈时暂不计入均分。
     </view>
   </template>
 </template>

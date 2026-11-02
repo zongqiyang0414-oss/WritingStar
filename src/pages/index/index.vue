@@ -2,6 +2,7 @@
 import WorkViewer from "../../components/WorkViewer.vue";
 import AssignmentComposer from "../../components/AssignmentComposer.vue";
 import SlideDownPanel from "../../components/SlideDownPanel.vue";
+import StudentNotifications from "../../components/StudentNotifications.vue";
 import SubmissionRecords from "../../components/SubmissionRecords.vue";
 import ClassSelector from "../../components/ClassSelector.vue";
 import ClassStatistics from "../../components/ClassStatistics.vue";
@@ -138,7 +139,14 @@ const { bottomInset: bottomInset } = {
     currentClass: currentClass,
     classStudents: classStudents,
     visibleAssignments: visibleAssignments,
-    newAssignment,
+    learnerNotifications,
+    openStudentNotification,
+    openNotifications,
+    studentTaskFilter,
+    studentTaskRows,
+    studentTaskCategories,
+    studentTaskLabel,
+    studentTaskBadge,
     ongoingAssignments: ongoingAssignments,
     closedAssignments: closedAssignments,
     workCounts: workCounts,
@@ -215,7 +223,7 @@ function toggleFeedbackDimension(id) {
       </view>
       <view class="intro-foot">
         <text class="tiny-dot" />
-        原型展示 · v0.18.0
+        原型展示 · v0.19.0
       </view>
     </view>
     <!-- #endif -->
@@ -332,6 +340,9 @@ function toggleFeedbackDimension(id) {
                 @help="bindingHelp"
                 v-model:code="inviteCode"
               />
+            </template>
+            <template v-else-if="!isTeacher && screen === 'notifications'">
+              <StudentNotifications :notifications="learnerNotifications" :busy="busy" @open="openStudentNotification" />
             </template>
             <template v-else-if="screen === 'excellentWorks' || screen === 'excellentWork'">
               <ExcellentWorks
@@ -488,19 +499,15 @@ function toggleFeedbackDimension(id) {
                     </view>
                     <template v-if="boundStudent?.archived">
                       <view :key="0" class="notice">
-                        当前学生已不在班级，作品与已审核反馈保留。请联系学校管理员核对。
+                        当前学生已不在班级，作品与教师反馈保留。请联系学校管理员核对。
                       </view>
                     </template>
-                    <button v-if="newAssignment" class="new-assignment-entry card" :disabled="busy" @click="openAssignment(newAssignment)">
-                      <view><view class="strong">有新作业，去看看</view><view class="small subtle">{{ newAssignment.title }}</view></view>
-                      <text class="new-assignment-entry-mark">›</text>
-                    </button>
-                    <view v-else class="notice">暂时没有新的待提交作业，有新作业时可在这里一键查看详情。</view>
+                    <StudentNotifications compact :notifications="learnerNotifications" :busy="busy" @open="openStudentNotification" @all="openNotifications" />
                     <view class="section-heading">
                       <view class="section-title">
                         我的双写任务
                         <text class="count-label">
-                          {{ visibleAssignments.length }}
+                          {{ studentTaskRows.length }}
                         </text>
                       </view>
                     </view>
@@ -510,6 +517,9 @@ function toggleFeedbackDimension(id) {
                     <view class="grow"><view class="strong">班级优秀作业</view><view class="tiny subtle">{{ classExcellentWorks.length }} 份作品 · 一起学习好方法</view></view>
                     <button class="text-button" :disabled="busy" @click="openExcellentWorks()">去看看 ›</button>
                   </view>
+                  <view v-if="!isTeacher" class="student-task-tabs" aria-label="作业分类">
+                    <button v-for="item in studentTaskCategories" :key="item.id" :class="['student-task-tab', { active: studentTaskFilter === item.id }]" :disabled="busy" :aria-pressed="studentTaskFilter === item.id" @click="studentTaskFilter = item.id"><text>{{ item.label }}</text><text class="student-task-tab-count">{{ item.count }}</text></button>
+                  </view>
                   <template v-for="item2 in visibleAssignments" :key="item2.id">
                     <view class="assignment-card card">
                       <view class="card-top">
@@ -517,7 +527,7 @@ function toggleFeedbackDimension(id) {
                           <text class="task-icon"> 文 </text>
                           <text> 作文双评 </text>
                         </view>
-                        <template v-if="expired(item2)">
+                        <template v-if="isTeacher && expired(item2)">
                           <text :key="0" class="badge neutral"> 已截止 </text>
                         </template>
                         <template v-else>
@@ -525,21 +535,7 @@ function toggleFeedbackDimension(id) {
                             <text :key="2" class="badge green"> 进行中 </text>
                           </template>
                           <template v-else>
-                            <text
-                              :key="1"
-                              :class="[
-                                'badge',
-                                statusClass(
-                                  latest(item2.id, boundStudent?.id || ''),
-                                ),
-                              ]"
-                            >
-                              {{
-                                statusLabel(
-                                  latest(item2.id, boundStudent?.id || ""),
-                                )
-                              }}
-                            </text>
+                            <text :class="['badge', studentTaskBadge(item2)]">{{ studentTaskLabel(item2) }}</text>
                           </template>
                         </template>
                       </view>
@@ -597,13 +593,9 @@ function toggleFeedbackDimension(id) {
                           "
                         >
                           {{
-                            isTeacher ||
-                            "published" !==
-                              latest(item2.id, boundStudent?.id || "")?.status
-                              ? isTeacher
-                                ? "查看详情"
-                                : "查看任务"
-                              : "查看反馈"
+                            isTeacher ? "查看详情"
+                              : canResubmit(latest(item2.id, boundStudent?.id || "")) ? "重新提交"
+                              : latest(item2.id, boundStudent?.id || "")?.status === "published" ? "查看反馈" : "查看任务"
                           }}
                           <text> </text>
                         </button>
@@ -618,7 +610,7 @@ function toggleFeedbackDimension(id) {
                           ? "ongoing" === assignmentPeriod
                             ? "本班暂时没有进行中的作业。"
                             : "本班暂无已完成的作业。"
-                          : "老师还没有布置作业。"
+                          : "此分类下暂无作业。"
                       }}
                     </view>
                   </template>
@@ -830,7 +822,7 @@ function toggleFeedbackDimension(id) {
                               </template>
                             </template>
                             <template v-else>
-                              <view v-if="mine" class="card ai-student-entry"><view class="ai-entry-heading"><view class="ai-entry-symbol">✧</view><view class="grow"><view class="section-title">我的AI批阅</view><view class="tiny subtle">{{ aiStateLabel(mine) }}</view></view><button class="text-button" :disabled="busy" @click="openAiReview(mine)">{{ mine.aiReview?.result ? '查看建议' : '查看进度' }} ›</button></view><view class="small subtle spaced-small">AI学习建议可以先看，老师完成审核后即可查看正式反馈。</view></view>
+                              <view v-if="mine" class="card ai-student-entry"><view class="ai-entry-heading"><view class="ai-entry-symbol">✧</view><view class="grow"><view class="section-title">我的AI批阅</view><view class="tiny subtle">{{ aiStateLabel(mine) }}</view></view><button class="text-button" :disabled="busy" @click="openAiReview(mine)">{{ mine.aiReview?.result ? '查看建议' : '查看进度' }} ›</button></view><view class="small subtle spaced-small">AI学习建议可以先看，教师批阅完成后即可查看正式反馈。</view></view>
                               <view class="section-heading">
                                 <view class="section-title"> 我的提交 </view>
                                 <text class="small subtle">
@@ -861,12 +853,12 @@ function toggleFeedbackDimension(id) {
                                       canResubmit(mine)
                                         ? "老师已同意重新提交一次。请核对照片后提交，成功后将以这次作品为准。"
                                         : "published" === mine.status
-                                        ? "老师已完成审核，可查看反馈。作品已锁定。"
+                                        ? "教师已完成批阅，可查看反馈。作品已锁定。"
                                         : "failed" === mine.status
-                                          ? "作品已保留，系统会自动重试。仍未完成时可用原图再次分析或报告管理员。"
+                                          ? "作品已保留。AI批阅失败时可在批阅进度页用原图重试；教师批阅完成后可查看反馈。"
                                           : "processing" === mine.status
                                             ? "作品已接收，正在处理。你可以稍后回来查看。"
-                                            : "作品已提交，可先查看AI学习建议；老师完成审核后即可查看正式反馈。"
+                                            : "作品已提交，可先查看AI学习建议；教师批阅完成后即可查看正式反馈。"
                                     }}
                                   </view>
                                   <template v-if="'published' === mine.status">
@@ -1013,7 +1005,7 @@ function toggleFeedbackDimension(id) {
                             <template v-if="'submit' === screen">
                               <view :key="9">
                                 <view class="submit-intro"><view class="detail-title">{{ selectedAssignment.title }}</view></view>
-                                <view class="ai-submit-preview"><view class="ai-entry-symbol">✧</view><view class="grow"><view class="strong">提交后，开始AI双写批阅</view><view class="tiny subtle">识别作品 → 分析书写与写作 → 生成学习建议</view><view class="tiny subtle spaced-small">你可以先看AI建议，老师完成审核后即可查看正式反馈。</view></view></view>
+                                <view class="ai-submit-preview"><view class="ai-entry-symbol">✧</view><view class="grow"><view class="strong">提交后，开始AI双写批阅</view><view class="tiny subtle">识别作品 → 分析书写与写作 → 生成学习建议</view><view class="tiny subtle spaced-small">你可以先看AI建议，教师批阅完成后即可查看正式反馈。</view></view></view>
                                 <view v-if="photos.length && photos.every(photo => photo.sample)" class="small subtle spaced-small">已预置示例作品，可直接提交体验。AI评分会标注“示例结果”；自选照片不会套用示例分数。</view>
                                 <view class="upload-area">
                                   <view class="upload-icon"> ＋ </view>
@@ -1131,7 +1123,7 @@ function toggleFeedbackDimension(id) {
                                     <view v-if="isTeacher" class="card homework-actions homework-selection-bar"><text class="small subtle">{{ selectedSubmission.excellent ? '★ 优秀作业 · 全班可参考' : '分享这份作品，供全班参考' }}</text><button class="primary excellent-action-button" :disabled="busy" @click="toggleExcellent(selectedSubmission)">{{ selectedSubmission.excellent ? '取消优秀作业' : '设为优秀作业' }}</button></view>
                                     <view class="feedback-intro">
                                       <view class="eyebrow">
-                                            老师已审核
+                                            教师已完成批阅
                                       </view>
                                       <view class="detail-title">
                                         {{ assignmentFor(selectedSubmission).title }}
@@ -1177,7 +1169,7 @@ function toggleFeedbackDimension(id) {
                                           }}想对你说
                                         </view>
                                         <text class="small subtle">
-                                          已审核
+                                          已批阅
                                         </text>
                                       </view>
                                       <view class="paragraph">
@@ -1301,10 +1293,10 @@ function toggleFeedbackDimension(id) {
                                     <view :key="1" class="empty-state card">
                                       <view class="empty-symbol"> ◌ </view>
                                       <view class="strong">
-                                        老师尚未完成审核
+                                        教师批阅中
                                       </view>
                                       <view class="paragraph small">
-                                        老师完成审核后，你就能看到评分和批阅建议。
+                                        教师反馈准备好后，你就能看到评分和批阅建议。
                                       </view>
                                       <button
                                         class="secondary"
@@ -1490,7 +1482,7 @@ function toggleFeedbackDimension(id) {
                                           <text> 写作 / 100 分 </text>
                                         </view>
                                         <view class="small subtle spaced-small">
-                                          老师完成审核后，学生即可查看反馈。
+                                          教师批阅完成后，即可查看反馈。
                                         </view>
                                       </view>
                                     </view>
@@ -1638,11 +1630,11 @@ function toggleFeedbackDimension(id) {
       <view class="guide-step">
         <text> 01 </text>
         <view>
-          <view class="strong"> 教师核对与审核 </view>
+          <view class="strong"> 教师批阅与反馈 </view>
           <view class="small subtle">
             教师登录并确认任教范围，
             <br />
-            选择作业进入名单完成审核。
+            选择作业进入名单完成批阅。
           </view>
         </view>
       </view>

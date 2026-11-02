@@ -17,6 +17,7 @@ export type Screen =
   | "submit"
   | "feedback"
   | "records"
+  | "notifications"
   | "profile"
   | "create"
   | "classes"
@@ -201,6 +202,8 @@ export interface PrototypeState {
   assignmentTemplates?: AssignmentTemplate[];
   students: Student[];
   submissions: Submission[];
+  /** Per-student read receipts; notifications derive from actual task events. */
+  studentNotificationReads?: Record<string, Record<string, string>>;
 }
 export interface StorageAdapter {
   read(): unknown;

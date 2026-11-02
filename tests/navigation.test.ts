@@ -16,6 +16,7 @@ import * as pageModels from '../src/services/pageModels.js';
 import * as administration from '../src/services/administration.js';
 import * as aiReview from '../src/services/aiReview.js';
 import * as submissionPolicy from '../src/services/submissionPolicy.js';
+import * as studentWorkspace from '../src/services/studentWorkspace.js';
 
 const generate = require('@babel/generator').default;
 
@@ -44,6 +45,7 @@ async function setup() {
     '../services/administration.js': administration,
     '../services/aiReview.js': aiReview,
     '../services/submissionPolicy.js': submissionPolicy,
+    '../services/studentWorkspace.js': studentWorkspace,
     'vue': { ...vue, onUnmounted: callback => disposals.push(callback) },
     '@dcloudio/uni-app': {
       onShow: callback => shows.push(callback),
@@ -372,4 +374,27 @@ test('点击已打回只展示说明，确认关闭不重复写入许可', async
   await page.agreeResubmission(first);
   assert.equal(page.modal.value.title,'作业已打回');assert.equal(page.modal.value.cancel,false);
   await page.confirmModal();assert.equal(service.snapshot(),before);assert.equal(page.modal.value,null);
+});
+
+test('学生分类返回保留，消息直达作业与教师反馈并更新已读，教师端不受分类影响', async () => {
+  const { page, service, show } = await setup();
+  const assignment = await service.createAssignment({ classId: 'class-1', title: '消息通知验证', requirements: '', dueAt: '' }, 'teacher');
+  page.switchRole('student'); show();
+  page.studentTaskFilter.value = 'unsubmitted';
+  assert.ok(page.visibleAssignments.value.some(item => item.id === assignment.id));
+  page.openNotifications(); assert.equal(page.screen.value, 'notifications');
+  const notification = page.learnerNotifications.value.find(item => item.assignmentId === assignment.id);
+  await page.openStudentNotification(notification);
+  assert.equal(page.screen.value, 'assignment'); assert.equal(page.selectedAssignment.value.id, assignment.id);
+  assert.equal(page.learnerNotifications.value.find(item => item.id === notification.id).read, true);
+  page.back(); assert.equal(page.screen.value, 'notifications'); page.back(); assert.equal(page.screen.value, 'home');
+  assert.equal(page.studentTaskFilter.value, 'unsubmitted');
+  const work = await service.submit(assignment.id, seed.samplePhotos, '', 'student'); await service.finishAnalysis(work.id);
+  await service.publish(work.id, seed.sampleReview(), 'teacher'); show();
+  page.studentTaskFilter.value = 'reviewed'; page.openNotifications();
+  await page.openStudentNotification(page.learnerNotifications.value.find(item => item.assignmentId === assignment.id && item.type === 'reviewed'));
+  assert.equal(page.screen.value, 'feedback'); assert.equal(page.selectedSubmission.value.id, work.id);
+  page.back(); page.back(); assert.equal(page.studentTaskFilter.value, 'reviewed');
+  page.switchRole('teacher'); assert.equal(page.learnerNotifications.value.length, 0);
+  assert.equal(page.statusLabel({ status: 'pending' }), '待审核');
 });
