@@ -224,7 +224,7 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   }
   await successful.render()[event(thumbnail,'bindtap')]();
   assert.notEqual(successful.render()[event(camera,'wx:if')],true,'thumbnail tap enters review and releases camera');
-  const continueTag=template.match(/<button\b[^>]+>继续拍照/)[0];
+  const continueTag=template.match(/<button\b[^>]+>继续扫描/)[0];
   assert.equal(successful.render()[event(continueTag,'disabled')],false);
   await successful.render()[event(continueTag,'bindtap')](); successful.render()[event(camera,'bindinitdone')]();
   await successful.render()[event(shutter,'bindtap')]();assert.equal(successful.count,4,'manual shutter still works after opening and returning from continuous scan');

@@ -81,7 +81,7 @@ export function createScanProcessor({ workerFactory, fallback = processScanPixel
           options: { readCode, identifyOnly, sourceCodeFallback, maxEdge, aspectRatio } }, taskTimeout, options.onStage);
         if (cancelled()) throw paused();
         if (!(result.buffer instanceof ArrayBuffer) || result.buffer.byteLength !== result.width * result.height * 4) throw unavailable();
-        return { image: { width: result.width, height: result.height, data: new Uint8ClampedArray(result.buffer) }, code: result.code || "" };
+        return { image: { width: result.width, height: result.height, data: new Uint8ClampedArray(result.buffer) }, code: result.code || "", quarterTurns: result.quarterTurns ?? null };
       } catch (error) {
         if (cancelled() || error.message === paused().message) throw paused();
         // Messaging/runtime failure leaves the source intact (WeChat copies

@@ -2,6 +2,7 @@ import jsQR from "jsqr";
 import { paperId, decodePaperCode } from "../services/paperWorkflow.js";
 import { analyzeDocument } from "./documentScan.js";
 import { processScanPixels } from "./scanProcessing.js";
+import { detectTemplateDocument } from "./templateScan.js";
 
 // Four solid corner marks give a stable target even on a light desktop.
 export function detectPaperCorners({ data, width, height }, { markersOnly = false } = {}) {
@@ -106,9 +107,9 @@ function canvasFor(source, max = 1600) {
   return canvas;
 }
 export function inspectScanFrame(source) {
-  const canvas = canvasFor(source, 480), context = canvas.getContext("2d", {willReadFrequently: true});
+  const canvas = canvasFor(source, 640), context = canvas.getContext("2d", {willReadFrequently: true});
   const data = context.getImageData(0, 0, canvas.width, canvas.height);
-  const detected = analyzeDocument(data);
+  const detected = detectTemplateDocument(data) || analyzeDocument(data);
   const corners = detected?.corners.map(p => ({ x: p.x * (canvas.width - 1), y: p.y * (canvas.height - 1) }))
     || detectPaperCorners(data, { markersOnly: true });
   return { corners, markerEstimate: !detected && !!corners, width: canvas.width, height: canvas.height };

@@ -98,7 +98,7 @@ const server = http.createServer((req,res) => {
         if(window.__scanDecode.hold)window.__scanDecode.pending.push({img,value});else src.set.call(img,value);
       }});return img;};
     });
-    await button('继续拍照').click();
+    await button('继续扫描').click();
     await choose([files[0]]);
     await page.waitForFunction(()=>window.__scanDecode.pending.length>0);
     await button('停止处理').click();

@@ -210,7 +210,7 @@ export async function createScanRenderer(instance, { workSelector = "#scan-work-
       throw new Error("扫描图片较大，请缩小拍摄范围后重试。");
     });
   }
-  async function cropOriginal(path, corners) {
+  async function cropOriginal(path, corners, quarterTurns = 0) {
     const token = revision;
     return serializeImage(async () => {
       check(token);
@@ -226,15 +226,20 @@ export async function createScanRenderer(instance, { workSelector = "#scan-work-
       });
       check(token);
       const bounds = photoCropBounds(corners, img.width, img.height);
-      work.width = bounds.width; work.height = bounds.height;
+      const turns = ((quarterTurns % 4) + 4) % 4;
+      work.width = turns % 2 ? bounds.height : bounds.width; work.height = turns % 2 ? bounds.width : bounds.height;
       const ctx = work.getContext("2d");
+      if (turns) {
+        ctx.translate(turns === 1 || turns === 2 ? work.width : 0, turns === 2 || turns === 3 ? work.height : 0);
+        ctx.rotate(turns * Math.PI / 2);
+      }
       ctx.drawImage(img, bounds.left, bounds.top, bounds.width, bounds.height, 0, 0, bounds.width, bounds.height);
       await flush(work, token);
       // PNG is lossless. In particular, do not reuse the old 2400px/1.5MiB
       // scan export path, which could shrink/recompress this original crop.
       const url = await uniqueImage(await encode(work, "png"), "photo-crop", token, "png");
       check(token);
-      return {url, ...bounds};
+      return {url, ...bounds, width:work.width, height:work.height, bounds, quarterTurns:turns};
     });
   }
   async function exportPreview(image) {

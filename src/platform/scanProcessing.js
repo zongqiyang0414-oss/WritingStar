@@ -13,9 +13,9 @@ export async function processScanPixels(image, corners, { readCode = true, ident
     onStage("正在识别学生码…");
     const region = await rectifyDocument(image, corners, { maxEdge: 1600, cancelled, cooperative });
     check();
-    const code = readPaperScanCode(region);
+    const { code, quarterTurns } = readPaperScanMark(region);
     check();
-    return { image, code };
+    return { image, code, quarterTurns };
   }
   onStage("正在拉正纸面…");
   // Uncertain borders still retain the whole frame, with the same bounded

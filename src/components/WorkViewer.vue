@@ -37,6 +37,12 @@ async function ensureOrientation() {
 }
 async function correctDirection(manual = false) {
   if (!source.value || disposed) return;
+  // Captured scans already used the verified template/QR direction at full
+  // resolution. Do not decode and re-export another smaller viewer copy.
+  if (!manual && current.value?.orientationChecked) {
+    if (!views.has(source.value)) views.set(source.value,{url:source.value,quarterTurns:0,automatic:true});
+    viewRevision.value++;return;
+  }
   const original = source.value, token = ++orientationEpoch;
   orienting.value = true; orientationError.value = "";
   try {
@@ -59,7 +65,7 @@ async function preview() {
     for (const photo of props.photos) {
       const original = displayPhoto(photo.url);
       let result;
-      try { result = editor && await editor.inspect(original); } catch { /* Keep unreadable/CORS originals. */ }
+      try { result = views.get(original) || (photo.orientationChecked ? {url:original,quarterTurns:0,automatic:true} : editor && await editor.inspect(original)); } catch { /* Keep unreadable/CORS originals. */ }
       if (disposed || token !== orientationEpoch) return;
       if (result) views.set(original, result);
       urls.push(result?.url || original);

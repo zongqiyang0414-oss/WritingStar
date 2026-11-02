@@ -99,7 +99,7 @@ const output = name => path.resolve(__dirname, '../outputs/' + name.replace('v01
     await page.setViewportSize({width:844,height:390});
     await page.waitForFunction(()=>new DOMMatrix(getComputedStyle(document.querySelector('.scan-zoom-image')).transform).a===1);
     await page.setViewportSize({width:390,height:844});
-    await button('继续拍照').click();await page.locator('.scan-outline').waitFor();
+    await button('继续扫描').click();await page.locator('.scan-outline').waitFor();
     await page.locator('.scan-mode-toggle').click();
     await page.locator('.scan-shutter').click();
     await page.locator('.scan-capture-flight').waitFor();
@@ -107,7 +107,7 @@ const output = name => path.resolve(__dirname, '../outputs/' + name.replace('v01
     await button('删除此页').waitFor();
     assert.equal((await matrix()).scale,1,'new page starts at whole-page size');
     await button('上一页').click();assert.equal((await matrix()).scale,1,'page switching resets view');
-    await button('继续拍照').click();await page.locator('.scan-outline').waitFor();
+    await button('继续扫描').click();await page.locator('.scan-outline').waitFor();
     await page.locator('.scan-mode-toggle').click();
     await page.evaluate(()=>{const c=window.__scanScene;c.strokeStyle='#333';c.lineWidth=7;for(let i=0;i<6;i++){c.beginPath();c.moveTo(160,240+i*35);c.lineTo(450,255+i*35);c.stroke();}});
     await page.locator('.scan-capture-flight').waitFor();

@@ -82,6 +82,9 @@ export interface Photo {
   cropBounds?: { left: number; top: number; width: number; height: number };
   sourceWidth?: number;
   sourceHeight?: number;
+  templateId?: string;
+  quarterTurns?: number;
+  orientationChecked?: boolean;
   width?: number;
   height?: number;
   captureCorners?: { x: number; y: number }[] | null;

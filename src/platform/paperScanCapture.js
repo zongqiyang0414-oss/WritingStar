@@ -3,6 +3,7 @@ import { detectPaperCorners } from "./documentScanner.js";
 import { validQuad } from "./scanGeometry.js";
 import { downsampleScanImage } from "./scanPixels.js";
 import { readPaperScanCode } from "./scanCode.js";
+import { detectTemplateDocument } from "./templateScan.js";
 
 function downsample(image, maxEdge) {
   return downsampleScanImage(image, maxEdge);
@@ -11,7 +12,9 @@ function downsample(image, maxEdge) {
 // Retain v0.12 paper corner-mark detection on pale desks. The general detector
 // supplies the live document outline when the paper edge is visible.
 export function analyzePaperCapture(image) {
-  const small = downsample(image, 480);
+  const small = downsample(image, 640);
+  const template = detectTemplateDocument(small);
+  if (template) return template;
   const detected = analyzeDocument(small);
   if (detected) return detected;
   const corners = detectPaperCorners(small, { markersOnly: true })?.map(p => ({ x: p.x / (small.width - 1), y: p.y / (small.height - 1) }));
@@ -25,7 +28,8 @@ export class LivePaperDetector {
   reset() { this.previous = null; this.lastSearch = -Infinity; }
   update(image, time = Date.now()) {
     if (this.previous) {
-      const tracked = analyzeDocument(image, { previousCorners: this.previous.corners, trackingOnly: true });
+      const tracked = this.previous.method === "template" ? detectTemplateDocument(downsample(image,640))
+        : analyzeDocument(image, { previousCorners: this.previous.corners, trackingOnly: true });
       if (tracked) { this.previous = tracked; return tracked; }
       this.previous = null;
     }

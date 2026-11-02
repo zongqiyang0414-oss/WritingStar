@@ -253,7 +253,7 @@ async function privacyContract() {
   try { await openScanPrivacyContract(); }
   catch (failure) { showFailure(failure); }
 }
-function copyError() { uni.setClipboardData({ data: `写字星 v0.22.0 拍照
+function copyError() { uni.setClipboardData({ data: `写字星 v0.23.0 拍照
 ${error.value}
 ${errorDetail.value}`, fail: () => uni.showModal({ title: "请长按复制错误详情", showCancel: false,
   content: errorDetail.value || error.value }) }); }
@@ -362,12 +362,12 @@ async function processSource(source, fromAutomatic, token, fromImport = false, p
   const detection = selectCaptureDetection(image, previewDetection, sameFrame);
   const quad = detection?.confidence >= .7 && detection.autoEligible !== false ? detection.corners : null;
   const cancelled = () => disposed || token !== epoch || !foreground;
-  let code = "";
+  let code = "", quarterTurns = detection?.quarterTurns ?? null;
   if (paperBatch.value && quad) {
     try {
       const identified = await processor.process(image, quad, { cancelled, identifyOnly: true,
         onStage: text => { if (!cancelled()) processingStage.value = text; } });
-      try { decodePaperCode(identified.code); code = identified.code.trim(); } catch { /* Generic QR codes do not identify a student. */ }
+      try { decodePaperCode(identified.code); code = identified.code.trim(); quarterTurns = identified.quarterTurns ?? quarterTurns; } catch { /* Generic QR codes do not identify a student. */ }
     } catch (failure) {
       if (cancelled()) throw failure;
       // A failed identifier must not discard or re-encode a valid photograph.
@@ -390,7 +390,7 @@ async function processSource(source, fromAutomatic, token, fromImport = false, p
   try {
     if (quad && !cancelled()) {
       processingStage.value = "正在裁剪文档范围…";
-      try { cropped = await renderer.cropOriginal(source, photoCropQuad(quad)); }
+      try { cropped = await renderer.cropOriginal(source, photoCropQuad(quad), quarterTurns || 0); }
       catch (failure) { if (cancelled()) throw failure; /* Keep original for deferred crop review. */ }
     }
     if (cancelled()) throw new Error("拍照已暂停，请重新拍摄。");
@@ -404,7 +404,8 @@ async function processSource(source, fromAutomatic, token, fromImport = false, p
     photo: { id: `photo-${Date.now()}-${Math.random().toString(36).slice(2)}`, url: cropped?.url || source,
       name: "作业照片", sample: false, original: !cropped, cropped: !!cropped, width: photoWidth, height: photoHeight, captureCorners,
       sourceWidth: width, sourceHeight: height,
-      ...(cropped && {cropBounds:{left:cropped.left,top:cropped.top,width:cropped.width,height:cropped.height}}) } };
+      ...(cropped && {cropBounds:cropped.bounds, quarterTurns:cropped.quarterTurns, orientationChecked:quarterTurns !== null}),
+      ...(detection?.templateId && {templateId:detection.templateId}) } };
   pages.value = [...pages.value, output]; selected.value = pages.value.length - 1;
   if (inputSource !== source) renderer.remove(inputSource);
   notice.value = cropped ? "已裁剪保存，请换上下一张" : "照片已保留，结束后可调整裁剪；请换上下一张";
@@ -494,15 +495,15 @@ async function confirmCrop() {
   try {
     await jobs.run(async()=>{
       const image=await renderer.readAnalysis(entry.source);
-      let code="";
+      let code="",quarterTurns=entry.photo.orientationChecked ? entry.photo.quarterTurns : null;
       if(paperBatch.value){
-        try{const result=await processor.process(image,quad,{identifyOnly:true,cancelled});decodePaperCode(result.code);code=result.code.trim();}
+        try{const result=await processor.process(image,quad,{identifyOnly:true,cancelled});decodePaperCode(result.code);code=result.code.trim();quarterTurns=result.quarterTurns??quarterTurns;}
         catch(failure){if(cancelled())throw failure;}
       }
-      const cropped=await renderer.cropOriginal(entry.source,quad);
+      const cropped=await renderer.cropOriginal(entry.source,quad,quarterTurns||0);
       if(cancelled()){renderer.remove(cropped.url);throw new Error("裁剪已暂停，请重试。");}
       const photo={...entry.photo,url:cropped.url,original:false,cropped:true,width:cropped.width,height:cropped.height,captureCorners:quad,
-        cropBounds:{left:cropped.left,top:cropped.top,width:cropped.width,height:cropped.height}};
+        cropBounds:cropped.bounds,quarterTurns:cropped.quarterTurns,orientationChecked:quarterTurns!==null};
       pages.value=pages.value.map((page,i)=>i===index?{...page,code,photo,needsReview:false,previewWidth:cropped.width,previewHeight:cropped.height}:page);
       if(entry.photo.url!==entry.source)renderer.remove(entry.photo.url);
       mode.value="review";

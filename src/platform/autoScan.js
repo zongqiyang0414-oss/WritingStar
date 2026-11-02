@@ -104,15 +104,16 @@ export class AutoScanGate {
     this.samples++; this.lastReliableTime = time; this.previousReliable = true;
     this.history.push(copyCorners(detection.corners));
     if (this.history.length > 5) this.history.shift();
-    const capture = !this.emitted && this.held >= HOLD_MS && this.samples >= 5;
+    const hold = detection.method === "template" && detection.markerCount >= 6 ? 800 : HOLD_MS;
+    const capture = !this.emitted && this.held >= hold && this.samples >= 5;
     if (capture) this.emitted = true;
-    return this.state(capture, moved ? "moving" : "steady");
+    return this.state(capture, moved ? "moving" : "steady", hold);
   }
-  state(capture, reason) {
+  state(capture, reason, hold = HOLD_MS) {
     const corners = !this.locked && this.history.length >= 3 ? this.history[0].map((_, index) => {
       const median = axis => this.history.map(quad => quad[index][axis]).sort((a, b) => a - b)[Math.floor(this.history.length / 2)];
       return { x: median("x"), y: median("y") };
     }) : null;
-    return { capture, corners: validQuad(corners, .15) ? corners : null, progress: this.locked ? 0 : Math.min(1, this.held / HOLD_MS), waiting: this.locked, reason: this.locked ? "waiting" : reason };
+    return { capture, corners: validQuad(corners, .15) ? corners : null, progress: this.locked ? 0 : Math.min(1, this.held / hold), waiting: this.locked, reason: this.locked ? "waiting" : reason };
   }
 }

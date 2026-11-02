@@ -30,9 +30,9 @@ async function nativeModule(){
  return import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
 }
 test('微信裁剪直接读取完整照片，只做同尺寸区域拷贝并导出PNG，重复导出路径不覆盖旧成片',async()=>{
- const previousUni=globalThis.uni,previousWx=globalThis.wx,draws=[],encodes=[],removed=[];
+ const previousUni=globalThis.uni,previousWx=globalThis.wx,draws=[],encodes=[],removed=[],transforms=[];
  const canvas={width:1,height:1,createImage(){const img={width:4000,height:3000};Object.defineProperty(img,'src',{set(){queueMicrotask(()=>img.onload());}});return img;},requestAnimationFrame(fn){queueMicrotask(fn);},
-  getContext(){return {drawImage(...args){draws.push(args.slice(1));},getImageData(){assert.fail('native crop does not read full RGBA through JS');},putImageData(){assert.fail('no enhanced replacement pixels');}};}};
+  getContext(){return {translate(...args){transforms.push(["translate",...args]);},rotate(...args){transforms.push(["rotate",...args]);},drawImage(...args){draws.push(args.slice(1));},getImageData(){assert.fail('native crop does not read full RGBA through JS');},putImageData(){assert.fail('no enhanced replacement pixels');}};}};
  globalThis.wx={env:{USER_DATA_PATH:'/saved'}};
  globalThis.uni={createSelectorQuery(){const q={in(){return q;},select(){return q;},fields(){return q;},exec(resolve){resolve([{node:canvas},{node:{...canvas}}]);}};return q;},
   canvasToTempFilePath(options){encodes.push(options);options.success({tempFilePath:'/tmp/reused.png'});},getFileSystemManager(){return {copyFile(options){options.success({});},unlink(options){removed.push(options.filePath);options.success?.();}};}};
@@ -44,6 +44,11 @@ test('微信裁剪直接读取完整照片，只做同尺寸区域拷贝并导�
   const second=await renderer.cropOriginal('/tmp/original.png',[{x:.2,y:.2},{x:.8,y:.2},{x:.8,y:.8},{x:.2,y:.8}]);
   assert.notEqual(first.url,second.url);assert.ok(first.url.endsWith('.png'));
   assert.ok(!removed.includes('/tmp/original.png')&&!removed.includes(first.url));
+  const rotated=await renderer.cropOriginal('/tmp/original.png',quad,1);
+  assert.equal(rotated.width,2250);assert.equal(rotated.height,3200);
+  assert.deepEqual(rotated.bounds,{left:400,top:450,width:3200,height:2250});
+  assert.deepEqual(transforms,[["translate",2250,0],["rotate",Math.PI/2]]);
+  assert.equal(encodes[2].fileType,'png');assert.equal(encodes[2].destWidth,2250);assert.equal(encodes[2].destHeight,3200);
   const saved=await native.persistScanPages(renderer,[{id:'one',url:second.url,cropped:true}]);assert.equal(saved[0].url,second.url);
   renderer.dispose();assert.ok(removed.includes(first.url)&&!removed.includes(second.url));
  }finally{globalThis.uni=previousUni;globalThis.wx=previousWx;}

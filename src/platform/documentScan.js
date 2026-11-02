@@ -237,7 +237,7 @@ export function analyzeDocument(image, { previousCorners = null, trackingOnly = 
   return describeDocument(best, gray, width, height);
 }
 
-function describeDocument(best, gray, width, height) {
+export function describeDocument(best, gray, width, height) {
   const project = projectiveMap(best.corners), fingerprint = [], contentFingerprint = [];
   for (let y = 1; y <= 16; y++) for (let x = 1; x <= 12; x++) {
     const p = project(x / 13, y / 17);

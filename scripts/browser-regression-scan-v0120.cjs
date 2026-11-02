@@ -49,7 +49,7 @@ function stored() {
         const ctx=canvas.getContext('2d'), img=new Image();
         await new Promise(resolve=>{img.onload=resolve;img.src=state.paper;});
         let loaded=state.paper;
-        const draw=()=>{if(loaded!==state.paper){loaded=state.paper;img.src=loaded;}ctx.fillStyle='#544d41';ctx.fillRect(0,0,960,720);if(state.present&&img.complete&&img.naturalWidth)ctx.drawImage(img,280,77,400,566);};
+        const draw=()=>{if(loaded!==state.paper){loaded=state.paper;img.src=loaded;}ctx.fillStyle='#544d41';ctx.fillRect(0,0,960,720);if(state.present&&img.complete&&img.naturalWidth)ctx.drawImage(img,80,77,800,566);};
         draw(); const timer=setInterval(draw,80),stream=canvas.captureStream(12); state.streams.push(stream);
         const track=stream.getVideoTracks()[0],stop=track.stop.bind(track);track.stop=()=>{clearInterval(timer);stop();};
         return stream;
@@ -79,7 +79,7 @@ function stored() {
       let left=canvas.width,right=0,top=canvas.height,bottom=0;
       for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++)if(pixels[(y*canvas.width+x)*4+3]>40){left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);}
       const scale=Math.min(canvas.width/960,canvas.height/720),offsetX=(canvas.width-960*scale)/2,offsetY=(canvas.height-720*scale)/2;
-      return {actual:[left,top,right,bottom],expected:[offsetX+280*scale,offsetY+77*scale,offsetX+680*scale,offsetY+643*scale]};
+      return {actual:[left,top,right,bottom],expected:[offsetX+80*scale,offsetY+77*scale,offsetX+880*scale,offsetY+643*scale]};
     });
     outline.actual.forEach((value,i)=>assert.ok(Math.abs(value-outline.expected[i])<8,`outline ${i}: ${value} vs ${outline.expected[i]}`));
     await page.waitForFunction(()=>document.querySelector('.scan-count')?.textContent.startsWith('1'));
@@ -109,7 +109,7 @@ function stored() {
     assert.ok((await page.locator('.scan-result img').getAttribute('src')).startsWith('data:image/png;'));
     await page.screenshot({path:path.resolve(__dirname,`../outputs/${artifactVersion}-scan-result-${artifactDate}.png`)});
     // The manual switch stops automatic capture; the shutter still creates a page.
-    await button('继续拍照').click();await page.locator('.scan-outline').waitFor();
+    await button('继续扫描').click();await page.locator('.scan-outline').waitFor();
     await page.locator('.scan-mode-toggle').click();assert.match(await page.locator('.scan-mode-toggle').innerText(),/已关闭/);
     await page.evaluate(()=>window.__capture.present=false);await page.waitForTimeout(1500);
     await page.evaluate(()=>window.__capture.present=true);await page.waitForTimeout(2200);
