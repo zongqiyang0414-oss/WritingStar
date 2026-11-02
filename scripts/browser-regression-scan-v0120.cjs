@@ -120,7 +120,7 @@ function stored() {
     await page.waitForFunction(()=>document.querySelector('.paper-error')?.textContent.includes('未能添加'));
     assert.equal(await page.locator('.scan-page-card').count(),2);
     assert.match(await page.locator('.scan-student-group').first().innerText(),/可提交/);
-    await page.screenshot({path:path.resolve(__dirname,`../outputs/${artifactVersion}-scan-inbox-20261030.png`),fullPage:true});
+    await page.screenshot({path:path.resolve(__dirname,`../outputs/${artifactVersion}-scan-inbox-${artifactDate}.png`),fullPage:true});
     await button('统一提交并开始AI批阅').click();await confirm();await page.locator('.scan-empty').waitFor();
     const submissions=(await page.evaluate(stored)).submissions.filter(s=>s.assignmentId===assignment.id);
     assert.equal(submissions.length,1);assert.equal(submissions[0].paper.source,'teacher-scan');
