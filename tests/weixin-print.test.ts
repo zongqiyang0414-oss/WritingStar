@@ -46,12 +46,13 @@ function device(failPage = 0) {
   globalThis.wx = {env: {USER_DATA_PATH: '/user'}, getFileSystemManager: () => fs,
     shareFileMessage: o => {shared.push(o); o.success({});}} as any;
   globalThis.uni = {
+    getImageInfo: o => o.success({path: o.src}),
     createCanvasContext: (_id, _scope) => new Proxy({}, {get: (_target, name) => (...args) => {
       if (name === 'fillText' && String(args[0]).startsWith('WS1|')) codes.push(args[0]);
       if (name === 'draw') {rendered++; args[1]();}
     }}),
     canvasToTempFilePath: o => {
-      assert.equal(o.destWidth, 1588); assert.equal(o.destHeight, 2246); assert.equal(o.fileType, 'jpg');
+      assert.equal(o.destWidth, 2382); assert.equal(o.destHeight, 1684); assert.equal(o.fileType, 'jpg');
       activeRasters++; peakRasters = Math.max(peakRasters, activeRasters);
       o.success({tempFilePath: `/tmp/page-${rendered}.jpg`});
     },
@@ -84,6 +85,7 @@ test('微信全班106页按学生、页码生成同一PDF，逐页释放图片�
     const progress: number[] = [];
     const path = await exportWeixinAnswerCards(assignment, cards, {canvasId: 'print', scope: {}, onProgress: done => progress.push(done)});
     inspectPdf(current.files.get(path)!, 106);
+    assert.match(current.files.get(path)!.toString('latin1'), /MediaBox \[0 0 1190\.55 841\.89\]/);
     assert.deepEqual(current.codes, cards.flatMap(card => [encodePaperCode(card, 1, 2), encodePaperCode(card, 2, 2)]));
     assert.equal(progress.at(-1), 106); assert.equal(current.peak(), 1);
     assert.equal(current.files.has('/user/writingstar-print/old.pdf'), false);

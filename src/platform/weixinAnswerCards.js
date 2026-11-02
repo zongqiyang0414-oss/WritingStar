@@ -1,4 +1,4 @@
-import { CARD_WIDTH, CARD_HEIGHT, drawAnswerCard } from "./answerCards.js";
+import { CARD_WIDTH, CARD_HEIGHT, CARD_PAPER, drawAnswerCard, loadAnswerCardBackground } from "./answerCards.js";
 import { createImagePdf } from "./imagePdf.js";
 
 function call(target, name, options, scope) {
@@ -27,13 +27,15 @@ export async function exportWeixinAnswerCards(assignment, cards, { canvasId, sco
     for (const card of cards) for (let page = 1; page <= assignment.paperPacket.pages; page++) {
       if (cancelled()) throw new Error("已停止生成答题卡。");
       const ctx = uni.createCanvasContext(canvasId, scope);
-      drawAnswerCard(ctx, assignment, card, page);
+      const background = await loadAnswerCardBackground(page);
+      if (cancelled()) throw new Error("已停止生成答题卡。");
+      drawAnswerCard(ctx, assignment, card, page, background);
       await new Promise(resolve => ctx.draw(false, resolve));
       const image = await call(uni, "canvasToTempFilePath", { canvasId, width: CARD_WIDTH, height: CARD_HEIGHT,
         destWidth: CARD_WIDTH * 2, destHeight: CARD_HEIGHT * 2, fileType: "jpg", quality: .9 }, scope);
       try {
         const result = await call(fs, "readFile", { filePath: image.tempFilePath });
-        await pdf.addPage(result.data, CARD_WIDTH * 2, CARD_HEIGHT * 2);
+        await pdf.addPage(result.data, CARD_WIDTH * 2, CARD_HEIGHT * 2, CARD_PAPER);
       } finally {
         // Release each temporary raster as soon as it has been appended.
         try { await call(fs, "unlink", { filePath: image.tempFilePath }); } catch { /* system temp cleanup remains available */ }

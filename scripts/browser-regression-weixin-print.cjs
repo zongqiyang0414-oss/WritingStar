@@ -38,6 +38,7 @@ const root = path.resolve(__dirname, '..');
     await page.exposeFunction('persistPdf', (name, encoded) => fs.writeFileSync(`/tmp/${name}`, Buffer.from(encoded, 'base64')));
     const result = await page.evaluate(async () => {
       const {exportWeixinAnswerCards, openWeixinAnswerCards, shareWeixinAnswerCards} = await import('/src/platform/weixinAnswerCards.js');
+      const {CARD_WIDTH, CARD_HEIGHT} = await import('/src/platform/answerCards.js');
       const {encodePaperCode} = await import('/src/services/paperWorkflow.js');
       const {readStudentCode} = await import('/src/platform/documentScanner.js');
       const assignment = {title: '真实画布打印验证', requirements: '记录秋天的一次发现。', paperPacket: {pages: 2}};
@@ -55,11 +56,11 @@ const root = path.resolve(__dirname, '..');
         shareFileMessage: o => {shared++; o.success({});}};
       globalThis.uni = {
         createCanvasContext: () => {
-          frame = document.createElement('canvas'); frame.width = 794; frame.height = 1123;
+          frame = document.createElement('canvas'); frame.width = CARD_WIDTH; frame.height = CARD_HEIGHT;
           const ctx = frame.getContext('2d');
           return {setFillStyle: value => ctx.fillStyle = value, setStrokeStyle: value => ctx.strokeStyle = value,
             setFontSize: value => ctx.font = `${value}px sans-serif`, setLineWidth: value => ctx.lineWidth = value,
-            fillRect: (...args) => ctx.fillRect(...args), fillText: (...args) => ctx.fillText(...args),
+            fillRect: (...args) => ctx.fillRect(...args), fillText: (...args) => ctx.fillText(...args), drawImage: (...args) => ctx.drawImage(...args),
             beginPath: () => ctx.beginPath(), moveTo: (...args) => ctx.moveTo(...args), lineTo: (...args) => ctx.lineTo(...args), stroke: () => ctx.stroke(),
             draw: (_reserve, done) => done()};
         },
