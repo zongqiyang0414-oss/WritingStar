@@ -81,12 +81,35 @@ const server = http.createServer((req,res) => {
     await button('调整边角').click();assert.match(await page.locator('.scan-ratio-picker').innerText(),/竖版/);
     await page.screenshot({path:path.resolve(__dirname,`../outputs/scan-ratio-${artifactVersion}-${artifactDate}.png`)});
     await button('取消调整').click();
+    // Hold an actual scanner image decode, then click Stop. Existing pages
+    // stay usable, the late image cannot append, and the same queue can resume.
+    await page.evaluate(()=>{
+      const Original=window.Image,src=Object.getOwnPropertyDescriptor(HTMLImageElement.prototype,'src');
+      window.__scanDecode={Original,src,hold:true,pending:[]};
+      window.Image=function(){const img=new Original();Object.defineProperty(img,'src',{get(){return src.get.call(img);},set(value){
+        if(window.__scanDecode.hold)window.__scanDecode.pending.push({img,value});else src.set.call(img,value);
+      }});return img;};
+    });
+    await button('继续扫描').click();
+    await choose([files[0]]);
+    await page.waitForFunction(()=>window.__scanDecode.pending.length>0);
+    await button('停止处理').click();
+    await button('继续处理所选图片').waitFor();
+    assert.match(await page.locator('.scan-count').innerText(),/^3/);
+    const previewButton=page.locator('.scan-side-action').filter({hasText:'已扫描'});
+    assert.equal(await previewButton.getAttribute('disabled'),null,'completed pages remain clickable after stop');
+    await previewButton.click();await button('调整边角').waitFor();
+    await page.evaluate(()=>{const state=window.__scanDecode;window.Image=state.Original;state.hold=false;state.pending.forEach(({img,value})=>state.src.set.call(img,value));});
+    await page.waitForTimeout(50);assert.match(await page.locator('.scan-count').innerText(),/^3/,'late decode does not add a page');
+    await button('继续处理所选图片').click();
+    await page.waitForFunction(()=>document.querySelector('.scan-count')?.textContent.startsWith('4'));
+    await button('调整边角').waitFor();
     // A query-only hash change reuses the uni-app page instance; reload for a
     // new independent scan session with a different remaining capacity.
     await page.goto('about:blank');await page.goto(base+'2',{waitUntil:'networkidle'});await choose(files);
     await page.locator('.scan-error').waitFor();assert.match(await page.locator('.scan-error').innerText(),/还可添加 2 页/);
     assert.match(await page.locator('.scan-count').innerText(),/^0/,'over-limit choice does not partially import');
     assert.deepEqual(errors,[]);
-    console.log('Album multiple input, selected order, corner-confirmation queue, retained colors, A4 picker/reprocessing/persistence and capacity limit passed.',quality,dimensions);
+    console.log('Album multiple input, order, retained colors, A4 picker, stop during decode, existing-page access, stale-result rejection, queue resume and capacity limit passed.',quality,dimensions);
   } finally {await browser?.close();server.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

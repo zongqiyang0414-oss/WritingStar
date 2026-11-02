@@ -11,20 +11,36 @@ const event = (tag, attribute) => {
 const camera = template.match(/<camera\b[^>]+>/)[0];
 const start = template.match(/<button\b[^>]*class="scan-primary"[^>]+>/)[0];
 const album = template.match(/<button\b[^>]*class="scan-side-action"[^>]+>/)[0];
+const shutter = template.match(/<button\b[^>]*class="scan-shutter"[^>]+>/)[0];
+const thumbnail = [...template.matchAll(/<button\b[^>]*class="scan-side-action"[^>]+>/g)][1][0];
+const countKey = template.match(/class="scan-count"[^>]*>{{([^}]+)}}/)[1];
 
-function createPage({ denied = false, canvasUnavailable = false, mediaFailure = '' } = {}) {
+function createPage({ denied = false, canvasUnavailable = false, mediaFailure = '', paper = false, stalledPhoto = false, stalledExport = false, fastTimeouts = false } = {}) {
   let definition, viewerDefinition, canvasQueries = 0, requests = 0, pickerReturn, contractOpens = 0, systemPhotos = 0, previews = [];
   const lifecycle = {}, cache = {};
+  let frameCallback, photoCallback, exportCallback, clock = 1000, frameStarts = 0, frameStops = 0;
+  const removed = [];
+  class ScanDate extends Date { static now() { return clock; } }
+  const pixels = (width, height) => {
+    const data = new Uint8ClampedArray(width * height * 4).fill(255);
+    if (paper) for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const inside = x > width * .125 && x < width * .875 && y > height * .08 && y < height * .92;
+      const value = inside ? (y % 29 < 2 && x > width * .25 && x < width * .75 ? 65 : 225) : 75;
+      const i = (y * width + x) * 4; data[i] = data[i + 1] = data[i + 2] = value;
+    }
+    return { width, height, data };
+  };
   const hooks = name => callback => (lifecycle[name] ||= []).push(callback);
   const canvasNode = {
     width: 2, height: 2,
     createImage() {
-      return { width: 24, height: 32, set src(_value) { queueMicrotask(() => this.onload()); } };
+      return { width: paper ? 384 : 24, height: paper ? 512 : 32, set src(_value) { queueMicrotask(() => this.onload()); } };
     },
     getContext() {
-      return { drawImage() {}, getImageData(_x, _y, width, height) {
-        return { width, height, data: new Uint8ClampedArray(width * height * 4).fill(255) };
-      } };
+      return { drawImage() {}, getImageData(_x, _y, width, height) { return pixels(width, height); },
+        createImageData(width, height) { return pixels(width, height); }, putImageData() {},
+        clearRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, closePath() {}, fill() {}, stroke() {},
+      };
     },
   };
   const uni = {
@@ -38,7 +54,15 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
         exec(callback) { callback?.(canvasUnavailable ? [] : [{ node: canvasNode }, { node: canvasNode }]); return query; },
       }; return query;
     },
-    createCameraContext() { return { onCameraFrame() { return { start() {}, stop() {} }; } }; },
+    createCameraContext() { return {
+      onCameraFrame(fn) { frameCallback = fn; return { start() { frameStarts++; }, stop() { frameStops++; } }; },
+      takePhoto(options) { photoCallback = options; if (!stalledPhoto) options.success({ tempImagePath: '/tmp/capture.jpg' }); },
+    }; },
+    canvasToTempFilePath(options) {
+      if (options.fileType === 'jpg') { exportCallback = options; if (stalledExport) return; }
+      options.success({ tempFilePath: options.fileType === 'jpg' ? '/tmp/output.jpg' : '/tmp/outline.png' });
+    },
+    getFileInfo(options) { options.success({ size: 10000 }); },
     chooseImage(options) {
       assert.deepEqual(Array.from(options.sourceType), ['camera']); systemPhotos++;
       options.success({ tempFilePaths: ['/tmp/system-camera.jpg'] });
@@ -46,7 +70,7 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
     setClipboardData(options) { options.fail({ errMsg: 'setClipboardData:fail api scope is not declared in privacy agreement' }); },
     showModal(options) { assert.ok(options.content); },
     previewImage(options) { previews.push(options); },
-    getFileSystemManager() { return { unlink(options) { options.success?.(); } }; },
+    getFileSystemManager() { return { unlink(options) { removed.push(options.filePath); options.success?.(); } }; },
   };
   const wx = {
     createPage(page) { definition = page; },
@@ -63,10 +87,10 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
       pickerReturn = setTimeout(() => lifecycle.onShow.forEach(callback => callback()), 20);
     },
   };
-  const vendor = { ...vue, index: uni, wx$1: wx,
+  const vendor = { ...vue, index: uni, wx$1: wx, jsQR: require('jsqr'),
     getCurrentInstance: () => ({ proxy: { $scope: {}, getOpenerEventChannel() { return { emit() {} }; } } }),
     e: (...args) => Object.assign({}, ...args), t: String, o: handler => handler,
-    n: value => value, s: value => value, f: (items, callback) => items.map(callback),
+    n: value => value, s: value => value, p: value => value, f: (items, callback) => items.map(callback),
     _export_sfc: (component, props) => Object.assign(component, Object.fromEntries(props)),
   };
   for (const name of ['onLoad', 'onReady', 'onShow', 'onHide', 'onUnload', 'onResize', 'onMounted', 'onUnmounted']) vendor[name] = hooks(name);
@@ -78,8 +102,8 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
       vendor[alias[1]] = vue[alias[1].split('$')[0]];
     const module = { exports: {} }; cache[file] = module;
     vm.runInNewContext(source, { module, exports: module.exports, require: name => load(path.resolve(path.dirname(file), name)),
-      wx, uni, console, setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask,
-      Uint8ClampedArray, Uint8Array, Uint16Array, Uint32Array, Float32Array, Int32Array, Promise, Date,
+      wx, uni, console, setTimeout: fastTimeouts ? (fn,ms) => setTimeout(fn,ms >= 5000 ? 35 : ms) : setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask,
+      Uint8ClampedArray, Uint8Array, Uint16Array, Uint32Array, Float32Array, Int32Array, Promise, Date: paper ? ScanDate : Date,
     }, { filename: file });
     return module.exports;
   }
@@ -91,6 +115,12 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   return { render, lifecycle, get canvasQueries() { return canvasQueries; }, get requests() { return requests; },
     get contractOpens() { return contractOpens; }, get systemPhotos() { return systemPhotos; },
     get previews() { return previews; },
+    get count() { return Number(render()[countKey]); },
+    get frameStarts() { return frameStarts; }, get frameStops() { return frameStops; },
+    emitFrame() { clock += 350; const image = pixels(384,512); frameCallback({ ...image, data: image.data.buffer }); },
+    latePhoto() { photoCallback.success({tempImagePath:'/tmp/late-capture.jpg'}); },
+    lateExport() { exportCallback.success({tempFilePath:'/tmp/late-output.jpg'}); },
+    get removed() { return removed; },
     mountViewer() {
       load(path.join(root, 'components/ScanImageViewer.js'));
       const render = viewerDefinition.setup({src:'/tmp/scan-test.jpg',urls:['/tmp/scan-test.jpg','/tmp/scan-next.jpg']}, {});
@@ -102,6 +132,10 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
 }
 
 (async () => {
+  const until = async (condition, label) => {
+    for (let i = 0; i < 1000; i++) { if (condition()) return; await new Promise(resolve => setTimeout(resolve,10)); }
+    assert.fail(label);
+  };
   const first = createPage({ canvasUnavailable: true });
   assert.equal(first.canvasQueries, 0, 'canvas initialization must not block first camera access');
   assert.equal(first.requests, 0, 'page opening must not request camera permission');
@@ -142,10 +176,45 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   assert.match(JSON.stringify(system.render()), /确认并处理|corners|拖动四角/);
   system.close();
 
+  // Actual compiled capture -> process -> result -> tap workflow. The iOS
+  // camera keeps running after automatic capture, but controls must unlock.
+  const successful = createPage({paper:true});
+  await successful.render()[event(start,'bindtap')](); successful.render()[event(camera,'bindinitdone')]();
+  for (let i=0;i<5;i++) { successful.emitFrame(); await new Promise(resolve=>setTimeout(resolve,5)); }
+  await until(()=>successful.count===1&&!successful.render()[event(shutter,'disabled')],'automatic capture must restore enabled shutter').catch(error=>{console.error({count:successful.count,starts:successful.frameStarts,stops:successful.frameStops,state:successful.render()});throw error;});
+  assert.equal(successful.render()[event(camera,'wx:if')],true,'successful automatic capture keeps native camera mounted');
+  assert.equal(successful.render()[event(thumbnail,'disabled')],false,'completed photograph can be opened');
+  assert.ok(successful.frameStops>=1&&successful.frameStarts>=2,'pause image callbacks while processing and resume afterwards');
+  await successful.render()[event(thumbnail,'bindtap')]();
+  assert.notEqual(successful.render()[event(camera,'wx:if')],true,'thumbnail tap enters review and releases camera');
+  const continueTag=template.match(/<button\b[^>]+>继续扫描/)[0];
+  assert.equal(successful.render()[event(continueTag,'disabled')],false);
+  await successful.render()[event(continueTag,'bindtap')](); successful.render()[event(camera,'bindinitdone')]();
+  await successful.render()[event(shutter,'bindtap')]();assert.equal(successful.count,2,'manual shutter still works after opening and returning from first scan');
+  successful.close();
+
+  const stopped = createPage({stalledPhoto:true});
+  await stopped.render()[event(start,'bindtap')](); stopped.render()[event(camera,'bindinitdone')]();
+  const waitingPhoto=stopped.render()[event(shutter,'bindtap')]();await vue.nextTick();
+  const stopTag=template.match(/<button\b[^>]*scan-stop[^>]+>/)[0];
+  await stopped.render()[event(stopTag,'bindtap')]();await waitingPhoto;
+  assert.equal(stopped.render()[event(album,'disabled')],false,'stop must restore other controls without native callback');
+  stopped.latePhoto();await new Promise(resolve=>setTimeout(resolve,10));assert.equal(stopped.count,0,'stale native capture must not append a page');
+  stopped.close();
+
+  const timedOut=createPage({paper:true,stalledExport:true,fastTimeouts:true});
+  await timedOut.render()[event(start,'bindtap')](); timedOut.render()[event(camera,'bindinitdone')]();
+  await timedOut.render()[event(shutter,'bindtap')]();
+  assert.match(JSON.stringify(timedOut.render()),/超时/);
+  assert.equal(timedOut.render()[event(album,'disabled')],false,'missing export callback must not lock the page forever');
+  timedOut.lateExport();await new Promise(resolve=>setTimeout(resolve,10));assert.equal(timedOut.count,0);
+  assert.ok(timedOut.removed.includes('/tmp/late-output.jpg'));timedOut.close();
+
   // Run real compiled mini-program event bindings with native client coordinates.
   // Browser touch input does not establish that WXML catches the same gestures.
-  assert.match(template, /<cover-view[^>]+class="[^\"]*scan-capture-flight/);
-  assert.match(template, /<cover-image[^>]+class="scan-capture-photo"/);
+  assert.doesNotMatch(template, /<cover-view\b/, 'no floating native cover-view may block iOS controls after capture');
+  assert.doesNotMatch(template, /scan-capture-flight|scan-capture-photo/);
+  assert.match(template, />停止处理<\//, 'busy processing must retain an enabled stop action');
   const viewerTemplate = fs.readFileSync(path.join(root, 'components/ScanImageViewer.wxml'), 'utf8');
   const viewerTag = viewerTemplate.match(/<view\b[^>]+>/)[0], imageTag = viewerTemplate.match(/<image\b[^>]+>/)[0];
   const touchHost = createPage(), viewer = touchHost.mountViewer();
@@ -164,5 +233,5 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   assert.equal(touchHost.previews[0].current,'/tmp/scan-test.jpg');
   assert.equal(touchHost.previews[0].urls.length,2);
   touchHost.close();
-  console.log('WeChat compiled scan checks passed: native consent, real privacy rejection, contract link, clipboard failure, system photo, picker lifecycle, capture cover-image, native pinch bindings and full-image preview.');
+  console.log('WeChat compiled scan checks passed: native consent, picker lifecycle, automatic capture unlock, thumbnail/review/continue/manual capture, frame pause/resume, stopped photo, export timeout/late cleanup, no blocking capture layer, native pinch and full-image preview.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

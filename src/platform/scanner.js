@@ -1,6 +1,7 @@
 import { MAX_PHOTO_BYTES } from "./photos.js";
 import { fitRect } from "./scanGeometry.js";
 import { browserScanError, nativeScanError, scanAccessError } from "./scanAccess.js";
+import { scanCallback } from "./scanAsync.js";
 
 const api = (method, options = {}) => new Promise((resolve, reject) => uni[method]({ ...options, success: resolve, fail: reject }));
 
@@ -19,19 +20,34 @@ export async function authorizeScanCamera() {
 
 export function startNativeFrames(context, callback, onError) {
   if (typeof context?.onCameraFrame !== "function") { onError(); return () => {}; }
-  let active = true, listener;
+  let active = true, listener, processing = false, nextFrameAt = 0;
   try {
-    listener = context.onCameraFrame(frame => { if (active) callback(frame); });
+    listener = context.onCameraFrame(frame => {
+      if (!active || processing || Date.now() < nextFrameAt) return;
+      processing = true;
+      // The camera can deliver 30fps while JS detection takes much longer.
+      // Drop surplus frames before allocating a pixel view and leave an input
+      // window after each completed pass, rather than queueing work forever.
+      let result;
+      try { result = callback(frame); } catch { processing = false; nextFrameAt = Date.now() + 180; if (active) onError(); return; }
+      Promise.resolve(result)
+        .catch(() => { if (active) onError(); })
+        .finally(() => { processing = false; nextFrameAt = Date.now() + 180; });
+    });
     listener.start({ fail: () => { if (active) onError(); } });
   } catch { onError(); }
   return () => { active = false; try { listener?.stop(); } catch { /* Already stopped by the camera. */ } };
 }
 
 export function takeNativePhoto(context) {
-  return new Promise((resolve, reject) => context.takePhoto({
+  return scanCallback((resolve, reject) => context.takePhoto({
     quality: "high", success: result => resolve(result.tempImagePath),
     fail: failure => reject(nativeScanError(failure)),
-  }));
+  }), { message: "拍照等待超时，请重新开启相机后重试。", onLateValue: path => {
+    // #ifdef MP-WEIXIN
+    uni.getFileSystemManager().unlink({ filePath: path, fail: () => {} });
+    // #endif
+  } });
 }
 
 export async function openScanSettings() { await api("openSetting"); }
@@ -60,14 +76,16 @@ export async function createScanRenderer(instance) {
   outline = document.createElement("canvas");
   // #endif
   // #ifdef MP-WEIXIN
-  const result = await new Promise(resolve => uni.createSelectorQuery().in(instance)
+  const result = await scanCallback(resolve => uni.createSelectorQuery().in(instance)
     .select("#scan-work-canvas").fields({ node: true, size: true })
-    .select("#scan-outline-canvas").fields({ node: true, size: true }).exec(resolve));
+    .select("#scan-outline-canvas").fields({ node: true, size: true }).exec(resolve),
+  { timeout: 5000, message: "扫描画布未就绪，请重新打开扫描页面。" });
   work = result[0]?.node; outline = result[1]?.node;
   // #endif
   if (!work || !outline) throw new Error("当前设备不支持扫描画布，请更新微信后重试。");
   const transient = new Set();
-  let disposed = false;
+  let disposed = false, revision = 0;
+  const check = token => { if (disposed || token !== revision) throw new Error("扫描已暂停，请重试。"); };
   const remove = path => {
     // #ifdef H5
     if (transient.delete(path) && path?.startsWith("blob:")) URL.revokeObjectURL(path);
@@ -77,20 +95,24 @@ export async function createScanRenderer(instance) {
     // #endif
   };
   async function encode(canvas, format = "jpg", quality = 0.9) {
+    const token = revision;
     // #ifdef H5
     return canvas.toDataURL(format === "png" ? "image/png" : "image/jpeg", quality);
     // #endif
     // #ifdef MP-WEIXIN
-    const result = await new Promise((resolve, reject) => uni.canvasToTempFilePath({
+    const result = await scanCallback((resolve, reject) => uni.canvasToTempFilePath({
       canvas, width: canvas.width, height: canvas.height, destWidth: canvas.width, destHeight: canvas.height,
       fileType: format, quality, success: resolve, fail: reject,
-    }, instance));
+    }, instance), { message: "生成扫描件等待超时，已恢复操作，请重试。", onLateValue: result => {
+      transient.add(result.tempFilePath); remove(result.tempFilePath);
+    } });
     transient.add(result.tempFilePath);
-    if (disposed) { remove(result.tempFilePath); throw new Error("扫描已关闭。"); }
+    if (disposed || token !== revision) { remove(result.tempFilePath); throw new Error("扫描已暂停，请重试。"); }
     return result.tempFilePath;
     // #endif
   }
   async function read(path) {
+    const token = revision;
     let img;
     // #ifdef H5
     img = new Image();
@@ -98,12 +120,12 @@ export async function createScanRenderer(instance) {
     // #ifdef MP-WEIXIN
     img = work.createImage();
     // #endif
-    await new Promise((resolve, reject) => {
+    await scanCallback((resolve, reject) => {
       img.onload = resolve;
       img.onerror = () => reject(new Error("照片读取失败，请重新拍摄。"));
       img.src = path;
-    });
-    if (disposed) throw new Error("扫描已关闭。");
+    }, { message: "照片读取等待超时，请重新选择或拍摄。" });
+    check(token);
     const scale = Math.min(1, 2200 / Math.max(img.width, img.height));
     work.width = Math.max(1, Math.round(img.width * scale)); work.height = Math.max(1, Math.round(img.height * scale));
     const ctx = work.getContext("2d");
@@ -111,6 +133,7 @@ export async function createScanRenderer(instance) {
     return ctx.getImageData(0, 0, work.width, work.height);
   }
   async function exportImage(image) {
+    const token = revision;
     work.width = image.width; work.height = image.height;
     const ctx = work.getContext("2d"), pixels = ctx.createImageData(image.width, image.height);
     pixels.data.set(image.data); ctx.putImageData(pixels, 0, 0);
@@ -121,7 +144,13 @@ export async function createScanRenderer(instance) {
       size = Math.ceil((path.length - path.indexOf(",") - 1) * 3 / 4);
       // #endif
       // #ifdef MP-WEIXIN
-      const info = await api("getFileInfo", { filePath: path }); size = info.size;
+      let info;
+      try {
+        info = await scanCallback((success, fail) => uni.getFileInfo({ filePath: path, success, fail }),
+          { timeout: 5000, message: "扫描件校验等待超时，请重试。" });
+        check(token);
+      } catch (error) { remove(path); throw error; }
+      size = info.size;
       // #endif
       if (size <= MAX_PHOTO_BYTES) return path;
       remove(path);
@@ -157,13 +186,15 @@ export async function createScanRenderer(instance) {
     // partially failed multi-page save impossible to retry after rollback.
     const savedPath = `${wx.env.USER_DATA_PATH}/scan-${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
     try {
-      await new Promise((resolve, reject) => uni.getFileSystemManager().copyFile({ srcPath: path, destPath: savedPath, success: resolve, fail: reject }));
+      await scanCallback((resolve, reject) => uni.getFileSystemManager().copyFile({ srcPath: path, destPath: savedPath, success: resolve, fail: reject }),
+        { onLateValue: () => uni.getFileSystemManager().unlink({ filePath: savedPath, fail: () => {} }) });
       return savedPath;
     }
     catch { throw new Error("扫描件保存失败，请检查设备存储后重试。"); }
     // #endif
   }
   return { read, exportImage, drawOutline, persist, remove,
+    cancelPending() { revision++; },
     track: path => transient.add(path),
     dispose() { disposed = true; [...transient].forEach(remove); work.width = work.height = outline.width = outline.height = 1; },
   };
@@ -171,7 +202,7 @@ export async function createScanRenderer(instance) {
 
 export async function removeSavedScan(path) {
   // #ifdef MP-WEIXIN
-  await new Promise(resolve => uni.getFileSystemManager().unlink({ filePath: path, success: resolve, fail: resolve }));
+  await scanCallback(resolve => uni.getFileSystemManager().unlink({ filePath: path, success: resolve, fail: resolve }), { timeout: 3000 }).catch(() => {});
   // #endif
 }
 

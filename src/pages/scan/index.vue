@@ -2,6 +2,7 @@
 import { computed, getCurrentInstance, nextTick, ref, shallowRef, watch } from "vue";
 import { onHide, onLoad, onReady, onResize, onShow, onUnload } from "@dcloudio/uni-app";
 import { createScanProcessor } from "../../platform/scanProcessor.js";
+import { createScanJobs, scanCallback } from "../../platform/scanAsync.js";
 import ScanImageViewer from "../../components/ScanImageViewer.vue";
 import { LivePaperDetector, selectCaptureDetection } from "../../platform/paperScanCapture.js";
 import { AutoScanGate } from "../../platform/autoScan.js";
@@ -20,6 +21,7 @@ const realtime = ref(true), starting = ref(false), error = ref(""), notice = ref
 const outlineUrl = ref(""), progress = ref(0), waiting = ref(false), pages = shallowRef([]), selected = ref(0), capacity = ref(MAX_PHOTOS);
 const paperBatch = ref(false);
 const importQueue = shallowRef([]), importStatus = ref(""), processingStage = ref("");
+const importsPaused = ref(false), jobs = createScanJobs();
 const pending = shallowRef(null), corners = ref([]), stage = ref({ width: 300, height: 400, left: 0, top: 0 });
 const ratioIndex = ref(0);
 const ratioOptions = ["自动估算", "A4 / A5 竖版", "A4 / A5 横版", "正方形"];
@@ -59,20 +61,20 @@ onReady(() => {
 });
 onShow(() => {
   foreground = true; resumePicker?.();
-  if (importQueue.value.length && !busy.value && !pending.value) processImportQueue();
+  if (importQueue.value.length && !importsPaused.value && !busy.value && !pending.value) processImportQueue();
 });
 onResize(async () => { cancelCaptureFeedback(); await nextTick(); if (!disposed) await measure(); });
 watch([mode, error, () => pages.value.length, waiting], async () => { await nextTick(); if (!disposed) await measure(); });
-onHide(() => { foreground = false; releaseCamera(); });
+onHide(() => { foreground = false; if (!jobs.cancel()) releaseCamera(); });
 onUnload(() => {
-  disposed = true; resumePicker?.(); releaseCamera(); processor.dispose(); renderer?.dispose();
+  disposed = true; resumePicker?.(); if (!jobs.cancel()) releaseCamera(); processor.dispose(); renderer?.dispose();
 });
 
 function measure() {
-  return new Promise(resolve => uni.createSelectorQuery().in(instance).select("#scan-stage").boundingClientRect(rect => {
+  return scanCallback(resolve => uni.createSelectorQuery().in(instance).select("#scan-stage").boundingClientRect(rect => {
     if (rect?.width) stage.value = rect;
     resolve();
-  }).exec());
+  }).exec(), { timeout: 1000 }).catch(() => {});
 }
 function clearOutline() {
   const old = outlineUrl.value; outlineUrl.value = "";
@@ -85,12 +87,33 @@ function releaseCamera() {
   nativeContext = null; cameraMounted.value = false; cameraReady.value = false; starting.value = false;
   lastDetection = null; lastDetectionTime = 0; lastFrame = 0; detectionErrors = 0; liveDetector.reset(); gate.restart(); progress.value = 0; waiting.value = gate.locked; clearOutline();
 }
+function interruptProcessing(reason) {
+  if (reason?.code === "SCAN_TIMEOUT" && importStatus.value) importsPaused.value = true;
+  renderer?.cancelPending(); releaseCamera(); automatic.value = false;
+}
+function stopProcessing() {
+  if (importStatus.value) importsPaused.value = true;
+  jobs.cancel();
+}
+function resumeImports() {
+  if (busy.value || !importQueue.value.length) return;
+  importsPaused.value = false; clearError(); processImportQueue();
+}
 function cancelCaptureFeedback() {
   flightSequence++; clearTimeout(flightStart); clearTimeout(flightEnd); clearTimeout(pulseEnd);
   captureFlight.value = null; thumbnailPulse.value = false; flightResolve?.(false); flightResolve = null;
 }
 async function animateCapture(entry, token) {
   cancelCaptureFeedback();
+  // #ifdef MP-WEIXIN
+  // Floating native cover-view animations can leave iOS camera hit testing
+  // above the page controls. Keep feedback in the existing thumbnail instead.
+  if (token !== epoch || disposed || !foreground || mode.value !== "live") return false;
+  thumbnailPulse.value = true;
+  pulseEnd = setTimeout(() => { thumbnailPulse.value = false; }, 280);
+  return true;
+  // #endif
+  // #ifdef H5
   const sequence = flightSequence;
   await nextTick();
   const rects = await new Promise(resolve => {
@@ -125,6 +148,7 @@ async function animateCapture(entry, token) {
     }, 540);
   }, 60);
   return completed;
+  // #endif
 }
 async function ensureRenderer() {
   if (renderer) return renderer;
@@ -174,6 +198,10 @@ function nativeReady() {
   if (!cameraMounted.value || !foreground || disposed) return;
   nativeContext = uni.createCameraContext(); cameraReady.value = true; starting.value = false;
   notice.value = "将整张作业放入画面，四周留出一些背景";
+  resumeNativeFrames();
+}
+function resumeNativeFrames() {
+  if (!nativeContext || !foreground || disposed || busy.value || mode.value !== "live" || !cameraReady.value || full.value) return;
   stopFrames?.();
   stopFrames = startNativeFrames(nativeContext, frame => receiveFrame({ ...frame, data: new Uint8ClampedArray(frame.data) }), () => {
     realtime.value = false; automatic.value = false; clearOutline();
@@ -199,7 +227,7 @@ async function privacyContract() {
   try { await openScanPrivacyContract(); }
   catch (failure) { showFailure(failure); }
 }
-function copyError() { uni.setClipboardData({ data: `写字星 v0.17.0 扫描
+function copyError() { uni.setClipboardData({ data: `写字星 v0.18.0 扫描
 ${error.value}
 ${errorDetail.value}`, fail: () => uni.showModal({ title: "请长按复制错误详情", showCancel: false,
   content: errorDetail.value || error.value }) }); }
@@ -272,27 +300,32 @@ async function capture(fromAutomatic = false) {
   if (!cameraReady.value || busy.value || full.value) return;
   busy.value = true; error.value = "";
   const token = epoch, detection = Date.now() - lastDetectionTime < 650 ? lastDetection : null;
+  stopFrames?.(); stopFrames = null;
+  processingStage.value = "正在拍摄照片…";
   try {
-    let source;
-    // #ifdef H5
-    source = browserCamera.capture();
-    // #endif
-    // #ifdef MP-WEIXIN
-    source = await takeNativePhoto(nativeContext);
-    await ensureRenderer(); renderer.track(source);
-    // #endif
-    if (token !== epoch || disposed) { renderer.remove(source); return; }
-    // Lock immediately; an interrupted processing attempt must not trigger a burst.
-    gate.captured(detection); waiting.value = true; progress.value = 0;
-    let sameFrame = false;
-    // #ifdef H5
-    sameFrame = !!detection && browserCamera.matchesFrame(detection.frameWidth, detection.frameHeight);
-    // #endif
-    await processSource(source, fromAutomatic, token, false, detection, sameFrame);
+    await jobs.run(async () => {
+      let source;
+      // #ifdef H5
+      source = browserCamera.capture();
+      // #endif
+      // #ifdef MP-WEIXIN
+      source = await takeNativePhoto(nativeContext);
+      await ensureRenderer(); renderer.track(source);
+      // #endif
+      if (token !== epoch || disposed) { renderer.remove(source); return; }
+      // Lock immediately; an interrupted processing attempt must not trigger a burst.
+      gate.captured(detection); waiting.value = true; progress.value = 0;
+      let sameFrame = false;
+      // #ifdef H5
+      sameFrame = !!detection && browserCamera.matchesFrame(detection.frameWidth, detection.frameHeight);
+      // #endif
+      await processSource(source, fromAutomatic, token, false, detection, sameFrame);
+    }, { onInterrupt: interruptProcessing });
   } catch (failure) {
+    if (failure?.code === "SCAN_TIMEOUT" && token === epoch) interruptProcessing(failure);
     if (!disposed) showFailure(failure);
     automatic.value = false;
-  } finally { busy.value = false; }
+  } finally { busy.value = false; processingStage.value = ""; resumeNativeFrames(); }
 }
 async function processSource(source, fromAutomatic, token, fromImport = false, previewDetection = null, sameFrame = false) {
   processingStage.value = "正在读取照片…";
@@ -322,6 +355,7 @@ async function makePage(source, image, quad, token, aspectRatio = 0) {
   const cancelled = () => disposed || token !== epoch || !foreground;
   const { image: enhanced, code } = await processor.process(image, quad, { cancelled, aspectRatio, readCode: paperBatch.value,
     onStage: text => { if (!cancelled()) processingStage.value = text; } });
+  if (cancelled()) throw new Error("扫描已暂停，请重试。");
   processingStage.value = "正在生成扫描件…";
   const url = await renderer.exportImage(enhanced);
   if (cancelled()) { renderer.remove(url); throw new Error("扫描已暂停，请重试。"); }
@@ -337,7 +371,7 @@ async function importPage(sourceType = "album") {
     if (!sources.length) return;
     await ensureRenderer(); sources.forEach(source => renderer.track(source));
     if (disposed) { sources.forEach(source => renderer.remove(source)); return; }
-    importQueue.value = sources;
+    importsPaused.value = false; importQueue.value = sources;
     await processImportQueue();
   } catch (failure) { if (!disposed) showFailure(failure, sourceType); }
   finally { choosing = false; busy.value = false; }
@@ -345,15 +379,20 @@ async function importPage(sourceType = "album") {
 async function processImportQueue() {
   busy.value = true;
   try {
-    while (importQueue.value.length && !full.value && !disposed && foreground) {
+    while (importQueue.value.length && !importsPaused.value && !full.value && !disposed && foreground) {
       const source = importQueue.value[0];
       importQueue.value = importQueue.value.slice(1);
       importStatus.value = `正在处理所选图片，还剩 ${importQueue.value.length + 1} 张…`;
       const token = epoch;
-      try { await processSource(source, false, token, true); }
+      try { await jobs.run(() => processSource(source, false, token, true), { onInterrupt: interruptProcessing }); }
       catch (failure) {
         if (disposed) return;
-        if (!foreground || token !== epoch) { importQueue.value = [source, ...importQueue.value]; return; }
+        if (failure?.code === "SCAN_TIMEOUT" && token === epoch) interruptProcessing(failure);
+        if (!foreground || token !== epoch) {
+          importQueue.value = [source, ...importQueue.value];
+          if (foreground) showFailure(failure, "album");
+          return;
+        }
         renderer.remove(source); showFailure(failure, "album");
       }
       if (mode.value === "corners") return;
@@ -361,7 +400,7 @@ async function processImportQueue() {
     if (!disposed && pages.value.length) mode.value = "review";
   } finally {
     busy.value = false; importStatus.value = "";
-    if (!disposed && foreground && importQueue.value.length && !pending.value && !full.value) nextTick(processImportQueue);
+    if (!disposed && foreground && !importsPaused.value && importQueue.value.length && !pending.value && !full.value) nextTick(processImportQueue);
   }
 }
 function reviewPage(index) {
@@ -390,22 +429,27 @@ async function confirmCorners() {
   if (!validQuad(corners.value)) { error.value = "请按顺序框住纸张四角，边线不能交叉。"; return; }
   busy.value = true; error.value = ""; const token = epoch;
   try {
-    const source = pending.value.source, image = await renderer.read(source);
-    const output = await makePage(source, image, corners.value, token, ratioValues[ratioIndex.value]);
-    const updated = [...pages.value];
-    if (replacing >= 0) { renderer.remove(updated[replacing].photo.url); updated[replacing] = output; selected.value = replacing; }
-    else { updated.push(output); selected.value = updated.length - 1; }
-    const newlyCaptured = replacing < 0 && !pending.value.fromImport;
-    pages.value = updated; pending.value = null;
-    if (newlyCaptured) {
-      mode.value = "live";
-      await animateCapture(output, token);
-    }
-    if (token !== epoch || disposed || !foreground) return;
-    mode.value = "review";
-  } catch (failure) { if (!disposed) error.value = failure.message || "图片处理失败，请重试。"; }
+    await jobs.run(async () => {
+      const source = pending.value.source, image = await renderer.read(source);
+      const output = await makePage(source, image, corners.value, token, ratioValues[ratioIndex.value]);
+      const updated = [...pages.value];
+      if (replacing >= 0) { renderer.remove(updated[replacing].photo.url); updated[replacing] = output; selected.value = replacing; }
+      else { updated.push(output); selected.value = updated.length - 1; }
+      const newlyCaptured = replacing < 0 && !pending.value.fromImport;
+      pages.value = updated; pending.value = null;
+      if (newlyCaptured) {
+        mode.value = "live";
+        await animateCapture(output, token);
+      }
+      if (token !== epoch || disposed || !foreground) return;
+      mode.value = "review";
+    }, { onInterrupt: interruptProcessing });
+  } catch (failure) {
+    if (failure?.code === "SCAN_TIMEOUT" && token === epoch) interruptProcessing(failure);
+    if (!disposed) error.value = failure.message || "图片处理失败，请重试。";
+  }
   finally { busy.value = false; }
-  if (!pending.value && importQueue.value.length) await processImportQueue();
+  if (!pending.value && !importsPaused.value && importQueue.value.length) await processImportQueue();
 }
 async function cancelCorners() {
   if (busy.value) return;
@@ -504,6 +548,8 @@ function leave() {
       <!-- #endif -->
     </view>
     <view class="scan-controls">
+      <button v-if="busy && !saving" class="scan-text-button scan-stop" @click="stopProcessing">停止处理</button>
+      <button v-if="!busy && importsPaused && importQueue.length" class="scan-text-button" @click="resumeImports">继续处理所选图片（{{ importQueue.length }} 张）</button>
       <template v-if="mode === 'live'">
         <view class="scan-mode-row">
           <button :class="['scan-mode-toggle', { active: automatic }]" :disabled="busy || !realtime" :aria-pressed="automatic" @click="toggleAutomatic"><text class="scan-toggle-dot" />自动扫描 {{ automatic ? '已开启' : '已关闭' }}</button>
@@ -532,9 +578,6 @@ function leave() {
     </view>
     <!-- #ifdef H5 -->
     <view v-if="captureFlight" :class="['scan-capture-flight', { 'scan-capture-moving': captureFlight.moving }]" :style="flightStyle" aria-hidden="true"><image class="scan-capture-photo" :src="captureFlight.url" mode="scaleToFill" /></view>
-    <!-- #endif -->
-    <!-- #ifdef MP-WEIXIN -->
-    <cover-view v-if="captureFlight" :class="['scan-capture-flight', { 'scan-capture-moving': captureFlight.moving }]" :style="flightStyle"><cover-image class="scan-capture-photo" :src="captureFlight.url" /></cover-view>
     <!-- #endif -->
     <!-- #ifdef MP-WEIXIN -->
     <canvas id="scan-work-canvas" type="2d" class="scan-hidden-canvas" />
