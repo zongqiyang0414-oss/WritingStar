@@ -188,7 +188,7 @@ async function systemSettings() {
 function permissionHelp() {
   uni.showModal({ title: "相机授权说明", showCancel: false, content: errorAction.value.startsWith("privacy")
     ? "管理员在电脑浏览器打开 mp.weixin.qq.com，登录AppID为wxe3fefef9eaab17c3的小程序。进入“设置→服务内容声明→用户隐私保护指引”，补充摄像头（拍摄纸质作业）、选中的照片或视频信息（导入作业图片），按平台提示提交并确认生效。手机微信设置里没有这个配置；仅查看指引也不等于已经同意授权。"
-    : "在 Chrome 地址栏的网站信息中，允许此网站使用相机。手机还需在系统设置中允许 Chrome 使用相机。请通过 HTTPS 地址直接打开网站；嵌入页可能不支持授权。相册和系统相机可单独使用。" });
+    : "在 Chrome 地址栏的网站信息中，允许此网站使用相机。手机还需在系统设置中允许 Chrome 使用相机。请通过 HTTPS 地址直接打开网站；嵌入页可能不支持授权。也可以从相册导入。" });
 }
 async function privacyContract() {
   try { await openScanPrivacyContract(); }
@@ -435,6 +435,8 @@ async function finish() {
 }
 function leave() {
   if (busy.value) return;
+  if (mode.value === "corners") { cancelCorners(); return; }
+  if (mode.value === "review") { mode.value = "live"; startCamera(); return; }
   if (!pages.value.length && !pending.value || delivered.value) { uni.navigateBack(); return; }
   releaseCamera();
   uni.showModal({ title: "放弃本次扫描？", content: "尚未添加的扫描件将被丢弃。", confirmText: "放弃扫描", confirmColor: "#cc5544",
@@ -446,8 +448,8 @@ function leave() {
 <template>
   <view class="scanner-page">
     <view class="scan-header">
-      <button class="scan-icon-button" aria-label="退出扫描" :disabled="busy" @click="leave">×</button>
-      <view class="scan-heading"><text class="scan-title">作业扫描</text><text class="scan-subtitle">{{ mode === 'corners' ? '调整纸张四角' : mode === 'review' ? '检查扫描效果' : '自动框选 · 清晰留存' }}</text></view>
+      <button class="scan-icon-button" :aria-label="mode === 'live' ? '退出扫描' : mode === 'corners' ? '取消调整' : '返回拍照界面'" :disabled="busy" @click="leave">{{ mode === 'live' ? '×' : '‹' }}</button>
+      <view class="scan-heading"><text class="scan-title">作业扫描</text><text v-if="mode !== 'live'" class="scan-subtitle">{{ mode === 'corners' ? '调整纸张四角' : '检查扫描效果' }}</text></view>
       <text class="scan-count">{{ pages.length }} / {{ capacity }} 页</text>
     </view>
     <view class="scan-status" role="status">{{ mode === 'live' ? frameText : busy ? (saving ? '正在保存扫描件…' : processingText) : mode === 'corners' ? '拖动四角框住纸张，保留完整笔迹' + (importQueue.length ? ' · 后续还有 ' + importQueue.length + ' 张' : '') : '双指放大、拖动查看笔迹，轻点查看全图' }}</view>
@@ -465,15 +467,13 @@ function leave() {
         <image v-if="outlineUrl" class="scan-outline" :src="outlineUrl" mode="scaleToFill" />
         <!-- #endif -->
         <view v-if="!cameraMounted && !cameraReady && !captureFlight" class="scan-empty">
-          <view class="scan-empty-symbol">▣</view>
-          <text>{{ starting ? '正在开启相机' : '对准作业，扫描成清晰的纸面' }}</text>
-          <text class="scan-muted">纸张放平，保持光线均匀</text>
+          <view class="scan-empty-symbol" aria-hidden="true"><view class="scan-camera-lens" /></view>
+          <text v-if="starting">正在开启相机</text>
           <button v-if="!starting" class="scan-primary" :disabled="busy || full || !initialized" @click="startCamera">{{ full ? '已达到页数上限' : '开启相机' }}</button>
           <!-- #ifdef MP-WEIXIN -->
           <button v-if="errorAction === 'mini-settings' && !starting" class="scan-text-button" @click="settings">打开小程序权限设置</button>
           <button v-if="errorAction === 'app-settings' && !starting" class="scan-text-button" @click="systemSettings">打开手机授权设置</button>
           <!-- #endif -->
-          <button v-if="!starting" class="scan-text-button" :disabled="busy || full" @click="importPage('camera')">使用系统相机拍摄</button>
         </view>
       </template>
       <ScanImageViewer v-else-if="mode === 'review' && current" :key="current.photo.id" :src="current.photo.url" :urls="pages.map(page => page.photo.url)" />
@@ -515,7 +515,7 @@ function leave() {
       <template v-else-if="mode === 'review'">
         <view class="scan-pagination"><button :disabled="busy || selected === 0" @click="selected--">‹ 上一页</button><text>{{ selected + 1 }} / {{ pages.length }}</text><button :disabled="busy || selected >= pages.length - 1" @click="selected++">下一页 ›</button></view>
         <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy" @click="editSource(current, selected)">调整边角</button><button class="scan-secondary" :disabled="busy" @click="removePage">删除此页</button></view>
-        <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy || full" @click="startCamera">继续扫描</button><button class="scan-primary" :disabled="busy || delivered" @click="finish">完成 {{ pages.length }} 页</button></view>
+        <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy || delivered" @click="finish">完成 {{ pages.length }} 页</button><button class="scan-primary" :disabled="busy || full" @click="startCamera">继续扫描</button></view>
       </template>
       <template v-else>
         <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy" @click="cancelCorners">{{ importQueue.length ? '跳过此张' : '取消调整' }}</button><button class="scan-primary" :disabled="busy" @click="confirmCorners">确认并处理</button></view>
@@ -546,7 +546,9 @@ function leave() {
 .scan-camera, .scan-outline, .scan-result { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
 .scan-outline { pointer-events: none; z-index: 2; }
 .scan-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px; text-align: center; font-size: 14px; }
-.scan-empty-symbol { font-size: 48px; color: #49d4b4; }
+.scan-empty-symbol { position: relative; width: 56px; height: 40px; border: 3px solid #49d4b4; border-radius: 9px; margin-bottom: 10px; display: flex; align-items: center; justify-content: center; }
+.scan-empty-symbol::before { content: ''; position: absolute; width: 22px; height: 8px; border: 3px solid #49d4b4; border-bottom: 0; border-radius: 5px 5px 0 0; top: -11px; left: 14px; }
+.scan-camera-lens { width: 19px; height: 19px; border: 3px solid #49d4b4; border-radius: 50%; }
 .scan-controls { flex-shrink: 0; padding: 14px 22px 18px; }
 .scan-mode-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .scan-mode-toggle { display: flex; align-items: center; gap: 7px; padding: 6px 10px; margin: 0; background: #293b33; color: #e4eee8; border-radius: 20px; font-size: 12px; line-height: 20px; }

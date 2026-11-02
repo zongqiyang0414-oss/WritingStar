@@ -230,6 +230,7 @@ export function usePrototype() {
     closedAssignments = computed(() =>
       scopedAssignments.value.filter((e) => assignmentCompleted(state.value, e, now.value, assignmentCountsById.value.get(e.id))),
     ),
+    newAssignment = computed(() => ongoingAssignments.value.find(item => !latestSubmission(state.value, item.id, boundStudent.value?.id || "")) || null),
     visibleAssignments = computed(() =>
       isTeacher.value
         ? "ongoing" === assignmentPeriod.value
@@ -257,6 +258,7 @@ export function usePrototype() {
       state.value.submissions.find((e) => e.id === submissionId.value),
     ),
     aiTask = computed(() => {
+      now.value;
       if (!service || !selectedSubmission.value || role.value === "admin") return null;
       try { return service.aiResult(selectedSubmission.value.id, role.value); }
       catch { return null; }
@@ -357,7 +359,6 @@ export function usePrototype() {
           adminClasses: "班级管理",
           adminTeachers: "教师管理",
           adminStudents: "学生管理",
-          adminAiIssues: "AI服务问题",
           statistics: "学情",
           statisticsStudents: "全班学生学情",
           statisticsStudent: "学生成长",
@@ -551,7 +552,7 @@ export function usePrototype() {
   }
   function go(e) {
     if (isAdmin.value) {
-      if (["home", "adminClasses", "adminTeachers", "adminStudents", "adminAiIssues", "profile"].includes(e) && screen.value !== e)
+      if (["home", "adminClasses", "adminTeachers", "adminStudents", "profile"].includes(e) && screen.value !== e)
         guard(() => { adminDirty.value = false; navigate(e); });
       return;
     }
@@ -844,23 +845,14 @@ export function usePrototype() {
         await service.startAiReview(submissionId.value, role.value, failAnalysis.value);
       });
     },
-    reportAiIssue: async () => {
-      if (role.value !== "student" || !selectedSubmission.value) return;
-      await runAction(async () => { await service.reportAiIssue(submissionId.value, role.value); notify("已报告学校管理员"); });
-    },
     refreshAi: advanceAiQueue,
     mine,
     isTeacher,
     isAdmin,
     adminIdentity,
     adminDirty,
-    adminAiIssues: computed(() => {
-      state.value;
-      return isAdmin.value && adminIdentity.value && currentOrganization.value ? service.technicalAiIssues(currentOrganization.value.id, role.value) : [];
-    }),
     adminAction: async function ({ kind, data, success, message }) {
       const handlers = {
-        retryAiIssue: service?.retryAiIssue,
         saveClass: service?.saveClass,
         createTeacher: service?.createTeacher,
         setClassTeachers: service?.setClassTeachers,
@@ -1118,6 +1110,7 @@ export function usePrototype() {
     classStudents,
     scopedAssignments,
     visibleAssignments,
+    newAssignment,
     ongoingAssignments,
     closedAssignments,
     workCounts,

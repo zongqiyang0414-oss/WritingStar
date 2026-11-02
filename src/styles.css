@@ -1957,7 +1957,7 @@ textarea:focus {
 .personal-growth-summary .strong {
   font-size: 24px;
 }
-.personal-growth-entry {
+.new-assignment-entry {
   display: flex;
   width: 100%;
   align-items: center;
@@ -1965,13 +1965,13 @@ textarea:focus {
   gap: 12px;
   text-align: left;
 }
-.stage .personal-growth-entry {
+.stage .new-assignment-entry {
   margin: 18px 0;
 }
-.personal-growth-entry .small {
+.new-assignment-entry .small {
   margin-top: 5px;
 }
-.personal-growth-entry-mark {
+.new-assignment-entry-mark {
   color: var(--green);
   font-size: 24px;
   flex: none;
@@ -2197,3 +2197,8 @@ textarea:focus {
 @media (max-width: 900px) {
   .mobile-preview-tools { padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
 }
+
+.growth-nav-icon { display: flex; align-items: flex-end; justify-content: center; gap: 3px; height: 23px; padding-bottom: 2px; box-sizing: border-box; }
+.growth-nav-icon > view { width: 4px; border: 1.5px solid currentColor; border-radius: 2px 2px 0 0; height: 7px; }
+.growth-nav-icon > view:nth-child(2) { height: 13px; }
+.growth-nav-icon > view:nth-child(3) { height: 19px; }

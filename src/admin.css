@@ -18,7 +18,7 @@
 .admin-shortcut-icon.warm { color: #9b7a44; background: #f8f0df; }
 .admin-shortcut .entry-arrow { position: absolute; right: 13px; top: 20px; font-size: 18px; color: #8c9e8a; }
 .admin-shortcut .tiny { margin-top: 5px; font-size: 10px; }
-.admin-transfer-entry { display: flex; width: 100%; align-items: center; justify-content: space-between; text-align: left; padding: 16px 18px; border: 1px solid #dce6d6; background: #eef4e9; border-radius: 13px; margin-bottom: 20px; }
+.stage .admin-transfer-entry { display: flex; width: 100%; align-items: center; justify-content: space-between; text-align: left; padding: 16px 18px; border: 1px solid #dce6d6; background: #eef4e9; border-radius: 13px; margin-bottom: 20px; }
 .admin-transfer-entry > text { font-size: 28px; color: #65845d; }
 .admin-events { padding: 17px; }
 .admin-event { display: flex; gap: 10px; padding: 11px 0; }

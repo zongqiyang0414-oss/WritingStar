@@ -1,0 +1,100 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import http from 'node:http';
+import { createRequire } from 'node:module';
+import { MockService, clone } from '../src/services/mock.js';
+import { samplePhotos } from '../src/services/seed.js';
+const require = createRequire(import.meta.url);
+const { chromium } = require(process.env.WRITINGSTAR_PLAYWRIGHT_MODULE || 'playwright');
+const root = path.resolve('dist/client');
+const server = http.createServer((req, res) => {
+  const file = path.resolve(root, '.' + new URL(req.url!, 'http://localhost').pathname.replace(/\/$/, '/index.html'));
+  if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) { res.writeHead(404).end(); return; }
+  const types: any = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml' };
+  res.writeHead(200, { 'Content-Type': types[path.extname(file)] || 'application/octet-stream' }); fs.createReadStream(file).pipe(res);
+});
+let saved: any = null, stamp = Date.now();
+const service = new MockService({ read: () => clone(saved), write: value => { saved = clone(value); } }, () => new Date(stamp));
+for (const [role, code] of [['teacher', 'JS2026'], ['student', 'XS2026'], ['admin', 'MA2026']]) { await service.signIn(role); await service.bindInvitation(code, role); }
+for (const name of ['五年级（1）班', '五年级（2）班', '六年级（1）班']) await service.saveClass({ organizationId: 'organization-1', name }, 'admin');
+const failedAssignment = await service.createAssignment({ title: '原图重试验收', classId: 'class-1', dueAt: '', requirements: '保留原作业' }, 'teacher');
+const failed = await service.submit(failedAssignment.id, samplePhotos, '', 'student', false, true);
+const unavailableAssignment = await service.createAssignment({ title: '未开通服务验收', classId: 'class-1', dueAt: '', requirements: '真实照片不生成示例评分' }, 'teacher');
+await service.submit(unavailableAssignment.id, [{ ...samplePhotos[0], sample: false }], '', 'student');
+service.advanceAiReviews(); stamp += 3000; service.advanceAiReviews(); stamp += 3000; service.advanceAiReviews();
+await service.createAssignment({ title: '新作业快捷入口验收', classId: 'class-1', dueAt: '', requirements: '这是最新布置的作业' }, 'teacher');
+const fixture = service.read(), errors: string[] = [];
+let browser;
+try {
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${(server.address() as any).port}`;
+  browser = await chromium.launch({ executablePath: process.env.WRITINGSTAR_CHROMIUM_EXECUTABLE || '/usr/bin/chromium', headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+  const context = await browser.newContext({ viewport: { width: 390, height: 900 } });
+  await context.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' || /^(data|blob):/.test(route.request().url()) ? route.continue() : route.abort());
+  await context.addInitScript(state => {
+    if (!localStorage.getItem('jiaxiu-prototype-v1')) localStorage.setItem('jiaxiu-prototype-v1', JSON.stringify(state));
+    navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('Camera unavailable for this UI fixture', 'NotAllowedError'); };
+  }, fixture);
+  const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message)); page.setDefaultTimeout(15_000);
+  const button = (text: string | RegExp, scope: any = page) => scope.locator('uni-button').filter({ hasText: text });
+  const nav = (text: string) => button(text, page.locator('.bottom-nav')).click();
+  const role = (text: string) => button(text, page.locator('.role-picker')).click();
+  await page.goto(base, { waitUntil: 'networkidle' }); await role('学生');
+  await page.locator('.new-assignment-entry').waitFor();
+  assert.equal(await page.locator('.student-tip').count(), 0);
+  assert.equal(await page.locator('.growth-nav-icon > uni-view').count(), 3);
+  assert.match(await page.locator('.new-assignment-entry').innerText(), /新作业快捷入口验收/);
+  await page.locator('.new-assignment-entry').click();
+  assert.match(await page.locator('.page-body').innerText(), /这是最新布置的作业/);
+  await nav('我的'); assert.equal(await button('查看我的任务').count(), 0); assert.equal(await button('查看成长趋势').count(), 0);
+  await nav('记录'); assert.ok(await page.getByText('老师批阅中', { exact: true }).count());
+  await button('查看作品与批阅进度', page.locator('.submission-record').filter({ hasText: '原图重试验收' })).click();
+  const retry = button('用原图重新批阅'); await retry.waitFor(); assert.equal(await retry.getAttribute('disabled'), null);
+  await page.locator('.ai-empty-result').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: 'outputs/v018-student-retry.png' });
+  await retry.click(); await page.waitForFunction(() => !!document.querySelector('.ai-progress-card'));
+  const storedRetry = await page.evaluate(id => {
+    const raw = JSON.parse(localStorage.getItem('jiaxiu-prototype-v1')!); const state = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return state.submissions.find((item: any) => item.id === id);
+  }, failed.id);
+  assert.equal(storedRetry.aiReview.studentRetryTimes.length, 1); assert.deepEqual(storedRetry.photos, failed.photos);
+  await nav('记录'); await button('查看作品与批阅进度', page.locator('.submission-record').filter({ hasText: '未开通服务验收' })).click();
+  assert.match(await page.locator('.ai-empty-result').innerText(), /AI服务尚未开通/); assert.equal(await button('用原图重新批阅').count(), 0);
+  await role('管理员');
+  assert.equal(await page.locator('.admin-hero').count(), 0); assert.equal(await button('AI服务问题').count(), 0);
+  const entries = page.locator('.admin-transfer-entry'); const one = await entries.nth(0).boundingBox(), two = await entries.nth(1).boundingBox();
+  assert.ok(two.y - (one.y + one.height) >= 19, 'teacher entry keeps 20px bottom spacing');
+  await button('学生调班').click();
+  const picker = page.locator('.grade-class-picker').first(); await picker.locator('.grade-picker-trigger').click();
+  await button('五年级', picker.locator('.grade-picker-grades')).click();
+  assert.equal(await picker.locator('.grade-picker-classes .grade-picker-option').count(), 2);
+  await button('五年级（2）班', picker.locator('.grade-picker-classes')).click();
+  assert.match(await picker.locator('.grade-picker-trigger').innerText(), /五年级（2）班/);
+  assert.equal(await picker.locator('.grade-picker-panel').count(), 0);
+  await picker.locator('.grade-picker-trigger').click(); await page.screenshot({ path: 'outputs/v018-grade-class-picker.png' });
+  for (const width of [320, 390, 977]) { await page.setViewportSize({ width, height: 963 }); assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)); }
+  await page.goto(base + '/#/pages/scan/index?batch=paper&remaining=60', { waitUntil: 'networkidle' });
+  await page.locator('.scan-camera-lens').waitFor();
+  for (const text of ['对准作业，扫描成清晰的纸面', '纸张放平，保持光线均匀', '自动框选 · 清晰留存', '使用系统相机拍摄']) assert.equal(await page.getByText(text, { exact: true }).count(), 0);
+  const image = await page.evaluate(() => {
+    const canvas = document.createElement('canvas'); canvas.width = 720; canvas.height = 960; const c = canvas.getContext('2d')!;
+    c.fillStyle = '#555045'; c.fillRect(0, 0, 720, 960); c.fillStyle = '#faf8ed'; c.fillRect(90, 100, 540, 760);
+    c.fillStyle = '#153d82'; c.font = '24px sans-serif'; c.fillText('WritingStar scan review fixture', 130, 180);
+    return canvas.toDataURL('image/png');
+  });
+  const chooser = page.waitForEvent('filechooser'); await button('从相册扫描').click();
+  await (await chooser).setFiles({ name: 'synthetic-paper.png', mimeType: 'image/png', buffer: Buffer.from(image.split(',')[1], 'base64') });
+  await button('继续扫描').waitFor();
+  const continueButton = button('继续扫描'), finishButton = button(/^完成 \d+ 页$/);
+  assert.match(await continueButton.getAttribute('class'), /scan-primary/);
+  assert.ok((await continueButton.boundingBox()).x > (await finishButton.boundingBox()).x);
+  const countBefore = await page.locator('.scan-count').innerText(), urlBefore = page.url();
+  await page.screenshot({ path: 'outputs/v018-scan-review.png' });
+  await page.locator('[aria-label="返回拍照界面"]').click();
+  await page.locator('.scan-camera-lens').waitFor();
+  assert.equal(page.url(), urlBefore); assert.equal(await page.locator('.scan-count').innerText(), countBefore);
+  assert.equal(await page.locator('.scan-review-actions').count(), 0);
+  assert.deepEqual(errors, []);
+  console.log('v0.18 browser checks passed: student task shortcut/profile/growth icon, truthful AI state and bounded retry, admin spacing and cascading class selection, responsive layouts, scan cleanup and return without losing pages.');
+} finally { await browser?.close(); await new Promise<void>(resolve => server.close(() => resolve())); }

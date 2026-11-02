@@ -1,12 +1,19 @@
 <script setup>
 import WorkViewer from "./WorkViewer.vue";
 import { canResubmit as resubmissionOpen } from "../services/submissionPolicy.js";
-import { computed, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import { AI_RUNNING, aiQualityAttention } from "../services/aiReview.js";
 import { presentReview } from "../services/presentation.js";
 import { rubric, total } from "../services/rubric.js";
 
 const props = defineProps({ submission: {}, assignment: {}, student: {}, task: {}, teacher: Boolean, busy: Boolean, canResubmit: Boolean, canAllowResubmission: Boolean });
+const emit = defineEmits(["start"]);
+const clock = ref(Date.now());
+const timer = setInterval(() => { clock.value = Date.now(); }, 1000);
+onUnmounted(() => clearInterval(timer));
+const retry = computed(() => props.task?.retry);
+const retrySeconds = computed(() => Math.max(0, Math.ceil(((Date.parse(retry.value?.nextRetryAt || "") || 0) - clock.value) / 1000)));
+const retryEnabled = computed(() => !!retry.value && !retry.value.reason && !retrySeconds.value && !props.busy);
 const category = ref("handwriting"), collapsedDimensions = ref([]), photoIndex = ref(0);
 const phase = computed(() => props.task?.state || "notStarted");
 const running = computed(() => AI_RUNNING.includes(phase.value));
@@ -64,9 +71,16 @@ function toggleDimension(id) {
       <view class="ai-learning-note small">AI可能出错，请核查重要信息。</view>
     </template>
 
-    <view v-else class="card ai-empty-result">
-      <view class="section-title">{{ teacher ? (wrongPhoto ? '作品需要核对' : '批阅结果待就绪') : wrongPhoto ? '请核对本次作品，等待老师处理' : '作品已保存，AI结果正在准备' }}</view>
-      <view v-if="teacher && wrongPhoto" class="paragraph small">{{ attention.join('、') }}</view>
+    <view v-else class="card ai-empty-result" role="status">
+      <view class="section-title">{{ wrongPhoto ? '请核对本次作品，等待老师处理' : phase === 'failed' ? 'AI批阅失败，作品已保存' : phase === 'unavailable' ? 'AI服务暂不可用，作品已保存' : phase === 'cancelled' ? '老师批阅中' : '作品已保存，等待批阅' }}</view>
+      <view v-if="wrongPhoto" class="paragraph small">{{ attention.join('、') }}</view>
+      <view v-else-if="phase === 'unavailable'" class="paragraph small">AI服务尚未开通，本次暂时无法生成结果。老师批阅完成后，可在作业记录中查看反馈。</view>
+      <view v-else-if="phase === 'failed'" class="paragraph small">{{ task?.autoRetryCount ? '已自动重试一次，仍未完成。' : '本次批阅未完成。' }}可以使用原图重新批阅，无需再次上传。</view>
+      <view v-else class="paragraph small">老师完成批阅后，可在作业记录中查看反馈。</view>
+      <template v-if="!teacher && !wrongPhoto && ['failed', 'unavailable'].includes(phase)">
+        <button v-if="phase === 'failed' || !retry?.reason" class="primary full-width spaced" :disabled="!retryEnabled" @click="emit('start')">{{ busy ? '正在安排…' : retrySeconds && !retry?.reason ? `请在 ${retrySeconds} 秒后重试` : '用原图重新批阅' }}</button>
+        <view v-if="phase === 'failed'" class="paragraph small subtle">{{ retry?.reason || `本份作品还可重试 ${retry?.remaining || 0} 次；每次间隔60秒，24小时内最多5次。` }}</view>
+      </template>
     </view>
 
 

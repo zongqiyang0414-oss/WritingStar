@@ -195,13 +195,13 @@ export async function chooseScanSource(source = "album") {
 }
 
 export function chooseScanSources(source = "album", remaining = 1) {
-  const limit = source === "camera" ? 1 : Math.max(0, Math.floor(remaining));
+  if (source !== "album") return Promise.reject(new Error("仅支持从相册导入，请使用扫描页内的相机拍摄。"));
+  const limit = Math.max(0, Math.floor(remaining));
   if (!limit) return Promise.resolve([]);
   // #ifdef H5
   return new Promise((resolve, reject) => {
     const input = document.createElement("input"); input.type = "file"; input.accept = "image/jpeg,image/png,image/webp";
-    input.multiple = source === "album" && limit > 1;
-    if (source === "camera") input.setAttribute("capture", "environment");
+    input.multiple = limit > 1;
     input.style.cssText = "position:fixed;left:-10000px;width:1px;height:1px";
     document.body.appendChild(input);
     const finish = paths => { input.remove(); resolve(paths); };
@@ -227,7 +227,7 @@ export function chooseScanSources(source = "album", remaining = 1) {
     const finish = paths => paths?.length ? resolve(paths.slice(0, limit)) : reject(new Error("未读到选择的照片，请重试。"));
     // The native picker owns privacy consent; album access never needs camera
     // permission. WeChat allows at most nine still images per picker session.
-    if (source === "album" && typeof wx !== "undefined" && wx.chooseMedia) wx.chooseMedia({
+    if (typeof wx !== "undefined" && wx.chooseMedia) wx.chooseMedia({
       count: Math.min(9, limit), mediaType: ["image"], sourceType: [source], sizeType: ["original"],
       success: result => finish(result.tempFiles?.map(file => file.tempFilePath)), fail,
     });
@@ -240,11 +240,11 @@ export function chooseScanSources(source = "album", remaining = 1) {
 
 // #ifdef H5
 export async function openBrowserCamera(host, onFrame) {
-  if (window.isSecureContext === false) throw scanAccessError("当前网页不是安全连接，Chrome 不允许直接使用摄像头。请通过 HTTPS 打开网站，或使用系统相机／相册扫描。", "web-insecure", "web-help");
+  if (window.isSecureContext === false) throw scanAccessError("当前网页不是安全连接，Chrome 不允许直接使用摄像头。请通过 HTTPS 打开网站，或从相册导入。", "web-insecure", "web-help");
   const policy = document.permissionsPolicy || document.featurePolicy;
   if (policy?.allowsFeature && !policy.allowsFeature("camera"))
-    throw scanAccessError("当前嵌入页面禁止使用摄像头。请在 Chrome 新标签页直接打开完整网站后扫描；也可以使用系统相机或相册。", "web-policy", "web-help");
-  if (!navigator.mediaDevices?.getUserMedia) throw scanAccessError("当前浏览器不支持实时相机。可使用系统相机拍摄，或从相册扫描。", "web-camera-unsupported");
+    throw scanAccessError("当前嵌入页面禁止使用摄像头。请在 Chrome 新标签页直接打开完整网站后扫描；也可以从相册导入。", "web-policy", "web-help");
+  if (!navigator.mediaDevices?.getUserMedia) throw scanAccessError("当前浏览器不支持实时相机。可从相册扫描。", "web-camera-unsupported");
   if (!host) throw new Error("相机预览区尚未就绪，请重新打开扫描页。");
   let stream;
   try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false }); }

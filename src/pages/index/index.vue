@@ -90,13 +90,11 @@ const { bottomInset: bottomInset } = {
     publishAiBatch,
     startSingleAi,
     refreshAi,
-    reportAiIssue,
     mine: mine,
     isTeacher: isTeacher,
     isAdmin,
     adminIdentity,
     adminDirty,
-    adminAiIssues,
     adminAction,
     identity: identity,
     myHistory: myHistory,
@@ -140,6 +138,7 @@ const { bottomInset: bottomInset } = {
     currentClass: currentClass,
     classStudents: classStudents,
     visibleAssignments: visibleAssignments,
+    newAssignment,
     ongoingAssignments: ongoingAssignments,
     closedAssignments: closedAssignments,
     workCounts: workCounts,
@@ -216,7 +215,7 @@ function toggleFeedbackDimension(id) {
       </view>
       <view class="intro-foot">
         <text class="tiny-dot" />
-        原型展示 · v0.17.0
+        原型展示 · v0.18.0
       </view>
     </view>
     <!-- #endif -->
@@ -272,7 +271,6 @@ function toggleFeedbackDimension(id) {
             :administrator="adminIdentity"
             :section="screen"
             :busy="busy"
-            :ai-issues="adminAiIssues"
             @navigate="go"
             @action="adminAction"
             @confirm="modal = $event"
@@ -360,7 +358,6 @@ function toggleFeedbackDimension(id) {
                 :busy="busy"
                 @start="startSingleAi"
                 @refresh="refreshAi"
-                @report="reportAiIssue"
                 :can-resubmit="canSubmit"
                 :can-allow-resubmission="canAllowResubmission(selectedSubmission)"
                 @back="back"
@@ -494,31 +491,11 @@ function toggleFeedbackDimension(id) {
                         当前学生已不在班级，作品与已审核反馈保留。请联系学校管理员核对。
                       </view>
                     </template>
-                    <view class="student-tip">
-                      <view class="tip-symbol"> ✦ </view>
-                      <view>
-                        <view class="strong">
-                          {{ "先读要求，再动笔" }}
-                        </view>
-                        <view class="small subtle">
-                          同一份作文，收获书写和写作两份建议。
-                        </view>
-                      </view>
-                    </view>
-                    <button
-                      class="personal-growth-entry card"
-                      @click="(e) => go('growth')"
-                    >
-                      <view>
-                        <view class="strong"> {{ "看看我的成长" }} </view>
-                        <view class="small subtle">
-                          已收到
-                          {{ growthSummary?.feedbackCount || 0 }} 份作业反馈 ·
-                          {{ growthSummary?.submissionCount || 0 }} 份作业
-                        </view>
-                      </view>
-                      <text class="personal-growth-entry-mark"> </text>
+                    <button v-if="newAssignment" class="new-assignment-entry card" :disabled="busy" @click="openAssignment(newAssignment)">
+                      <view><view class="strong">有新作业，去看看</view><view class="small subtle">{{ newAssignment.title }}</view></view>
+                      <text class="new-assignment-entry-mark">›</text>
                     </button>
+                    <view v-else class="notice">暂时没有新的待提交作业，有新作业时可在这里一键查看详情。</view>
                     <view class="section-heading">
                       <view class="section-title">
                         我的双写任务
@@ -1492,18 +1469,6 @@ function toggleFeedbackDimension(id) {
                                             </button>
                                           </view>
                                           <button
-                                            class="secondary spaced"
-                                            @click="(e) => go('home')"
-                                          >
-                                            {{ "查看我的任务" }}
-                                          </button>
-                                          <button
-                                            class="secondary spaced personal-growth-profile-link"
-                                            @click="(e) => go('growth')"
-                                          >
-                                            查看成长趋势
-                                          </button>
-                                          <button
                                             class="text-button full-width spaced"
                                             @click="bindingHelp"
                                           >
@@ -1615,7 +1580,7 @@ function toggleFeedbackDimension(id) {
               :disabled="busy"
               @click="(e) => go('growth')"
             >
-              <text class="nav-glyph"> </text>
+              <view class="nav-glyph growth-nav-icon" aria-hidden="true"><view /><view /><view /></view>
               <text> 成长 </text>
             </button>
           </template>

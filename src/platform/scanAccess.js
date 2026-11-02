@@ -22,7 +22,7 @@ export function nativeScanError(cause, operation = "camera") {
     return operation === "album"
       ? scanAccessError("未获准选择照片，请重新选择并允许访问。相册选图不需要小程序的摄像头授权。", "wx-album-denied", "mini-settings", cause)
       : scanAccessError("未获准使用相机。请在本小程序的设置中允许摄像头；若没有该选项，请点击“开启相机”先触发授权。", "wx-camera-denied", "mini-settings", cause);
-  return scanAccessError(operation === "album" ? "相册未能打开，请稍后重试。" : "相机未能启动，可重试或使用系统相机拍摄。", "wx-media-failed", "", cause);
+  return scanAccessError(operation === "album" ? "相册未能打开，请稍后重试。" : "相机未能启动，可重试或从相册导入。", "wx-media-failed", "", cause);
 }
 
 export function browserScanError(cause) {
@@ -31,8 +31,8 @@ export function browserScanError(cause) {
   if (name === "NotAllowedError" || name === "PermissionDeniedError" || name === "SecurityError")
     return scanAccessError("Chrome 未允许此网站使用相机。请在地址栏的网站权限中允许相机，并检查手机设置是否允许 Chrome 使用相机；修改后点击重试。", "web-camera-denied", "web-help", cause);
   if (name === "NotFoundError" || name === "DevicesNotFoundError")
-    return scanAccessError("没有找到可用摄像头，可以使用系统相机拍摄或从相册扫描。", "web-camera-missing", "", cause);
+    return scanAccessError("没有找到可用摄像头，可以从相册扫描。", "web-camera-missing", "", cause);
   if (name === "NotReadableError" || name === "TrackStartError" || name === "AbortError")
     return scanAccessError("相机可能正被其他应用占用。请关闭占用相机的应用，再点击重试。", "web-camera-busy", "", cause);
-  return scanAccessError("相机未能开启，可以重试、使用系统相机拍摄或从相册扫描。", "web-camera-failed", "", cause);
+  return scanAccessError("相机未能开启，可以重试或从相册扫描。", "web-camera-failed", "", cause);
 }

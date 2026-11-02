@@ -135,12 +135,7 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   assert.match(JSON.stringify(blocked.render()), /chooseMedia:fail api scope is not declared/, 'failed clipboard does not hide the media failure');
   blocked.close();
 
-  const system = createPage();
-  const capture = template.match(/<button\b[^>]+>使用系统相机拍摄/)[0];
-  await system.render()[event(capture, 'bindtap')]();
-  assert.equal(system.systemPhotos, 1);
-  assert.match(JSON.stringify(system.render()), /确认并处理|corners|拖动四角/);
-  system.close();
+  assert.doesNotMatch(template, /使用系统相机拍摄/, 'system-camera import entry is removed');
 
   // Run real compiled mini-program event bindings with native client coordinates.
   // Browser touch input does not establish that WXML catches the same gestures.
@@ -164,5 +159,5 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   assert.equal(touchHost.previews[0].current,'/tmp/scan-test.jpg');
   assert.equal(touchHost.previews[0].urls.length,2);
   touchHost.close();
-  console.log('WeChat compiled scan checks passed: native consent, real privacy rejection, contract link, clipboard failure, system photo, picker lifecycle, capture cover-image, native pinch bindings and full-image preview.');
+  console.log('WeChat compiled scan checks passed: native consent, real privacy rejection, contract link, clipboard failure, removed system photo, picker lifecycle, capture cover-image, native pinch bindings and full-image preview.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

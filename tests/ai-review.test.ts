@@ -186,3 +186,59 @@ test('人工批阅或已发布作品不会被迟到的AI完成回写；教师允
   await late.service.finishAnalysis('submission-1');
   assert.deepEqual(late.service.read().submissions[0], publishedAfterFailure);
 });
+
+test('学生原图重试限制：运行中去重、60秒冷却、刷新保留、每份最多两次', async () => {
+  const env = setup(), { service } = env; await bind(service, 'student', 'XS2026');
+  const submitted = await service.submit('assignment-plan-1', samplePhotos, '原图不能丢失', 'student', false, true);
+  finishWorker(env);
+  await service.startAiReview(submitted.id, 'student', true);
+  const running = service.aiResult(submitted.id, 'student');
+  assert.equal(running.retry.remaining, 1);
+  const writes = env.writes(); await service.startAiReview(submitted.id, 'student', true);
+  assert.equal(env.writes(), writes);
+  assert.equal(service.aiResult(submitted.id, 'student').id, running.id);
+  finishWorker(env);
+  await assert.rejects(service.startAiReview(submitted.id, 'student'), /秒后再重试/);
+  const reload = new MockService(env.storage, env.clock);
+  await assert.rejects(reload.startAiReview(submitted.id, 'student'), /秒后再重试/);
+  env.advance(60_000);
+  await reload.startAiReview(submitted.id, 'student', true);
+  reload.advanceAiReviews(); env.advance(3000); reload.advanceAiReviews();
+  env.advance(3000); reload.advanceAiReviews();
+  env.advance(60_000);
+  await assert.rejects(reload.startAiReview(submitted.id, 'student'), /次数已用完/);
+  const final = reload.read().submissions.find(item => item.id === submitted.id);
+  assert.equal(final.aiReview.studentRetryTimes.length, 2);
+  assert.deepEqual(final.photos, submitted.photos);
+  assert.equal(final.note, '原图不能丢失'); assert.equal(final.version, 1);
+});
+
+test('学生24小时重试额度跨作业计算，日限到期后恢复且不绕过单份上限', async () => {
+  const env = setup(), { service } = env;
+  await bind(service, 'student', 'XS2026'); await bind(service, 'teacher', 'JS2026');
+  let last;
+  for (let n = 0; n < 3; n++) {
+    const assignment = await service.createAssignment({ title: '失败重试测试' + n, classId: 'class-1', dueAt: '', requirements: '' }, 'teacher');
+    last = await service.submit(assignment.id, samplePhotos, '', 'student', false, true); finishWorker(env);
+    for (let retry = 0; retry < (n === 2 ? 1 : 2); retry++) {
+      env.advance(60_000); await service.startAiReview(last.id, 'student', true); finishWorker(env);
+    }
+  }
+  env.advance(60_000);
+  await assert.rejects(service.startAiReview(last.id, 'student'), /24小时/);
+  env.advance(24 * 60 * 60 * 1000);
+  await service.startAiReview(last.id, 'student'); finishWorker(env);
+  assert.equal(service.aiResult(last.id, 'student').state, 'completed');
+});
+
+test('真实照片服务未开通时明确终止等待，不自动空转或消耗学生重试次数', async () => {
+  const env = setup(), { service } = env; await bind(service, 'student', 'XS2026');
+  const submitted = await service.submit('assignment-plan-1', [{ ...samplePhotos[0], sample: false }], '', 'student');
+  finishWorker(env);
+  const task = service.aiResult(submitted.id, 'student');
+  assert.equal(task.state, 'unavailable'); assert.equal(task.attempt, 1); assert.equal(task.result, null);
+  assert.match(task.error, /尚未开通/); assert.equal(task.retry.remaining, 2);
+  const before = service.read();
+  await assert.rejects(service.startAiReview(submitted.id, 'student'), /尚未开通/);
+  assert.deepEqual(service.read(), before);
+});
