@@ -323,9 +323,9 @@ onBeforeUnmount(() => {
         <template v-if="publishedPointCount" />
         <template v-else>
           <view :key="1" class="trend-empty">
-            <view class="strong"> 暂无已审核成绩 </view>
+            <view class="strong"> 暂无已批阅成绩 </view>
             <view class="small subtle">
-              老师完成审核后，这里会显示成绩变化。
+              教师批阅完成后，这里会显示成绩变化。
             </view>
           </view>
         </template>
@@ -393,7 +393,7 @@ onBeforeUnmount(() => {
     </template>
     <template v-if="1 === publishedPointCount">
       <view :key="2" class="tiny subtle trend-hint">
-        已有1个成绩点，更多作业完成审核后可查看连线趋势。
+        已有1个成绩点，更多作业完成批阅后可查看连线趋势。
       </view>
     </template>
     <template v-else>

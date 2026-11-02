@@ -17,7 +17,7 @@ async function setup() {
   return { service, storage, assignment, advance, fail: (value: boolean) => { fail = value; } };
 }
 
-test("技术失败自动重试一次，保留提交和照片，管理员只得到故障元数据，学生用原图重试", async () => {
+test("技术失败自动重试一次，保留提交和照片，学生在本人页面用原图重试", async () => {
   const { service, assignment, advance } = await setup();
   const item = await service.submit(assignment.id, samplePhotos, "原提交说明", "student", false, true);
   advance();
@@ -25,17 +25,13 @@ test("技术失败自动重试一次，保留提交和照片，管理员只得�
   assert.equal(service.aiResult(item.id, "student").autoRetryCount, 1);
   advance();
   const failed = service.aiResult(item.id, "student");
-  assert.equal(failed.state, "failed"); assert.ok(failed.reportedAt);
+  assert.equal(failed.state, "failed"); assert.equal(failed.reportedAt, null);
   assert.equal(service.latest(assignment.id, "student-1").version, 1);
-  const issues = service.technicalAiIssues("organization-1", "admin");
-  assert.equal(issues.length, 1);
-  assert.equal("photos" in issues[0], false); assert.equal("published" in issues[0], false); assert.equal("note" in issues[0], false);
   assert.equal(aiAssignmentSummary(aiAssignmentRows(service.read(), assignment.id)).attention, 0, "技术故障不作为教师质量提醒");
   await service.startAiReview(item.id, "student"); advance();
   assert.equal(service.aiResult(item.id, "student").state, "completed");
   assert.deepEqual(service.latest(assignment.id, "student-1").photos, samplePhotos);
   assert.equal(service.read().submissions.filter((s: any) => s.assignmentId === assignment.id).length, 1);
-  assert.equal(service.technicalAiIssues("organization-1", "admin").length, 0);
 });
 
 test("低于60或图片质量问题需逐份审核，不进入一键发布；图片异常仍需教师允许后重新提交", async () => {
@@ -58,18 +54,16 @@ test("低于60或图片质量问题需逐份审核，不进入一键发布；图
   assert.ok(service.read().submissions.find((s: any) => s.id === item.id));
 });
 
-test("管理员技术处理按学校鉴权，失败回滚；教师和普通学生不能操作管理入口", async () => {
+test("原图重试仅本人可用，管理员不能批阅；保存失败不消耗次数", async () => {
   const { service, assignment, advance, fail } = await setup();
   const item = await service.submit(assignment.id, samplePhotos, "", "student", false, true); advance(); advance();
-  assert.throws(() => service.technicalAiIssues("organization-2", "admin"), /管理范围/);
-  assert.throws(() => service.technicalAiIssues("organization-1", "teacher"), /管理员/);
-  await assert.rejects(service.retryAiIssue({ submissionId: item.id }, "student"), /管理员/);
+  await assert.rejects(service.startAiReview(item.id, "admin"), /教师或学生/);
   const before = service.read(); fail(true);
-  await assert.rejects(service.retryAiIssue({ submissionId: item.id }, "admin"), /存储满/);
+  await assert.rejects(service.startAiReview(item.id, "student"), /存储满/);
   assert.deepEqual(service.read(), before); fail(false);
-  await service.retryAiIssue({ submissionId: item.id }, "admin"); advance();
+  await service.startAiReview(item.id, "student"); advance();
   assert.equal(service.aiResult(item.id, "student").state, "completed");
-  assert.equal(service.read().administrationEvents[0].description, "处理AI服务问题并重新分析");
+  assert.equal(service.read().submissions.find((s: any) => s.id === item.id).aiReview.studentRetryTimes.length, 1);
 });
 
 

@@ -17,13 +17,13 @@ export type Screen =
   | "submit"
   | "feedback"
   | "records"
+  | "notifications"
   | "profile"
   | "create"
   | "classes"
   | "classMembers"
   | "adminClasses"
   | "adminTeachers"
-  | "adminAiIssues"
   | "adminStudents"
   | "aiReview"
   | "aiBatch"
@@ -33,7 +33,7 @@ export type Screen =
   | "excellentWork"
   | "growth";
 // Administration uses separate navigation and does not grant teaching or feedback access.
-export type AdminScreen = "home" | "adminClasses" | "adminTeachers" | "adminStudents" | "adminAiIssues" | "profile";
+export type AdminScreen = "home" | "adminClasses" | "adminTeachers" | "adminStudents" | "profile";
 
 export interface Administrator {
   id: string;
@@ -187,6 +187,7 @@ export interface AiReviewTask {
   simulateFailure?: boolean;
   initializeDraft?: boolean;
   autoRetryCount?: number;
+  studentRetryTimes?: string[];
   reportedAt?: string | null;
   qualityFlags?: Array<"wrongImage" | "unreadable">;
 }
@@ -210,6 +211,8 @@ export interface PrototypeState {
   assignmentTemplates?: AssignmentTemplate[];
   students: Student[];
   submissions: Submission[];
+  /** Per-student read receipts; notifications derive from actual task events. */
+  studentNotificationReads?: Record<string, Record<string, string>>;
 }
 export interface StorageAdapter {
   read(): unknown;

@@ -1957,25 +1957,10 @@ textarea:focus {
 .personal-growth-summary .strong {
   font-size: 24px;
 }
-.personal-growth-entry {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  text-align: left;
-}
-.stage .personal-growth-entry {
-  margin: 18px 0;
-}
-.personal-growth-entry .small {
-  margin-top: 5px;
-}
-.personal-growth-entry-mark {
-  color: var(--green);
-  font-size: 24px;
-  flex: none;
-}
+ .student-task-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; padding: 5px; margin: 0 0 16px; background: #edf2e9; border-radius: 13px; }
+.stage .student-task-tab { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 1px; font-size: 13px; line-height: 1.5; border-radius: 9px; color: #687d64; background: transparent; }
+.stage .student-task-tab.active { color: #23634c; background: #fff; box-shadow: 0 2px 8px rgba(40, 75, 46, .07); font-weight: 600; }
+.student-task-tab-count { font-size: 11px; font-weight: 400; opacity: .8; }
 .learner-bottom-nav button {
   width: 25%;
 }
@@ -2197,3 +2182,8 @@ textarea:focus {
 @media (max-width: 900px) {
   .mobile-preview-tools { padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
 }
+
+.growth-nav-icon { display: flex; align-items: flex-end; justify-content: center; gap: 3px; height: 23px; padding-bottom: 2px; box-sizing: border-box; }
+.growth-nav-icon > view { width: 4px; border: 1.5px solid currentColor; border-radius: 2px 2px 0 0; height: 7px; }
+.growth-nav-icon > view:nth-child(2) { height: 13px; }
+.growth-nav-icon > view:nth-child(3) { height: 19px; }

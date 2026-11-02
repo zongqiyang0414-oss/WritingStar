@@ -123,7 +123,7 @@ function submitReady() {
   const selected = ready.value.flatMap(g => g.rows), ids = new Set(selected.map(r => r.id));
   if (!selected.length) return;
   emit("confirm", { title: props.teacher ? `提交 ${ready.value.length} 位学生的答题卡？` : "确认提交本次答题卡？",
-    body: `共 ${selected.length} 页，已按学生码和页码归档。提交后进入AI批阅；待确认和缺页页面继续保留。`,
+    body: `共 ${selected.length} 页，已按学生码和页码归档。提交后进入AI批阅。`,
     confirm: "确认提交", action: () => {
       emit("submit", { rows: selected, complete: async () => {
         rows.value = rows.value.filter(r => !ids.has(r.id));

@@ -15,6 +15,7 @@ import {
   sampleReview,
 } from "./seed.js";
 import { canResubmit, prepareSubmissionPolicy } from "./submissionPolicy.js";
+import { studentNotifications as buildStudentNotifications } from "./studentWorkspace.js";
 import { emptyReview, validateReview } from "./rubric.js";
 import { migrateStudentEntry } from "./migration.js";
 import { withClassPractice } from "./classPractice.js";
@@ -281,6 +282,20 @@ export class MockService extends AiReviewService {
     const a = getBoundStudent(this.state, role);
     if (!a) throw new Error("请先登录并完成学习档案绑定。");
     return a;
+  }
+  studentNotifications(role) {
+    return buildStudentNotifications(this.state, this.learner(role).id);
+  }
+  async markStudentNotificationRead(notificationId, role) {
+    const student = this.learner(role);
+    const notification = buildStudentNotifications(this.state, student.id).find(item => item.id === notificationId);
+    if (!notification) throw new Error("这条通知已更新，请返回消息列表查看。");
+    const reads = this.state.studentNotificationReads || {};
+    if (reads[student.id]?.[notificationId]) return notification;
+    this.commit({ ...this.state, studentNotificationReads: {
+      ...reads, [student.id]: { ...reads[student.id], [notificationId]: this.clock().toISOString() },
+    } });
+    return notification;
   }
   teacher(role) {
     if ("teacher" !== role) throw new Error("此操作需要教师身份。");

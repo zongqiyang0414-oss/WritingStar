@@ -1,7 +1,47 @@
 import qrcode from "qrcode-generator";
 import { encodePaperCode } from "../services/paperWorkflow.js";
 
-export const CARD_WIDTH = 794, CARD_HEIGHT = 1123;
+// PDF coordinates: preserve the approved A3 landscape front/back layout.
+export const CARD_WIDTH = 1191, CARD_HEIGHT = 842;
+export const CARD_PAPER = { width: 1190.55, height: 841.89 };
+const backgroundLoads = new Map();
+export function cardBackgroundPath(page) {
+  return `/static/paper/fangyuan-${page === 1 ? 1 : 2}.png`;
+}
+export function loadAnswerCardBackground(page) {
+  const path = cardBackgroundPath(page);
+  if (!backgroundLoads.has(path)) {
+    const loading = new Promise((resolve, reject) => {
+      // #ifdef H5
+      if (typeof Image !== "undefined") {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("作业模板加载失败，请重试。"));
+        image.src = `${import.meta.env?.BASE_URL || "/"}${path.slice(1)}`;
+      }
+      // #endif
+      // #ifndef H5
+      if (typeof Image === "undefined") uni.getImageInfo({ src: path,
+        success: result => resolve(result.path), fail: () => reject(new Error("作业模板加载失败，请重试。")) });
+      // #endif
+    }).catch(failure => { backgroundLoads.delete(path); throw failure; });
+    backgroundLoads.set(path, loading);
+  }
+  return backgroundLoads.get(path);
+}
+
+// Conservative glyph widths keep long Chinese titles inside the blank panel
+// with identical line breaks on browser and native canvas implementations.
+function wrapText(value, width, size) {
+  const lines = []; let line = "", used = 0;
+  for (const char of String(value || "").replace(/\s+/g, " ").trim()) {
+    const advance = size * (/[^\x00-\xff]/.test(char) ? 1 : .66);
+    if (line && used + advance > width) { lines.push(line); line = ""; used = 0; }
+    line += char; used += advance;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
 export function qrMatrix(code) {
   const qr = qrcode(0, "M"); qr.addData(code); qr.make();
   return Array.from({length: qr.getModuleCount()}, (_, y) => Array.from({length: qr.getModuleCount()}, (_, x) => qr.isDark(y, x)));
@@ -11,37 +51,39 @@ export function cardDrawing(assignment, card, page) {
   const code = encodePaperCode(card, page, assignment.paperPacket.pages), matrix = qrMatrix(code), commands = [];
   const rect = (x, y, w, h, color) => commands.push({ kind: "rect", x, y, w, h, color });
   const text = (value, x, y, size = 16, color = "#263d34") => commands.push({ kind: "text", value, x, y, size, color });
-  const line = (x, y, x2, y2, color = "#c5d3ca") => commands.push({ kind: "line", x, y, x2, y2, color });
   rect(0, 0, CARD_WIDTH, CARD_HEIGHT, "#ffffff");
-  for (const [x, y] of [[24, 24], [758, 24], [758, 1087], [24, 1087]]) rect(x, y, 12, 12, "#000000");
-  text("写字星  /  WRITINGSTAR", 52, 65, 15, "#257b61");
-  const title = assignment.title.length > 24 ? assignment.title.slice(0, 23) + "…" : assignment.title;
-  text(title, 52, 108, 26);
-  text(`${card.className}   姓名：${card.studentName}`, 52, 147, 18);
-  text(`学号：${card.studentNumber || "—"}     第 ${page} / ${assignment.paperPacket.pages} 页`, 52, 178, 16);
-  const size = 132, unit = size / (matrix.length + 8), qx = 610, qy = 82;
+  commands.push({ kind: "image", source: cardBackgroundPath(page), x: 0, y: 0, w: CARD_WIDTH, h: CARD_HEIGHT });
+  const front = page === 1, left = front ? 64 : 820;
+  const block = (value, x, y, width, size, maxLines, leading = size * 1.35) => {
+    const lines = wrapText(value, width, size);
+    for (let i = 0; i < Math.min(lines.length, maxLines); i++)
+      text(lines[i] + (i === maxLines - 1 && lines.length > maxLines ? "…" : ""), x, y + i * leading, size);
+  };
+  block(assignment.title, left, 72, 330, 18, 3, 21);
+  if (front) rect(62, 121, 341, 49, "#ffffff");
+  block(`班级：${card.className}`, left, 139, 185, 10, 1);
+  block(`姓名：${card.studentName}`, left + 195, 139, 140, 10, 1);
+  block(`学号：${card.studentNumber || "—"}`, left, 160, 230, 10, 1);
+  text("分数：________", left + 245, 160, 10);
+  const size = 122, unit = size / (matrix.length + 8), qx = left + 104, qy = 190;
+  rect(qx, qy, size, size, "#ffffff");
   for (let y = 0; y < matrix.length; y++) for (let x = 0; x < matrix.length; x++)
     if (matrix[y][x]) rect(qx + (x + 4) * unit, qy + (y + 4) * unit, unit + .08, unit + .08, "#000000");
-  text("学生专属码 · 请保持清晰", 604, 232, 11, "#46554c");
-  line(52, 252, 742, 252);
-  const requirements = assignment.requirements.replace(/\s+/g, " ");
-  text("本次要求", 52, 279, 14);
-  const chunks = Array.from(requirements.matchAll(/.{1,43}/gu)).map(match => match[0]);
-  for (let i = 0; i < Math.min(chunks.length, 3); i++) text(chunks[i] + (i === 2 && chunks.length > 3 ? "…" : ""), 52, 303 + i * 21, 14);
-  if (chunks.length > 3) text("完整作业要求请查看学生端本次作业。", 52, 372, 11, "#65756b");
-  text("题目：", 52, 394, 16); line(106, 400, 742, 400);
-  const left = 52, top = 430, cell = 34.5, cols = 20, rows = 18;
-  for (let x = 0; x <= cols; x++) line(left + x * cell, top, left + x * cell, top + rows * cell);
-  for (let y = 0; y <= rows; y++) line(left, top + y * cell, left + cols * cell, top + y * cell);
-  text("A4 原比例打印 · 请勿裁去四角定位标记与学生码 · 完成后逐页拍照上传", 52, 1080, 12, "#65756b");
-  text(code, 52, 1103, 8, "#46554c");
+  text(`学生专属码 · 第 ${page} / ${assignment.paperPacket.pages} 页`, left + 90, 330, 10, "#46554c");
+  if (assignment.requirements?.trim()) {
+    block(`本次要求：${assignment.requirements}`, left, 356, 330, 10, 3, 14);
+    if (wrapText(`本次要求：${assignment.requirements}`, 330, 10).length > 3)
+      text("完整作业要求请查看学生端本次作业。", left, 402, 9, "#65756b");
+  }
+  text(code, left, front ? 182 : 421, 7, "#46554c");
   return { commands, code };
 }
-export function drawAnswerCard(ctx, assignment, card, page) {
+export function drawAnswerCard(ctx, assignment, card, page, background) {
   const { commands, code } = cardDrawing(assignment, card, page);
   for (const c of commands) {
     if (ctx.setFillStyle) ctx.setFillStyle(c.color); else ctx.fillStyle = c.color;
     if (c.kind === "rect") ctx.fillRect(c.x, c.y, c.w, c.h);
+    if (c.kind === "image") ctx.drawImage(background || c.source, c.x, c.y, c.w, c.h);
     if (c.kind === "text") {
       if (ctx.setFontSize) ctx.setFontSize(c.size); else ctx.font = `${c.size}px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif`;
       ctx.fillText(c.value, c.x, c.y);
@@ -56,13 +98,14 @@ export function drawAnswerCard(ctx, assignment, card, page) {
 }
 
 // #ifdef H5
-export function answerCardImage(assignment, card, page, scale = 1.5) {
+export async function answerCardImage(assignment, card, page, scale = 1.5) {
+  const background = await loadAnswerCardBackground(page);
   const canvas = document.createElement("canvas"); canvas.width = CARD_WIDTH * scale; canvas.height = CARD_HEIGHT * scale;
-  const ctx = canvas.getContext("2d"); ctx.scale(scale, scale); drawAnswerCard(ctx, assignment, card, page);
+  const ctx = canvas.getContext("2d"); ctx.scale(scale, scale); drawAnswerCard(ctx, assignment, card, page, background);
   return canvas.toDataURL("image/png");
 }
-export function downloadAnswerCard(assignment, card, page) {
-  const link = document.createElement("a"); link.href = answerCardImage(assignment, card, page, 2);
+export async function downloadAnswerCard(assignment, card, page) {
+  const link = document.createElement("a"); link.href = await answerCardImage(assignment, card, page, 2);
   link.download = `${assignment.title}-${card.studentName}-第${page}页.png`; link.click();
 }
 export async function printAnswerCards(assignment, cards, onProgress = () => {}) {
@@ -79,13 +122,14 @@ export async function printAnswerCards(assignment, cards, onProgress = () => {})
   try {
     doc.title = frame.title;
     const style = doc.createElement("style");
-    style.textContent = "@page{size:A4;margin:0}html,body{margin:0;padding:0}img{display:block;width:210mm;height:297mm;break-after:page;page-break-after:always}img:last-child{break-after:auto;page-break-after:auto}";
+    style.textContent = "@page{size:A3 landscape;margin:0}html,body{margin:0;padding:0}img{display:block;width:420mm;height:297mm;break-after:page;page-break-after:always}img:last-child{break-after:auto;page-break-after:auto}";
     doc.head.append(style);
     const total = cards.length * assignment.paperPacket.pages;
     let completed = 0;
     for (const card of cards) for (let page = 1; page <= assignment.paperPacket.pages; page++) {
+      const background = await loadAnswerCardBackground(page);
       const canvas = document.createElement("canvas"); canvas.width = CARD_WIDTH * 1.5; canvas.height = CARD_HEIGHT * 1.5;
-      const ctx = canvas.getContext("2d"); ctx.scale(1.5, 1.5); drawAnswerCard(ctx, assignment, card, page);
+      const ctx = canvas.getContext("2d"); ctx.scale(1.5, 1.5); drawAnswerCard(ctx, assignment, card, page, background);
       const blob = await new Promise((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("答题卡生成失败，请重试。")), "image/png"));
       canvas.width = canvas.height = 0;
       const url = URL.createObjectURL(blob); urls.push(url);

@@ -192,12 +192,7 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   assert.match(JSON.stringify(blocked.render()), /chooseMedia:fail api scope is not declared/, 'failed clipboard does not hide the media failure');
   blocked.close();
 
-  const system = createPage();
-  const capture = template.match(/<button\b[^>]+>使用系统相机拍摄/)[0];
-  await system.render()[event(capture, 'bindtap')]();
-  assert.equal(system.systemPhotos, 1);
-  assert.match(JSON.stringify(system.render()), /原照片|review/);
-  system.close();
+  assert.doesNotMatch(template, /使用系统相机拍摄/, 'system-camera import entry is removed');
 
   const lighting=createPage();
   const lightTag=template.match(/<button\b[^>]*scan-flash-toggle[^>]+>/)[0];

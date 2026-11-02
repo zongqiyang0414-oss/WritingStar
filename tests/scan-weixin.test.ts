@@ -73,8 +73,8 @@ test('相册在相机被拒后仍可用，走chooseMedia且不请求相机或写
     globalThis.wx.chooseMedia = options => options.fail({ errMsg: 'chooseMedia:fail api scope is not declared in privacy agreement' });
     globalThis.uni.chooseImage = () => assert.fail('do not retry another API to bypass an actual privacy rejection');
     await assert.rejects(native.chooseScanSource(), error => error.code === 'wx-privacy-config' && /scope/.test(error.detail));
-    globalThis.uni.chooseImage = options => { assert.deepEqual(options.sourceType, ['camera']); options.success({ tempFilePaths: ['/tmp/system-camera.jpg'] }); };
-    assert.equal(await native.chooseScanSource('camera'), '/tmp/system-camera.jpg', 'system camera uses the previously working chooseImage even when chooseMedia exists');
+    globalThis.uni.chooseImage = () => assert.fail('removed system camera must never invoke a picker');
+    await assert.rejects(native.chooseScanSource('camera'), /仅支持从相册/);
     delete globalThis.wx.chooseMedia;
     globalThis.uni.chooseImage = options => { assert.deepEqual(options.sourceType, ['album']); options.success({ tempFilePaths: ['/tmp/older-library.jpg'] }); };
     assert.equal(await native.chooseScanSource(), '/tmp/older-library.jpg');
@@ -115,7 +115,7 @@ test('微信扫描件保存失败回滚本次副本，原临时扫描件仍可�
   } finally { globalThis.uni = originalUni; globalThis.wx = originalWx; }
 });
 
-test('微信相册按剩余页数多选并保留页序，系统相机仍只拍一张', async () => {
+test('微信相册按剩余页数多选并保留页序，系统相机导入已移除', async () => {
   const originalUni = globalThis.uni, originalWx = globalThis.wx;
   try {
     const native = await nativeModule();
@@ -126,8 +126,8 @@ test('微信相册按剩余页数多选并保留页序，系统相机仍只拍�
     assert.deepEqual(await native.chooseScanSources('album', 3), ['/tmp/first.jpg', '/tmp/second.jpg']);
     globalThis.wx.chooseMedia = options => { assert.equal(options.count, 9); options.fail({ errMsg: 'chooseMedia:fail cancel' }); };
     assert.deepEqual(await native.chooseScanSources('album', 60), []);
-    globalThis.uni = { chooseImage(options) { assert.equal(options.count, 1); options.success({ tempFilePaths: ['/tmp/camera.jpg'] }); } };
-    assert.deepEqual(await native.chooseScanSources('camera', 60), ['/tmp/camera.jpg']);
+    globalThis.uni = { chooseImage() { assert.fail('system camera import is removed'); } };
+    await assert.rejects(native.chooseScanSources('camera', 60), /仅支持从相册/);
     assert.deepEqual(await native.chooseScanSources('album', 0), []);
   } finally { globalThis.uni = originalUni; globalThis.wx = originalWx; }
 });

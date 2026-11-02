@@ -1,4 +1,5 @@
 import { canResubmit } from "../services/submissionPolicy.js";
+import { STUDENT_TASK_CATEGORIES, studentTasks, studentNotifications, studentSubmissionLabel, studentTaskCategory } from "../services/studentWorkspace.js";
 import { pickPhotos } from "../platform/photos.js";
 import {
   DEFAULT_TEACHER,
@@ -109,6 +110,7 @@ export function usePrototype() {
     photoIndex = ref(0),
     openDimension = ref(null),
     filter = ref("全部"),
+    studentTaskFilter = ref("unsubmitted"),
     studentSearch = ref(""),
     aiBatchView = ref({ filter: "all", query: "" }),
     busy = ref(false),
@@ -230,12 +232,18 @@ export function usePrototype() {
     closedAssignments = computed(() =>
       scopedAssignments.value.filter((e) => assignmentCompleted(state.value, e, now.value, assignmentCountsById.value.get(e.id))),
     ),
+    studentTaskRows = computed(() => studentTasks(state.value, boundStudent.value?.id || "", now.value)),
+    studentTaskCategories = computed(() => STUDENT_TASK_CATEGORIES.map(item => ({ ...item,
+      count: studentTaskRows.value.filter(row => row.category === item.id).length,
+    }))),
+    learnerNotifications = computed(() => role.value === "student" && !needsBinding.value
+      ? studentNotifications(state.value, boundStudent.value?.id || "") : []),
     visibleAssignments = computed(() =>
       isTeacher.value
         ? "ongoing" === assignmentPeriod.value
           ? ongoingAssignments.value
           : closedAssignments.value
-        : [...ongoingAssignments.value, ...closedAssignments.value],
+        : studentTaskRows.value.filter(row => row.category === studentTaskFilter.value).map(row => row.assignment),
     ),
     workCounts = computed(() =>
       ongoingAssignments.value.reduce((counts, assignment) => {
@@ -257,6 +265,7 @@ export function usePrototype() {
       state.value.submissions.find((e) => e.id === submissionId.value),
     ),
     aiTask = computed(() => {
+      now.value;
       if (!service || !selectedSubmission.value || role.value === "admin") return null;
       try { return service.aiResult(selectedSubmission.value.id, role.value); }
       catch { return null; }
@@ -357,7 +366,6 @@ export function usePrototype() {
           adminClasses: "班级管理",
           adminTeachers: "教师管理",
           adminStudents: "学生管理",
-          adminAiIssues: "AI服务问题",
           statistics: "学情",
           statisticsStudents: "全班学生学情",
           statisticsStudent: "学生成长",
@@ -372,6 +380,7 @@ export function usePrototype() {
           excellentWork: "优秀作业",
           feedback: "老师的反馈",
           records: "作品记录",
+          notifications: "消息通知",
           profile: "我的",
           create: "布置双写作业",
           classes: "任教班级",
@@ -475,6 +484,7 @@ export function usePrototype() {
       excellentAssignmentId: excellentAssignmentId.value, excellentSubmissionId: excellentSubmissionId.value,
       category: category.value, panel: panel.value, photoIndex: photoIndex.value,
       filter: filter.value, studentSearch: studentSearch.value, scrollTop: currentScroll,
+      studentTaskFilter: studentTaskFilter.value,
       aiBatchView: clone(aiBatchView.value), review: clone(review.value), reviewBaseline: reviewBaseline.value,
     };
   }
@@ -488,6 +498,7 @@ export function usePrototype() {
     excellentAssignmentId.value = origin.excellentAssignmentId; excellentSubmissionId.value = origin.excellentSubmissionId;
     category.value = origin.category; panel.value = origin.panel; photoIndex.value = origin.photoIndex;
     filter.value = origin.filter; studentSearch.value = origin.studentSearch; aiBatchView.value = origin.aiBatchView;
+    studentTaskFilter.value = origin.studentTaskFilter || "unsubmitted";
     review.value = origin.review; reviewBaseline.value = origin.reviewBaseline;
     screen.value = origin.screen; error.value = "";
     scrollTo(origin.scrollTop);
@@ -551,7 +562,7 @@ export function usePrototype() {
   }
   function go(e) {
     if (isAdmin.value) {
-      if (["home", "adminClasses", "adminTeachers", "adminStudents", "adminAiIssues", "profile"].includes(e) && screen.value !== e)
+      if (["home", "adminClasses", "adminTeachers", "adminStudents", "profile"].includes(e) && screen.value !== e)
         guard(() => { adminDirty.value = false; navigate(e); });
       return;
     }
@@ -591,6 +602,26 @@ export function usePrototype() {
         assignmentId.value = e.id;
         navigate("assignment");
       });
+  }
+  async function openStudentNotification(notification) {
+    if (role.value !== "student" || !learnerNotifications.value.some(item => item.id === notification.id)) return;
+    await runAction(async () => {
+      const item = await service.markStudentNotificationRead(notification.id, role.value);
+      // Resolve the current target, rather than following stale client payloads.
+      refresh();
+      if (item.type === "reviewed") {
+        const work = state.value.submissions.find(work => work.id === item.submissionId);
+        if (work?.studentId === boundStudent.value?.id && work.status === "published") {
+          submissionId.value = work.id; assignmentId.value = work.assignmentId;
+          category.value = "handwriting"; openDimension.value = null; photoIndex.value = 0;
+          navigate("feedback"); return;
+        }
+      }
+      const assignment = scopedAssignments.value.find(assignment => assignment.id === item.assignmentId);
+      if (!assignment) throw new Error("作业状态已更新，请返回消息列表查看。");
+      assignmentId.value = assignment.id;
+      navigate("assignment");
+    });
   }
   function openReview(e) {
     guard(() => {
@@ -844,23 +875,14 @@ export function usePrototype() {
         await service.startAiReview(submissionId.value, role.value, failAnalysis.value);
       });
     },
-    reportAiIssue: async () => {
-      if (role.value !== "student" || !selectedSubmission.value) return;
-      await runAction(async () => { await service.reportAiIssue(submissionId.value, role.value); notify("已报告学校管理员"); });
-    },
     refreshAi: advanceAiQueue,
     mine,
     isTeacher,
     isAdmin,
     adminIdentity,
     adminDirty,
-    adminAiIssues: computed(() => {
-      state.value;
-      return isAdmin.value && adminIdentity.value && currentOrganization.value ? service.technicalAiIssues(currentOrganization.value.id, role.value) : [];
-    }),
     adminAction: async function ({ kind, data, success, message }) {
       const handlers = {
-        retryAiIssue: service?.retryAiIssue,
         saveClass: service?.saveClass,
         createTeacher: service?.createTeacher,
         setClassTeachers: service?.setClassTeachers,
@@ -917,20 +939,14 @@ export function usePrototype() {
     statusLabel: function (e) {
       return isTeacher.value
         ? taskStatus(e)
-        : e
-          ? {
-              processing: "处理中",
-              failed: "处理失败",
-              pending: "待审核",
-              published: "已完成",
-            }[e.status]
-          : "未提交";
+        : studentSubmissionLabel(e);
     },
     statusClass: function (e) {
+      if (!isTeacher.value && canResubmit(e)) return "red";
       return e
         ? "published" === e.status
           ? "green"
-          : "failed" === e.status
+          : (isTeacher.value ? "failed" === e.status : canResubmit(e))
             ? "red"
             : "amber"
         : "neutral";
@@ -947,6 +963,7 @@ export function usePrototype() {
         guard(() => {
           var a;
           role.value = e;
+          studentTaskFilter.value = "unsubmitted";
           adminDirty.value = false;
           clearBindingDraft();
           photos.value = [];
@@ -1112,12 +1129,20 @@ export function usePrototype() {
     assignmentAction: function (e) {
       var a;
       const t = latest(e.id, boundStudent.value?.id || "");
-      "published" === t?.status ? openFeedback(t) : openAssignment(e);
+      "published" === t?.status && !canResubmit(t) ? openFeedback(t) : openAssignment(e);
     },
     currentClass,
     classStudents,
     scopedAssignments,
     visibleAssignments,
+    learnerNotifications,
+    openStudentNotification,
+    openNotifications: () => { if (role.value === "student") guard(() => navigate("notifications")); },
+    studentTaskFilter,
+    studentTaskRows,
+    studentTaskCategories,
+    studentTaskLabel: assignment => STUDENT_TASK_CATEGORIES.find(item => item.id === studentTaskCategory(assignment, latest(assignment.id, boundStudent.value?.id || ""), now.value))?.label,
+    studentTaskBadge: assignment => ({ unsubmitted: "neutral", submitted: "amber", reviewed: "green", resubmit: "red", expired: "neutral" })[studentTaskCategory(assignment, latest(assignment.id, boundStudent.value?.id || ""), now.value)],
     ongoingAssignments,
     closedAssignments,
     workCounts,

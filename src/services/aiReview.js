@@ -11,8 +11,35 @@ export const AI_RETRYABLE = ["failed", "unavailable"];
 export const AI_LABELS = {
   notStarted: "待AI批阅", queued: "排队中", reading: "识别作品中",
   reviewing: "双写分析中", completed: "AI已完成", failed: "批阅失败",
-  unavailable: "等待审核结果", cancelled: "已转老师批阅", missing: "未提交", published: "老师已审核",
+  unavailable: "AI服务暂不可用", cancelled: "已转老师批阅", missing: "未提交", published: "教师已完成批阅",
 };
+
+export const AI_STUDENT_RETRY_LIMIT = 2;
+export const AI_STUDENT_DAILY_RETRY_LIMIT = 5;
+export const AI_RETRY_COOLDOWN_MS = 60_000;
+const DAY = 24 * 60 * 60 * 1000;
+
+// The mock service persists these limits. A real job endpoint must enforce the
+// same checks atomically with authenticated student IDs and server timestamps.
+export function studentAiRetryPolicy(state, submission, now) {
+  const task = submission.aiReview;
+  const ownTimes = task?.studentRetryTimes || [];
+  const recent = state.submissions.filter(item => item.studentId === submission.studentId)
+    .flatMap(item => item.aiReview?.studentRetryTimes || [])
+    .map(Date.parse).filter(time => Number.isFinite(time) && time > now.getTime() - DAY).sort((a, b) => a - b);
+  const remaining = Math.max(0, AI_STUDENT_RETRY_LIMIT - ownTimes.length);
+  const dailyRemaining = Math.max(0, AI_STUDENT_DAILY_RETRY_LIMIT - recent.length);
+  const last = recent[recent.length - 1];
+  const nextRetryAt = last === undefined ? null : new Date(last + AI_RETRY_COOLDOWN_MS).toISOString();
+  let reason = "";
+  if (submission.status === "published") reason = "老师已完成批阅，无需重复生成。";
+  else if (latestSubmission(state, submission.assignmentId, submission.studentId)?.id !== submission.id) reason = "只能重试最新提交的作品。";
+  else if (task?.state === "unavailable" && !submission.photos.every(photo => photo.sample)) reason = "AI服务尚未开通，暂时无法生成结果，请等待老师批阅。";
+  else if (!AI_RETRYABLE.includes(task?.state)) reason = "仅批阅失败或结果获取失败时可以重试。";
+  else if (!remaining) reason = "本份作品的重试次数已用完，请等待老师批阅。";
+  else if (!dailyRemaining) reason = "24小时内已重试5次，请稍后再试，或等待老师批阅。";
+  return { remaining, dailyRemaining, nextRetryAt, reason };
+}
 
 export function createAiTask(submission, source, now, fail = false) {
   return {
@@ -23,6 +50,7 @@ export function createAiTask(submission, source, now, fail = false) {
     simulateFailure: fail,
     autoRetryCount: 0,
     reportedAt: null,
+    studentRetryTimes: [...(submission.aiReview?.studentRetryTimes || [])],
     initializeDraft: submission.status === "processing" && !submission.draftRevision,
   };
 }
@@ -34,7 +62,7 @@ export function settleAiTask(submission, now, fail = false) {
   task.completedAt = now.toISOString();
   if (fail) {
     task.state = "failed";
-    task.error = "本次分析没有完成，作品已保留，可用原图重试或联系管理员。";
+    task.error = "本次分析没有完成，作品已保留，可用原图重试。";
     if (submission.status === "processing") submission.status = "failed";
     return;
   }
@@ -46,7 +74,7 @@ export function settleAiTask(submission, now, fail = false) {
       submission.draft = copy(task.result);
   } else {
     task.state = "unavailable";
-    task.error = "作品已收到，暂未取得AI结果。可用原图重试或联系管理员。";
+    task.error = "AI服务尚未开通，暂时无法生成结果。作品已保存，可等待老师批阅。";
   }
   if (["processing", "failed"].includes(submission.status)) submission.status = "pending";
 }
@@ -159,6 +187,7 @@ export class AiReviewService extends AdministrationService {
       queuedAt: task.queuedAt, startedAt: task.startedAt, completedAt: task.completedAt,
       result: task.result, resultSource: task.resultSource, error: task.error,
       autoRetryCount: task.autoRetryCount || 0, reportedAt: task.reportedAt || null, qualityFlags: task.qualityFlags || [],
+      ...(role === "student" && task.state !== "completed" ? { retry: studentAiRetryPolicy(this.state, submission, this.clock()) } : {}),
     });
   }
   prepareAutoAi() {
@@ -171,42 +200,25 @@ export class AiReviewService extends AdministrationService {
     }
     this.commit(next);
   }
-  async reportAiIssue(submissionId, role) {
-    if (role !== "student") throw new Error("此入口仅供学生报告问题。");
-    const current = this.authorizeAiSubmission(submissionId, role);
-    if (!AI_RETRYABLE.includes(current.aiReview?.state)) throw new Error("当前没有需要报告的AI服务问题。");
-    if (current.aiReview.reportedAt) return;
-    const next = this.read(); this.get(next, submissionId).aiReview.reportedAt = this.clock().toISOString(); this.commit(next);
-  }
-  technicalAiIssues(organizationId, role) {
-    this.managedOrganization(organizationId, role);
-    const classIds = new Set(this.state.classes.filter(item => item.organizationId === organizationId).map(item => item.id));
-    return this.state.submissions.filter(item => {
-      const assignment = this.state.assignments.find(a => a.id === item.assignmentId);
-      return classIds.has(assignment?.classId) && this.latest(item.assignmentId, item.studentId)?.id === item.id && item.status !== "published" && item.aiReview?.reportedAt && AI_RETRYABLE.includes(item.aiReview.state);
-    }).map(item => ({ id: item.id, assignmentTitle: this.state.assignments.find(a => a.id === item.assignmentId)?.title, studentName: this.state.students.find(s => s.id === item.studentId)?.name, reportedAt: item.aiReview.reportedAt, reason: item.aiReview.state === "failed" ? "AI服务处理失败" : "暂未取得分析结果" }));
-  }
-  async retryAiIssue(input, role) {
-    const current = this.get(this.state, input.submissionId);
-    const assignment = this.state.assignments.find(item => item.id === current.assignmentId);
-    const schoolClass = this.managedClass(assignment?.classId || "", role);
-    if (current.status === "published" || !AI_RETRYABLE.includes(current.aiReview?.state) || this.latest(current.assignmentId, current.studentId)?.id !== current.id) throw new Error("当前问题已处理或作品已更新。");
-    const next = this.read(), item = this.get(next, current.id);
-    item.aiReview = createAiTask(item, "admin", this.clock());
-    if (item.status === "failed") item.status = "processing";
-    this.recordAdministration(next, schoolClass.organizationId, "处理AI服务问题并重新分析", role);
-    this.commit(next);
-  }
   async startAiReview(submissionId, role, fail = false) {
     const submission = this.authorizeAiSubmission(submissionId, role);
-    if (submission.status === "published") throw new Error("老师已完成审核，本轮不再重复AI批阅。");
+    if (submission.status === "published") throw new Error(role === "student" ? "教师已完成批阅，本轮不再重复AI批阅。" : "老师已完成审核，本轮不再重复AI批阅。");
     if (this.latest(submission.assignmentId, submission.studentId)?.id !== submission.id)
       throw new Error("请对最新提交的作品进行AI批阅。");
     if (submission.aiReview && (AI_RUNNING.includes(submission.aiReview.state) || submission.aiReview.state === "completed"))
       return this.aiResult(submissionId, role);
+    const now = this.clock();
+    const retrying = role === "student" && !!submission.aiReview;
+    if (retrying) {
+      const policy = studentAiRetryPolicy(this.state, submission, now);
+      if (policy.reason) throw new Error(policy.reason);
+      if (policy.nextRetryAt && Date.parse(policy.nextRetryAt) > now.getTime())
+        throw new Error(`请等待 ${Math.ceil((Date.parse(policy.nextRetryAt) - now.getTime()) / 1000)} 秒后再重试。`);
+    }
     const next = this.read();
     const item = this.get(next, submissionId);
-    item.aiReview = createAiTask(item, role, this.clock(), fail);
+    item.aiReview = createAiTask(item, role, now, fail);
+    if (retrying) item.aiReview.studentRetryTimes.push(now.toISOString());
     if (item.status === "failed") item.status = "processing";
     this.commit(next);
     return this.aiResult(submissionId, role);
@@ -276,13 +288,13 @@ export class AiReviewService extends AdministrationService {
       const elapsed = now.getTime() - Date.parse(task.startedAt);
       if (elapsed >= 2600) settleAiTask(item, now, task.simulateFailure);
       else if (elapsed >= 1100) task.state = "reviewing";
-      if (AI_RETRYABLE.includes(task.state)) {
+      if (task.state === "failed") {
         if ((task.autoRetryCount || 0) < 1) {
           const retry = createAiTask(item, task.source, now, task.simulateFailure);
           retry.autoRetryCount = 1;
           item.aiReview = retry;
           if (item.status === "failed") item.status = "processing";
-        } else task.reportedAt ||= now.toISOString();
+        }
       }
     }
     const working = next.submissions.filter((item) => ["reading", "reviewing"].includes(item.aiReview?.state)).length;

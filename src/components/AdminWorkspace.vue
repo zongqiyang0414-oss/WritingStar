@@ -1,8 +1,9 @@
 <script setup>
 import { computed, onUnmounted, ref, watch } from "vue";
+import GradeClassPicker from "./GradeClassPicker.vue";
 import { activeStudents } from "../services/school.js";
 
-const props = defineProps({ state: {}, organization: {}, administrator: {}, section: {}, aiIssues: { default: () => [] }, busy: Boolean });
+const props = defineProps({ state: {}, organization: {}, administrator: {}, section: {}, busy: Boolean });
 const emit = defineEmits(["navigate", "action", "confirm", "dirty"]);
 const mode = ref("list"), classId = ref(""), query = ref(""), status = ref("active");
 const form = ref({}), baseline = ref(""), selectedTeachers = ref([]);
@@ -93,8 +94,7 @@ function startTransfer(student) {
   sourceId.value = student?.classId || currentClass.value?.id || classes.value[0]?.id || "";
   targetId.value = ""; selectedIds.value = student ? [student.id] : []; transferQuery.value = ""; mode.value = "transfer";
 }
-function changeSource(event) {
-  const id = classes.value[Number(event.detail.value)]?.id;
+function changeSource(id) {
   if (!id || id === sourceId.value) return;
   confirmLeave(() => { sourceId.value = id; targetId.value = ""; selectedIds.value = []; transferQuery.value = ""; });
 }
@@ -154,9 +154,7 @@ function time(value) { const date = new Date(value); return `${date.getMonth() +
         <input v-model="form.studentNumber" class="form-input" maxlength="32" :disabled="busy" placeholder="请输入校内唯一学号" />
         <view class="field-label">所在班级</view>
         <view v-if="form.id" class="date-picker">{{ classes.find(item => item.id === form.classId)?.name }}</view>
-        <picker v-else :range="classes" range-key="name" :value="Math.max(0, classes.findIndex(item => item.id === form.classId))" :disabled="busy" @change="form.classId = classes[Number($event.detail.value)]?.id || ''">
-          <view class="date-picker">{{ classes.find(item => item.id === form.classId)?.name || '请先新建班级' }}<text>选择 ›</text></view>
-        </picker>
+        <GradeClassPicker v-else v-model="form.classId" :classes="classes" :disabled="busy" placeholder="请先新建班级" />
         <view class="small subtle spaced">学号用于区分同名学生；调整已有学生的班级，请使用调班功能。</view>
       </view>
       <button class="primary full-width spaced" :disabled="busy || !form.name.trim() || !form.studentNumber.trim() || !form.classId" @click="save('saveStudent', { ...form }, '学生档案已保存')">{{ busy ? '保存中…' : '保存学生档案' }}</button>
@@ -197,13 +195,9 @@ function time(value) { const date = new Date(value); return `${date.getMonth() +
     <template v-else-if="mode === 'transfer'">
       <view class="card form-card">
         <view class="field-label">原班级</view>
-        <picker :range="classes" range-key="name" :value="Math.max(0, classes.findIndex(item => item.id === sourceId))" :disabled="busy" @change="changeSource">
-          <view class="date-picker">{{ sourceClass?.name || '请选择原班级' }}<text>选择 ›</text></view>
-        </picker>
+        <GradeClassPicker :model-value="sourceId" :classes="classes" :disabled="busy" placeholder="请选择原班级" @update:modelValue="changeSource" />
         <view class="field-label">目标班级</view>
-        <picker :range="targetClasses" range-key="name" :value="Math.max(0, targetClasses.findIndex(item => item.id === targetId))" :disabled="busy || !targetClasses.length" @change="targetId = targetClasses[Number($event.detail.value)]?.id || ''">
-          <view class="date-picker">{{ targetClass?.name || '请选择目标班级' }}<text>选择 ›</text></view>
-        </picker>
+        <GradeClassPicker v-model="targetId" :classes="targetClasses" :disabled="busy || !targetClasses.length" placeholder="请选择目标班级" />
       </view>
       <view class="notice">调班后按目标班级显示任务，原班作品与反馈保留在学生记录中。仅支持本校内调班。</view>
       <view class="section-heading"><view class="section-title">选择学生</view><text class="small subtle">已选 {{ selectedIds.length }} 人</text></view>
@@ -217,9 +211,7 @@ function time(value) { const date = new Date(value); return `${date.getMonth() +
     </template>
 
     <template v-else-if="mode === 'list' && section === 'home'">
-      <button class="card full-width" :disabled="busy" @click="emit('navigate', 'adminAiIssues')"><view class="card-top"><view class="strong">AI服务问题</view><text>{{ aiIssues.length }} 项待处理 ›</text></view></button>
       <view class="greeting-row"><view><view class="eyebrow">学校管理 / ADMINISTRATION</view><view class="greeting">{{ administrator.name }}，你好<text class="greeting-dot">。</text></view></view><view class="admin-seal">管</view></view>
-      <view class="admin-hero"><view class="tiny">{{ organization.name }}</view><view class="admin-hero-title">让每个孩子<br />找到自己的班级</view><view class="small">维护班级与师生档案，让日常教学有序开展。</view><view class="admin-hero-orbit">✧</view></view>
       <view class="admin-stats"><view><view class="admin-stat-number">{{ classes.length }}</view><view class="tiny subtle">班级</view></view><view><view class="admin-stat-number">{{ students.filter(item => !item.archived).length }}</view><view class="tiny subtle">在班学生</view></view><view><view class="admin-stat-number">{{ teachers.length }}</view><view class="tiny subtle">本校教师</view></view></view>
       <view class="section-heading"><view class="section-title">日常管理</view><text class="tiny subtle">{{ organization.kind === 'school' ? '本校管理范围' : '本机构管理范围' }}</text></view>
       <view class="admin-shortcuts">
@@ -231,15 +223,6 @@ function time(value) { const date = new Date(value); return `${date.getMonth() +
       <view v-if="waitingClasses.length" class="notice">{{ waitingClasses.length }} 个班级尚未分配任教老师，请在班级管理中完善。</view>
       <view class="section-heading"><view class="section-title">最近管理记录</view><text class="tiny subtle">本校动态</text></view>
       <view class="card admin-events"><view v-for="event in events" :key="event.id" class="admin-event"><view class="tiny-dot" /><view class="grow"><view class="small">{{ event.description }}</view><view class="tiny subtle">{{ event.administratorName }} · {{ time(event.createdAt) }}</view></view></view><view v-if="!events.length" class="small subtle">还没有管理记录。添加教师、建班、分配和调班操作会记录在这里。</view></view>
-    </template>
-
-    <template v-else-if="mode === 'list' && section === 'adminAiIssues'">
-      <view class="section-heading"><view class="section-title">AI服务问题</view><button class="text-button" @click="emit('navigate', 'home')">返回管理台 ›</button></view>
-      <view v-for="issue in aiIssues" :key="issue.id" class="card">
-        <view class="strong">{{ issue.studentName }} · {{ issue.assignmentTitle }}</view><view class="paragraph small subtle">{{ issue.reason }} · {{ time(issue.reportedAt) }}</view>
-        <button class="secondary" :disabled="busy" @click="save('retryAiIssue', { submissionId: issue.id }, '已安排重新分析', () => {})">安排重新分析</button>
-      </view>
-      <view v-if="!aiIssues.length" class="card empty-state">暂无待处理的AI服务问题</view>
     </template>
 
     <template v-else-if="mode === 'list' && section === 'profile'">
@@ -269,7 +252,7 @@ function time(value) { const date = new Date(value); return `${date.getMonth() +
         <view class="card admin-class-summary"><view class="eyebrow">{{ organization.name }}</view><view class="detail-title">{{ currentClass?.name }}</view><view class="small subtle">{{ activeStudents(state, classId).length }} 位在班学生</view><view class="admin-summary-actions"><button class="text-button" :disabled="busy" @click="editClass(currentClass)">修改班级</button><button class="text-button" :disabled="busy" @click="editTeachers">分配老师 ›</button></view><view class="admin-teacher-line small">任教：{{ classTeachers(classId).map(item => item.name).join('、') || '待分配老师' }}</view></view>
       </template>
       <view class="section-heading"><view class="section-title">{{ mode === 'members' ? '班级学生' : '学生管理' }}</view><view class="admin-inline-actions"><button class="text-button" :disabled="busy || classes.length < 2" @click="startTransfer()">调班</button><button class="text-button" :disabled="busy || !classes.length" @click="editStudent()">＋ 新增学生</button></view></view>
-      <picker v-if="mode !== 'members'" :range="[{ id: '', name: '全部班级' }, ...classes]" range-key="name" :value="classId ? classes.findIndex(item => item.id === classId) + 1 : 0" :disabled="busy" @change="classId = Number($event.detail.value) ? classes[Number($event.detail.value) - 1].id : ''"><view class="date-picker admin-class-filter">{{ currentClass?.name || '全部班级' }}<text>筛选 ⌄</text></view></picker>
+      <GradeClassPicker v-if="mode !== 'members'" v-model="classId" :classes="classes" :disabled="busy" allow-all class="admin-class-filter" />
       <view class="student-search"><text class="search-symbol">⌕</text><input v-model="query" maxlength="40" :disabled="busy" placeholder="搜索姓名或学号" /><button v-if="query" class="search-clear" :disabled="busy" @click="query = ''">清除</button></view>
       <view class="admin-selection-bar"><view class="admin-status-filters"><button :class="{ active: status === 'active' }" :disabled="busy" @click="status = 'active'">在班</button><button :class="{ active: status === 'archived' }" :disabled="busy" @click="status = 'archived'">已归档</button></view><text class="small subtle">{{ listedStudents.length }} 人</text></view>
       <view v-for="student in listedStudents" :key="student.id" class="card admin-student-card"><view class="admin-student-heading"><view class="avatar pale">{{ student.initial }}</view><view class="grow"><view class="strong">{{ student.name }}</view><view class="tiny subtle">{{ student.className }} · {{ student.studentNumber ? '学号 ' + student.studentNumber : '未填写学号' }}</view></view><text :class="['badge', student.archived ? 'neutral' : 'green']">{{ student.archived ? '已归档' : '在班' }}</text></view><view class="admin-student-actions"><button class="text-button" :disabled="busy" @click="editStudent(student)">编辑档案</button><button v-if="!student.archived" class="text-button" :disabled="busy || classes.length < 2" @click="startTransfer(student)">调班</button><button class="text-button" :disabled="busy" @click="archive(student)">{{ student.archived ? '恢复在班' : '归档' }}</button></view></view>

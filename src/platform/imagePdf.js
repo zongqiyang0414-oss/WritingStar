@@ -20,14 +20,15 @@ export async function createImagePdf(append) {
   }
   await write("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
   return {
-    async addPage(jpeg, width, height) {
+    async addPage(jpeg, width, height, paper) {
       if (finished) throw new Error("PDF已结束写入。");
       const bytes = new Uint8Array(jpeg);
       if (bytes.length < 4 || bytes[0] !== 255 || bytes[1] !== 216 || !(width > 0 && height > 0))
         throw new Error("答题卡图片无效，请重新生成。");
       const id = 3 + pages.length * 3, image = id + 1, content = id + 2;
-      // A4 points; the complete canvas, including QR and corner marks, fits the page.
-      const pw = width > height ? 841.89 : 595.28, ph = width > height ? 595.28 : 841.89;
+      // Existing callers retain A4; the approved template supplies A3 points.
+      const pw = paper?.width ?? (width > height ? 841.89 : 595.28), ph = paper?.height ?? (width > height ? 595.28 : 841.89);
+      if (!(pw > 0 && ph > 0 && Number.isFinite(pw) && Number.isFinite(ph))) throw new Error("PDF纸张尺寸无效。");
       await object(id, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pw} ${ph}] /Resources << /XObject << /Card ${image} 0 R >> >> /Contents ${content} 0 R >>`);
       offsets[image] = position;
       await write(`${image} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${bytes.length} >>\nstream\n`);

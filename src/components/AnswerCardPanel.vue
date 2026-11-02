@@ -1,6 +1,6 @@
 <script setup>
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { drawAnswerCard, CARD_WIDTH, CARD_HEIGHT } from "../platform/answerCards.js";
+import { drawAnswerCard, CARD_WIDTH, CARD_HEIGHT, loadAnswerCardBackground } from "../platform/answerCards.js";
 // #ifdef H5
 import { answerCardImage, printAnswerCards } from "../platform/answerCards.js";
 // #endif
@@ -13,22 +13,33 @@ const studentIndex = ref(0), page = ref(1), preview = ref(""), error = ref(""), 
 const generatedPdf = ref("");
 const selected = computed(() => props.cards?.[studentIndex.value]);
 const instance = getCurrentInstance();
-let disposed = false;
-onBeforeUnmount(() => { disposed = true; });
-watch(() => [selected.value?.id, page.value], async () => {
+let disposed = false, previewRequest = 0, previewQueue = Promise.resolve();
+onBeforeUnmount(() => { disposed = true; previewRequest++; });
+watch(() => [selected.value?.id, page.value, props.assignment.title, props.assignment.requirements, props.assignment.paperPacket?.pages], async () => {
+  const request = ++previewRequest, card = selected.value, currentPage = page.value;
+  preview.value = "";
   if (!selected.value) { preview.value = ""; return; }
   error.value = "";
+  try {
   // #ifdef H5
-  preview.value = answerCardImage(props.assignment, selected.value, page.value);
+  const image = await answerCardImage(props.assignment, card, currentPage);
+  if (!disposed && request === previewRequest) preview.value = image;
   // #endif
   // #ifndef H5
-  await nextTick();
-  const ctx = uni.createCanvasContext("answer-card-export", instance.proxy);
-  drawAnswerCard(ctx, props.assignment, selected.value, page.value);
-  ctx.draw(false, () => uni.canvasToTempFilePath({ canvasId: "answer-card-export", width: CARD_WIDTH, height: CARD_HEIGHT,
-    destWidth: CARD_WIDTH * 2, destHeight: CARD_HEIGHT * 2, fileType: "png",
-    success: result => { preview.value = result.tempFilePath; }, fail: () => { error.value = "答题卡生成失败，请返回重试。"; } }, instance.proxy));
+  previewQueue = previewQueue.catch(() => {}).then(async () => {
+    const background = await loadAnswerCardBackground(currentPage);
+    await nextTick();
+    if (disposed || request !== previewRequest) return;
+    const ctx = uni.createCanvasContext("answer-card-export", instance.proxy);
+    drawAnswerCard(ctx, props.assignment, card, currentPage, background);
+    await new Promise(resolve => ctx.draw(false, resolve));
+    const result = await new Promise((resolve, reject) => uni.canvasToTempFilePath({ canvasId: "answer-card-export", width: CARD_WIDTH, height: CARD_HEIGHT,
+      destWidth: CARD_WIDTH * 2, destHeight: CARD_HEIGHT * 2, fileType: "png", success: resolve, fail: reject }, instance.proxy));
+    if (!disposed && request === previewRequest) preview.value = result.tempFilePath;
+  });
+  await previewQueue;
   // #endif
+  } catch (failure) { if (!disposed && request === previewRequest) error.value = failure.message || "答题卡生成失败，请返回重试。"; }
 }, { immediate: true });
 async function print(all = false) {
   if (working.value || props.busy || !selected.value) return;
@@ -72,7 +83,7 @@ function zoom() { if (preview.value) uni.previewImage({urls: [preview.value]}); 
     </view>
     <template v-else>
       <view class="card paper-card-controls">
-        <view class="paper-inline"><view><view class="strong">{{ teacher ? '选择学生' : selected?.studentName + '的专属答题卡' }}</view><view class="tiny subtle">A4 · 共 {{ assignment.paperPacket.pages }} 页 · 黑白打印即可</view></view><text class="paper-count">{{ cards.length }} 人</text></view>
+        <view class="paper-inline"><view><view class="strong">{{ teacher ? '选择学生' : selected?.studentName + '的专属答题卡' }}</view><view class="tiny subtle">A3 横向 · 共 {{ assignment.paperPacket.pages }} 页 · 黑白打印即可</view></view><text class="paper-count">{{ cards.length }} 人</text></view>
         <picker v-if="teacher" :disabled="working" :range="cards" range-key="studentName" :value="studentIndex" @change="studentIndex = Number($event.detail.value); page = 1"><view class="paper-select">{{ selected?.studentName }} <text>切换学生 ﹀</text></view></picker>
         <view class="paper-page-controls"><button class="text-button" :disabled="working || page <= 1" @click="page--">‹ 上一页</button><text>第 {{ page }} / {{ assignment.paperPacket.pages }} 页</text><button class="text-button" :disabled="working || page >= assignment.paperPacket.pages" @click="page++">下一页 ›</button></view>
       </view>
@@ -87,9 +98,9 @@ function zoom() { if (preview.value) uni.previewImage({urls: [preview.value]}); 
         <button class="text-button full-width spaced-small" :disabled="busy || working" @click="emit('scan')">{{ teacher ? '去批量扫描收件箱' : '已完成，上传答题卡' }} ›</button>
       </view>
       <!-- #ifdef MP-WEIXIN -->
-      <view class="small subtle spaced-small">生成后打开 PDF，可通过右上角菜单转发给打印服务。打印时选择 A4、原比例 100%。</view>
+      <view class="small subtle spaced-small">生成后打开 PDF，可通过右上角菜单转发给打印服务。打印时选择 A3 横向、原比例 100%，双面打印选择短边翻转。</view>
       <!-- #endif -->
-      <view v-if="!teacher" class="notice">家长可协助打印：A4 纸、原比例 100%，完成后逐页上传，系统自动对应学生信息。</view>
+      <view v-if="!teacher" class="notice">家长可协助打印：A3 横向、原比例 100%，双面选择短边翻转，完成后逐页上传。</view>
       <view v-if="printProgress" class="small subtle paper-print-progress" role="status" aria-live="polite">{{ printProgress }}</view>
     </template>
     <view v-if="error" class="paper-error" role="alert">{{ error }}</view>
