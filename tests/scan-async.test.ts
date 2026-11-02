@@ -40,13 +40,14 @@ test('取消读图不再写回共用画布；取消JPEG导出会移除迟到文�
   const canvas={width:80,height:120,createImage(){image={width:80,height:120};return image;},getContext(){return {
     drawImage(){writes++;},getImageData(){return {width:80,height:120,data:new Uint8ClampedArray(80*120*4)};},
     createImageData(w,h){return {data:new Uint8ClampedArray(w*h*4)};},putImageData(){writes++;},
-  };}};
+  };},requestAnimationFrame(fn){queueMicrotask(fn);}};
   globalThis.uni={createSelectorQuery(){const query={in(){return query;},select(){return query;},fields(){return query;},exec(resolve){resolve([{node:canvas},{node:canvas}]);}};return query;},
     canvasToTempFilePath(options){exportOptions=options;},getFileSystemManager(){return {unlink(options){removed.push(options.filePath);}};}};
   try {
     const {createScanRenderer}=await nativeModule(),renderer=await createScanRenderer({});renderer.track('/tmp/already-scanned.jpg');
     const read=renderer.read('/tmp/new.jpg');renderer.cancelPending();image.onload();await assert.rejects(read,/暂停/);assert.equal(writes,0);
     const pending=renderer.exportImage({width:80,height:120,data:new Uint8ClampedArray(80*120*4)});
+    while (!exportOptions) await Promise.resolve();
     renderer.cancelPending();exportOptions.success({tempFilePath:'/tmp/late.jpg'});await assert.rejects(pending,/暂停/);
     assert.deepEqual(removed,['/tmp/late.jpg']);renderer.dispose();assert.ok(removed.includes('/tmp/already-scanned.jpg'));
   } finally {globalThis.uni=beforeUni;}

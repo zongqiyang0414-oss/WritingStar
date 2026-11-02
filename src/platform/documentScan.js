@@ -237,12 +237,24 @@ export function analyzeDocument(image, { previousCorners = null, trackingOnly = 
 }
 
 function describeDocument(best, gray, width, height) {
-  const project = projectiveMap(best.corners), fingerprint = [];
+  const project = projectiveMap(best.corners), fingerprint = [], contentFingerprint = [];
   for (let y = 1; y <= 16; y++) for (let x = 1; x <= 12; x++) {
     const p = project(x / 13, y / 17);
     fingerprint.push(sample(gray, width, height, p.x * (width - 1), p.y * (height - 1)) / 255);
   }
-  return { corners: best.corners, confidence: best.confidence, fingerprint };
+  // Local ink density catches small handwriting/QR differences on otherwise
+  // identical class worksheets. Area samples tolerate subpixel edge jitter;
+  // normalizing within each cell suppresses paper lighting/exposure changes.
+  for (let y = 0; y < 32; y++) for (let x = 0; x < 24; x++) {
+    let sum = 0, maximum = 0;
+    for (let sy = 0; sy < 3; sy++) for (let sx = 0; sx < 3; sx++) {
+      const p = project((x + (sx + .5) / 3) / 24, (y + (sy + .5) / 3) / 32);
+      const value = sample(gray, width, height, p.x * (width - 1), p.y * (height - 1));
+      sum += value; maximum = Math.max(maximum, value);
+    }
+    contentFingerprint.push(Math.max(0, maximum - sum / 9) / Math.max(40, maximum));
+  }
+  return { corners: best.corners, confidence: best.confidence, fingerprint, contentFingerprint };
 }
 
 const nextTick = () => new Promise(resolve => setTimeout(resolve, 0));

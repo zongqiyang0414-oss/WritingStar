@@ -70,21 +70,24 @@ export function openScanAppSettings() {
 
 // Canvas nodes are used on WeChat; DOM canvas/video never enter the mini-program build.
 export async function createScanRenderer(instance) {
-  let work, outline;
+  let work, outline, shape;
   // #ifdef H5
   work = document.createElement("canvas");
   outline = document.createElement("canvas");
+  shape = document.createElement("canvas");
   // #endif
   // #ifdef MP-WEIXIN
   const result = await scanCallback(resolve => uni.createSelectorQuery().in(instance)
     .select("#scan-work-canvas").fields({ node: true, size: true })
-    .select("#scan-outline-canvas").fields({ node: true, size: true }).exec(resolve),
+    .select("#scan-outline-canvas").fields({ node: true, size: true })
+    .select("#scan-shape-canvas").fields({ node: true, size: true }).exec(resolve),
   { timeout: 5000, message: "扫描画布未就绪，请重新打开扫描页面。" });
-  work = result[0]?.node; outline = result[1]?.node;
+  work = result[0]?.node; outline = result[1]?.node; shape = result[2]?.node;
   // #endif
   if (!work || !outline) throw new Error("当前设备不支持扫描画布，请更新微信后重试。");
   const transient = new Set();
-  let disposed = false, revision = 0;
+  let disposed = false, revision = 0, jpegQueue = Promise.resolve();
+  const serializeImage = task => { const next = jpegQueue.catch(() => {}).then(task); jpegQueue = next; return next; };
   const check = token => { if (disposed || token !== revision) throw new Error("扫描已暂停，请重试。"); };
   const remove = path => {
     // #ifdef H5
@@ -111,14 +114,39 @@ export async function createScanRenderer(instance) {
     return result.tempFilePath;
     // #endif
   }
-  async function read(path) {
+  async function flush(canvas, token) {
+    // #ifdef MP-WEIXIN
+    if (canvas.requestAnimationFrame) await scanCallback(resolve => canvas.requestAnimationFrame(resolve), { timeout: 250 }).catch(() => {});
+    else await new Promise(resolve => setTimeout(resolve, 16));
+    // #endif
+    check(token);
+  }
+  async function uniqueImage(path, prefix, token) {
+    // #ifdef H5
+    return path;
+    // #endif
+    // #ifdef MP-WEIXIN
+    // A canvas temp URI can be reused/cached by the native image component.
+    // Each completed edit gets a new path, so its new pixels/dimensions reload.
+    const target = `${wx.env.USER_DATA_PATH}/${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
+    try {
+      await scanCallback((success, fail) => uni.getFileSystemManager().copyFile({ srcPath: path, destPath: target, success, fail }),
+        { onLateValue: () => uni.getFileSystemManager().unlink({ filePath: target, fail: () => {} }) });
+      transient.add(target);
+      try { check(token); } catch (error) { remove(target); throw error; }
+      return target;
+    } finally { remove(path); }
+    // #endif
+  }
+  async function read(path, canvas = work, maxEdge = 2200) {
+    if (!canvas) throw new Error("当前设备暂不支持成片预览。");
     const token = revision;
     let img;
     // #ifdef H5
     img = new Image();
     // #endif
     // #ifdef MP-WEIXIN
-    img = work.createImage();
+    img = canvas.createImage();
     // #endif
     await scanCallback((resolve, reject) => {
       img.onload = resolve;
@@ -126,36 +154,52 @@ export async function createScanRenderer(instance) {
       img.src = path;
     }, { message: "照片读取等待超时，请重新选择或拍摄。" });
     check(token);
-    const scale = Math.min(1, 2200 / Math.max(img.width, img.height));
-    work.width = Math.max(1, Math.round(img.width * scale)); work.height = Math.max(1, Math.round(img.height * scale));
-    const ctx = work.getContext("2d");
-    ctx.drawImage(img, 0, 0, work.width, work.height);
-    return ctx.getImageData(0, 0, work.width, work.height);
+    const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+    canvas.width = Math.max(1, Math.round(img.width * scale)); canvas.height = Math.max(1, Math.round(img.height * scale));
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return ctx.getImageData(0, 0, canvas.width, canvas.height);
   }
   async function exportImage(image) {
     const token = revision;
-    work.width = image.width; work.height = image.height;
-    const ctx = work.getContext("2d"), pixels = ctx.createImageData(image.width, image.height);
-    pixels.data.set(image.data); ctx.putImageData(pixels, 0, 0);
-    for (const quality of [0.92, 0.82, 0.7, 0.58]) {
-      const path = await encode(work, "jpg", quality);
-      let size = 0;
-      // #ifdef H5
-      size = Math.ceil((path.length - path.indexOf(",") - 1) * 3 / 4);
-      // #endif
-      // #ifdef MP-WEIXIN
-      let info;
-      try {
-        info = await scanCallback((success, fail) => uni.getFileInfo({ filePath: path, success, fail }),
-          { timeout: 5000, message: "扫描件校验等待超时，请重试。" });
-        check(token);
-      } catch (error) { remove(path); throw error; }
-      size = info.size;
-      // #endif
-      if (size <= MAX_PHOTO_BYTES) return path;
-      remove(path);
-    }
-    throw new Error("扫描图片较大，请缩小拍摄范围后重试。");
+    return serializeImage(async () => {
+      check(token);
+      work.width = image.width; work.height = image.height;
+      const ctx = work.getContext("2d"), pixels = ctx.createImageData(image.width, image.height);
+      pixels.data.set(image.data); ctx.putImageData(pixels, 0, 0);
+      await flush(work, token);
+      for (const quality of [0.92, 0.82, 0.7, 0.58]) {
+        const path = await encode(work, "jpg", quality);
+        let size = 0;
+        // #ifdef H5
+        size = Math.ceil((path.length - path.indexOf(",") - 1) * 3 / 4);
+        // #endif
+        // #ifdef MP-WEIXIN
+        let info;
+        try {
+          info = await scanCallback((success, fail) => uni.getFileInfo({ filePath: path, success, fail }),
+            { timeout: 5000, message: "扫描件校验等待超时，请重试。" });
+          check(token);
+        } catch (error) { remove(path); throw error; }
+        size = info.size;
+        // #endif
+        if (size <= MAX_PHOTO_BYTES) return uniqueImage(path, "scan-preview", token);
+        remove(path);
+      }
+      throw new Error("扫描图片较大，请缩小拍摄范围后重试。");
+    });
+  }
+  async function exportPreview(image) {
+    if (!shape) throw new Error("当前设备暂不支持成片预览。");
+    const token = revision;
+    return serializeImage(async () => {
+      check(token);
+      shape.width = image.width; shape.height = image.height;
+      const ctx = shape.getContext("2d"), pixels = ctx.createImageData(image.width, image.height);
+      pixels.data.set(image.data); ctx.putImageData(pixels, 0, 0);
+      await flush(shape, token);
+      return uniqueImage(await encode(shape, "jpg", .8), "shape-preview", token);
+    });
   }
   async function drawOutline(corners, frameWidth, frameHeight, stage, cover = true, confirmed = true) {
     // #ifdef H5
@@ -193,10 +237,10 @@ export async function createScanRenderer(instance) {
     catch { throw new Error("扫描件保存失败，请检查设备存储后重试。"); }
     // #endif
   }
-  return { read, exportImage, drawOutline, persist, remove,
-    cancelPending() { revision++; },
+  return { read, exportImage, readPreview: path => read(path, shape, 600), exportPreview, drawOutline, persist, remove,
+    cancelPending() { revision++; jpegQueue = Promise.resolve(); },
     track: path => transient.add(path),
-    dispose() { disposed = true; [...transient].forEach(remove); work.width = work.height = outline.width = outline.height = 1; },
+    dispose() { disposed = true; [...transient].forEach(remove); work.width = work.height = outline.width = outline.height = 1; if (shape) shape.width = shape.height = 1; },
   };
 }
 

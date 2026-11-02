@@ -29,12 +29,20 @@ export function fingerprintDifference(a, b) {
   return a.reduce((sum, value, i) => sum + Math.abs((value - meanA) - (b[i] - meanB)), 0) / a.length;
 }
 
+export function contentDifference(a, b) {
+  if (!a?.length || a.length !== b?.length || !a.every(Number.isFinite) || !b.every(Number.isFinite)) return 0;
+  const differences = a.map((value, i) => Math.abs(value - b[i])).sort((x, y) => x - y);
+  const count = Math.max(1, Math.ceil(differences.length / 8));
+  return Math.max(0, differences.slice(-count).reduce((sum, value) => sum + value, 0) / count - differences[Math.floor(differences.length / 2)]);
+}
+
 export class AutoScanGate {
-  constructor() { this.restart(); this.locked = false; this.lastFingerprint = null; }
+  constructor() { this.restart(); this.locked = false; this.lastFingerprint = null; this.lastContent = null; this.identityKnown = false; }
   resetHold() { this.anchor = null; this.held = 0; this.samples = 0; this.history = []; this.lastReliableTime = null; this.previousReliable = false; this.emitted = false; }
-  resetChange() { this.changedSince = null; this.changedAnchor = null; this.changedFingerprint = null; }
-  restart() { this.resetHold(); this.resetChange(); this.missingSince = null; this.previousTime = null; }
-  captured(detection) { this.locked = true; this.lastFingerprint = detection?.fingerprint?.slice(); this.restart(); }
+  resetChange() { this.changedSince = null; this.changedAnchor = null; this.changedFingerprint = null; this.changedContent = null; }
+  restart() { this.resetHold(); this.resetChange(); this.missingSince = null; this.previousTime = null; this.departureObserved = false; }
+  captured(detection) { this.locked = true; this.identityKnown = false; this.lastFingerprint = detection?.fingerprint?.slice(); this.lastContent = detection?.contentFingerprint?.slice(); this.restart(); }
+  setIdentity(code) { this.identityKnown = !!code; }
   nextPage() { this.locked = false; this.restart(); }
   update(detection, time) {
     // Only fresh observed frames count. Background time, repeated timestamps and
@@ -52,6 +60,7 @@ export class AutoScanGate {
       // A confidence dip is not evidence that the already-scanned page left.
       if (!detection) {
         this.missingSince ??= time;
+        if (time - this.missingSince >= 200) this.departureObserved = true;
         if (time - this.missingSince >= REMOVAL_MS) this.locked = false;
       } else this.missingSince = null;
       if (this.lastReliableTime === null || time - this.lastReliableTime > DETECTION_GRACE_MS) this.resetHold();
@@ -59,16 +68,30 @@ export class AutoScanGate {
     }
     this.missingSince = null;
     if (this.locked) {
-      if (fingerprintDifference(this.lastFingerprint, detection.fingerprint) > 0.085) {
+      const detailed = this.lastContent?.length && detection.contentFingerprint?.length === this.lastContent.length;
+      const detailDifference = detailed ? contentDifference(this.lastContent, detection.contentFingerprint) : 0;
+      const coarseDifference = fingerprintDifference(this.lastFingerprint, detection.fingerprint);
+      const changed = detailed ? (detailDifference > (this.identityKnown ? .0005 : .035) && coarseDifference > (this.identityKnown ? .002 : .006))
+        || detailDifference > .075 || (this.departureObserved && detailDifference > .018)
+        : fingerprintDifference(this.lastFingerprint, detection.fingerprint) > .085;
+      if (changed) {
         // Require a consistent new page; moving the old page through noisy
         // fingerprints must not re-arm automatic capture.
         if (!stableAgainst(detection.corners, this.changedAnchor)
-          || fingerprintDifference(this.changedFingerprint, detection.fingerprint) > 0.06) {
+          || fingerprintDifference(this.changedFingerprint, detection.fingerprint) > .06
+          || (detailed && contentDifference(this.changedContent, detection.contentFingerprint) > .075)) {
           this.changedSince = time; this.changedAnchor = copyCorners(detection.corners);
           this.changedFingerprint = detection.fingerprint.slice();
         }
+        // Fine samples vary a little as tracked borders converge. Compare to
+        // the preceding candidate frame, while keeping the geometry/coarse
+        // anchor fixed, so that drift cannot reset the hold forever.
+        this.changedContent = detection.contentFingerprint?.slice();
         if (time - this.changedSince >= 900) { this.nextPage(); this.previousTime = time; }
-      } else this.resetChange();
+      } else {
+        this.resetChange();
+        if (detailed) { this.lastContent = detection.contentFingerprint.slice(); this.lastFingerprint = detection.fingerprint.slice(); }
+      }
       if (this.locked) return this.state(false, "waiting");
     }
     const expired = this.lastReliableTime !== null && time - this.lastReliableTime > DETECTION_GRACE_MS;

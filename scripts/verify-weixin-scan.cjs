@@ -15,17 +15,19 @@ const shutter = template.match(/<button\b[^>]*class="scan-shutter"[^>]+>/)[0];
 const thumbnail = [...template.matchAll(/<button\b[^>]*class="scan-side-action"[^>]+>/g)][1][0];
 const countKey = template.match(/class="scan-count"[^>]*>{{([^}]+)}}/)[1];
 
-function createPage({ denied = false, canvasUnavailable = false, mediaFailure = '', paper = false, stalledPhoto = false, stalledExport = false, fastTimeouts = false } = {}) {
+function createPage({ denied = false, canvasUnavailable = false, mediaFailure = '', paper = false, stalledPhoto = false, stalledExport = false, fastTimeouts = false, uncertainStill = false, qrData = '' } = {}) {
   let definition, viewerDefinition, canvasQueries = 0, requests = 0, pickerReturn, contractOpens = 0, systemPhotos = 0, previews = [];
   const lifecycle = {}, cache = {};
   let frameCallback, photoCallback, exportCallback, clock = 1000, frameStarts = 0, frameStops = 0;
   const removed = [];
+  let pageVariant = 0;
+  const files = new Map(), copies = [], delivered = [], trace = [];
   class ScanDate extends Date { static now() { return clock; } }
   const pixels = (width, height) => {
     const data = new Uint8ClampedArray(width * height * 4).fill(255);
     if (paper) for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
       const inside = x > width * .125 && x < width * .875 && y > height * .08 && y < height * .92;
-      const value = inside ? (y % 29 < 2 && x > width * .25 && x < width * .75 ? 65 : 225) : 75;
+      const value = inside ? ((y + pageVariant * 7) % 29 < 2 && x > width * .25 && x < width * .75 ? 65 : 225) : 75;
       const i = (y * width + x) * 4; data[i] = data[i + 1] = data[i + 2] = value;
     }
     return { width, height, data };
@@ -33,11 +35,15 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   const hooks = name => callback => (lifecycle[name] ||= []).push(callback);
   const canvasNode = {
     width: 2, height: 2,
+    requestAnimationFrame(fn) { queueMicrotask(fn); },
     createImage() {
-      return { width: paper ? 384 : 24, height: paper ? 512 : 32, set src(_value) { queueMicrotask(() => this.onload()); } };
+      return { width: paper ? 384 : 24, height: paper ? 512 : 32, set src(value) { this.path = value; queueMicrotask(() => this.onload()); } };
     },
     getContext() {
-      return { drawImage() {}, getImageData(_x, _y, width, height) { return pixels(width, height); },
+      const target = this;
+      return { drawImage(image) { target.source = image.path; }, getImageData(_x, _y, width, height) {
+        return uncertainStill && target.source?.includes('capture') ? {width,height,data:new Uint8ClampedArray(width*height*4).fill(255)} : pixels(width, height);
+      },
         createImageData(width, height) { return pixels(width, height); }, putImageData() {},
         clearRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, closePath() {}, fill() {}, stroke() {},
       };
@@ -51,7 +57,7 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
         in() { return query; }, select() { return query; },
         fields() { canvasQueries++; return query; },
         boundingClientRect(callback) { callback({ width: 300, height: 400, left: 0, top: 100 }); return query; },
-        exec(callback) { callback?.(canvasUnavailable ? [] : [{ node: canvasNode }, { node: canvasNode }]); return query; },
+        exec(callback) { callback?.(canvasUnavailable ? [] : [{ node: canvasNode }, { node: { ...canvasNode } }, { node: { ...canvasNode } }]); return query; },
       }; return query;
     },
     createCameraContext() { return {
@@ -60,7 +66,9 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
     }; },
     canvasToTempFilePath(options) {
       if (options.fileType === 'jpg') { exportCallback = options; if (stalledExport) return; }
-      options.success({ tempFilePath: options.fileType === 'jpg' ? '/tmp/output.jpg' : '/tmp/outline.png' });
+      const file = options.fileType === 'jpg' ? '/tmp/output.jpg' : '/tmp/outline.png';
+      files.set(file,{width:options.destWidth,height:options.destHeight});
+      options.success({ tempFilePath: file });
     },
     getFileInfo(options) { options.success({ size: 10000 }); },
     chooseImage(options) {
@@ -70,9 +78,14 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
     setClipboardData(options) { options.fail({ errMsg: 'setClipboardData:fail api scope is not declared in privacy agreement' }); },
     showModal(options) { assert.ok(options.content); },
     previewImage(options) { previews.push(options); },
-    getFileSystemManager() { return { unlink(options) { removed.push(options.filePath); options.success?.(); } }; },
+    getFileSystemManager() { return {
+      copyFile(options) { const dimensions=files.get(options.srcPath); files.set(options.destPath,dimensions); copies.push({...dimensions,...options}); options.success(); },
+      unlink(options) { removed.push(options.filePath); files.delete(options.filePath); options.success?.(); },
+    }; },
+    navigateBack() {},
   };
   const wx = {
+    env: { USER_DATA_PATH: '/sandbox' },
     createPage(page) { definition = page; },
     createComponent(component) { viewerDefinition = component; },
     getPrivacySetting() { assert.fail('privacy-setting failure must not block native media'); },
@@ -87,8 +100,8 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
       pickerReturn = setTimeout(() => lifecycle.onShow.forEach(callback => callback()), 20);
     },
   };
-  const vendor = { ...vue, index: uni, wx$1: wx, jsQR: require('jsqr'),
-    getCurrentInstance: () => ({ proxy: { $scope: {}, getOpenerEventChannel() { return { emit() {} }; } } }),
+  const vendor = { ...vue, index: uni, wx$1: wx, jsQR: qrData ? () => ({data:qrData}) : require('jsqr'),
+    getCurrentInstance: () => ({ proxy: { $scope: {}, getOpenerEventChannel() { return { emit(name, rows) { delivered.push({name,rows}); } }; } } }),
     e: (...args) => Object.assign({}, ...args), t: String, o: handler => handler,
     n: value => value, s: value => value, p: value => value, f: (items, callback) => items.map(callback),
     _export_sfc: (component, props) => Object.assign(component, Object.fromEntries(props)),
@@ -102,9 +115,15 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
       vendor[alias[1]] = vue[alias[1].split('$')[0]];
     const module = { exports: {} }; cache[file] = module;
     vm.runInNewContext(source, { module, exports: module.exports, require: name => load(path.resolve(path.dirname(file), name)),
-      wx, uni, console, setTimeout: fastTimeouts ? (fn,ms) => setTimeout(fn,ms >= 5000 ? 35 : ms) : setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask,
+      wx, uni, console, setTimeout: fastTimeouts ? (fn,ms) => setTimeout(fn,ms >= 45000 ? 500 : ms >= 5000 ? 100 : ms) : setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask,
       Uint8ClampedArray, Uint8Array, Uint16Array, Uint32Array, Float32Array, Int32Array, Promise, Date: paper ? ScanDate : Date,
     }, { filename: file });
+    if (paper && file.endsWith('/autoScan.js')) {
+      const proto=module.exports.AutoScanGate.prototype, update=proto.update;
+      proto.update=function(detection,time){const before=this.lastContent, after=detection?.contentFingerprint;
+        const delta=before&&after?Math.max(...after.map((value,i)=>Math.abs(value-before[i]))):null;
+        const result=update.call(this,detection,time);trace.push({time,delta,before:before?.length,after:after?.length,changed:this.changedSince,held:this.held,reason:result.reason});return result;};
+    }
     return module.exports;
   }
   load(path.join(root, 'pages/scan/index.js'));
@@ -121,6 +140,8 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
     latePhoto() { photoCallback.success({tempImagePath:'/tmp/late-capture.jpg'}); },
     lateExport() { exportCallback.success({tempFilePath:'/tmp/late-output.jpg'}); },
     get removed() { return removed; },
+    get trace() { return trace; }, get copies() { return copies; }, get delivered() { return delivered; },
+    setPage(value) { pageVariant = value; },
     mountViewer() {
       load(path.join(root, 'components/ScanImageViewer.js'));
       const render = viewerDefinition.setup({src:'/tmp/scan-test.jpg',urls:['/tmp/scan-test.jpg','/tmp/scan-next.jpg']}, {});
@@ -178,20 +199,58 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
 
   // Actual compiled capture -> process -> result -> tap workflow. The iOS
   // camera keeps running after automatic capture, but controls must unlock.
-  const successful = createPage({paper:true});
+  const successful = createPage({paper:true,qrData:'https://school.example/instructions'});
   await successful.render()[event(start,'bindtap')](); successful.render()[event(camera,'bindinitdone')]();
   for (let i=0;i<5;i++) { successful.emitFrame(); await new Promise(resolve=>setTimeout(resolve,5)); }
   await until(()=>successful.count===1&&!successful.render()[event(shutter,'disabled')],'automatic capture must restore enabled shutter').catch(error=>{console.error({count:successful.count,starts:successful.frameStarts,stops:successful.frameStops,state:successful.render()});throw error;});
   assert.equal(successful.render()[event(camera,'wx:if')],true,'successful automatic capture keeps native camera mounted');
   assert.equal(successful.render()[event(thumbnail,'disabled')],false,'completed photograph can be opened');
   assert.ok(successful.frameStops>=1&&successful.frameStarts>=2,'pause image callbacks while processing and resume afterwards');
+  for(let i=0;i<8;i++){successful.emitFrame();await new Promise(resolve=>setTimeout(resolve,5));}
+  assert.equal(successful.count,1,'native tracking drift must not duplicate the same paper');
+  assert.doesNotMatch(template,/已换好下一页/,'automatic scanning cannot require a next-page confirmation');
+  for (let variant=1;variant<=2;variant++) {
+    successful.setPage(variant);
+    for(let i=0;i<14;i++){successful.emitFrame();await new Promise(resolve=>setTimeout(resolve,5));}
+    await until(()=>successful.count===variant+1&&!successful.render()[event(shutter,'disabled')],'changing sheets must capture the next page without touching controls').catch(error=>{console.error({variant,count:successful.count,trace:successful.trace.slice(-12),state:successful.render()});throw error;});
+  }
   await successful.render()[event(thumbnail,'bindtap')]();
   assert.notEqual(successful.render()[event(camera,'wx:if')],true,'thumbnail tap enters review and releases camera');
   const continueTag=template.match(/<button\b[^>]+>继续扫描/)[0];
   assert.equal(successful.render()[event(continueTag,'disabled')],false);
   await successful.render()[event(continueTag,'bindtap')](); successful.render()[event(camera,'bindinitdone')]();
-  await successful.render()[event(shutter,'bindtap')]();assert.equal(successful.count,2,'manual shutter still works after opening and returning from first scan');
+  await successful.render()[event(shutter,'bindtap')]();assert.equal(successful.count,4,'manual shutter still works after opening and returning from continuous scan');
+  const editTag=template.match(/<button\b[^>]+>调整边角与比例/)[0];
+  const pickerTag=template.match(/<picker\b[^>]+>/)[0];
+  const confirmTag=template.match(/<button\b[^>]+>确认并处理/)[0];
+  let previous=successful.copies.filter(copy=>copy.destPath.includes('/scan-preview-')).at(-1).destPath;
+  for(const [option,expected] of [[2,297/210],[3,1]]) {
+    await successful.render()[event(editTag,'bindtap')]();await vue.nextTick();
+    successful.render()[event(pickerTag,'bindchange')]({detail:{value:String(option)}});
+    await until(()=>{
+      const preview=successful.copies.filter(copy=>copy.destPath.includes('/shape-preview-')).at(-1);
+      return preview&&Math.abs(preview.width/preview.height-expected)<.01;
+    },'native shape preview must visibly change width and height');
+    await successful.render()[event(confirmTag,'bindtap')]();
+    const output=successful.copies.filter(copy=>copy.destPath.includes('/scan-preview-')).at(-1);
+    assert.ok(Math.abs(output.width/output.height-expected)<.01,'picker ratio reaches final native canvas export');
+    assert.notEqual(output.destPath,previous,'edited photo gets a fresh URI even if native temp paths repeat');
+    assert.ok(successful.removed.includes(previous));previous=output.destPath;
+    assert.equal(successful.count,4,'shape change replaces one page');
+  }
   successful.close();
+
+  const uncertain=createPage({paper:true,uncertainStill:true});
+  await uncertain.render()[event(start,'bindtap')]();uncertain.render()[event(camera,'bindinitdone')]();
+  for(let i=0;i<5;i++){uncertain.emitFrame();await new Promise(resolve=>setTimeout(resolve,5));}
+  await until(()=>uncertain.count===1&&!uncertain.render()[event(shutter,'disabled')],'uncertain auto crop must preserve a page and continue');
+  assert.equal(uncertain.render()[event(camera,'wx:if')],true);
+  const reviewNote=template.match(/<view\b[^>]*class="scan-review-note"[^>]*>/)[0];
+  assert.equal(uncertain.render()[event(reviewNote,'wx:if')],true,'uncertain retained pages have a visible batch review notice');
+  const finishTag=template.match(/<button\b[^>]*scan-finish[^>]+>/)[0];await uncertain.render()[event(finishTag,'bindtap')]();
+  assert.equal(uncertain.delivered[0].rows[0].corrected,false,'uncertain page is not mislabeled as automatically corrected');
+  assert.equal(uncertain.delivered[0].rows[0].code,'','uncertain full-frame photo must not assign a background student code');
+  uncertain.close();
 
   const stopped = createPage({stalledPhoto:true});
   await stopped.render()[event(start,'bindtap')](); stopped.render()[event(camera,'bindinitdone')]();
@@ -233,5 +292,5 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   assert.equal(touchHost.previews[0].current,'/tmp/scan-test.jpg');
   assert.equal(touchHost.previews[0].urls.length,2);
   touchHost.close();
-  console.log('WeChat compiled scan checks passed: native consent, picker lifecycle, automatic capture unlock, thumbnail/review/continue/manual capture, frame pause/resume, stopped photo, export timeout/late cleanup, no blocking capture layer, native pinch and full-image preview.');
+  console.log('WeChat compiled scan checks passed: native consent, picker lifecycle, continuous three-page auto capture without confirmation, uncertain full-frame retention, live/final landscape and square dimensions, fresh edited-image paths, thumbnail/review/continue/manual capture, frame pause/resume, stopped photo, export timeout/late cleanup, no blocking capture layer, native pinch and full-image preview.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

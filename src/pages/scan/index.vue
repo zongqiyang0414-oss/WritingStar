@@ -3,11 +3,13 @@ import { computed, getCurrentInstance, nextTick, ref, shallowRef, watch } from "
 import { onHide, onLoad, onReady, onResize, onShow, onUnload } from "@dcloudio/uni-app";
 import { createScanProcessor } from "../../platform/scanProcessor.js";
 import { createScanJobs, scanCallback } from "../../platform/scanAsync.js";
+import { rectifyDocument } from "../../platform/documentScan.js";
 import ScanImageViewer from "../../components/ScanImageViewer.vue";
 import { LivePaperDetector, selectCaptureDetection } from "../../platform/paperScanCapture.js";
 import { AutoScanGate } from "../../platform/autoScan.js";
 import { clamp, fitRect, validQuad } from "../../platform/scanGeometry.js";
 import { MAX_PHOTOS } from "../../platform/photos.js";
+import { decodePaperCode } from "../../services/paperWorkflow.js";
 import { nativeScanError } from "../../platform/scanAccess.js";
 import { authorizeScanCamera, chooseScanSources, createScanRenderer, openScanSettings, openScanAppSettings, openScanPrivacyContract, persistScanPages, startNativeFrames, takeNativePhoto } from "../../platform/scanner.js";
 // #ifdef H5
@@ -24,8 +26,11 @@ const importQueue = shallowRef([]), importStatus = ref(""), processingStage = re
 const importsPaused = ref(false), jobs = createScanJobs();
 const pending = shallowRef(null), corners = ref([]), stage = ref({ width: 300, height: 400, left: 0, top: 0 });
 const ratioIndex = ref(0);
-const ratioOptions = ["自动估算", "A4 / A5 竖版", "A4 / A5 横版", "正方形"];
+const ratioOptions = ["自动保持纸张形状", "A4 / A5 竖版", "A4 / A5 横版", "正方形"];
 const ratioValues = [0, 210 / 297, 297 / 210, 1];
+const shapePreview = shallowRef(null), shapeBusy = ref(false), shapeError = ref("");
+const shapeSize = computed(() => shapePreview.value ? fitRect(shapePreview.value.width, shapePreview.value.height, 112, 88) : { width: 88, height: 88 });
+const reviewNeeded = computed(() => pages.value.filter(page => page.needsReview).length);
 const captureFlight = shallowRef(null), thumbnailPulse = ref(false);
 const flightStyle = computed(() => {
   const flight = captureFlight.value;
@@ -36,7 +41,7 @@ const current = computed(() => pages.value[selected.value]);
 const full = computed(() => pages.value.length >= capacity.value);
 const fit = computed(() => pending.value ? fitRect(pending.value.width, pending.value.height, stage.value.width, stage.value.height) : stage.value);
 const processingText = computed(() => [importStatus.value, processingStage.value || "正在处理扫描件…"].filter(Boolean).join(" "));
-const frameText = computed(() => busy.value ? processingText.value : full.value ? "本次页数已满，请检查后完成" : waiting.value && automatic.value ? "本页已扫描，请移开后放入下一张" : notice.value);
+const frameText = computed(() => busy.value ? processingText.value : full.value ? "本次页数已满，请结束扫描" : waiting.value && automatic.value ? "本页已收好，换上下一张即可自动扫描" : notice.value);
 const gate = new AutoScanGate();
 const liveDetector = new LivePaperDetector();
 const processor = createScanProcessor();
@@ -45,6 +50,7 @@ let renderer, rendererPromise, nativeContext, browserCamera, stopFrames, channel
 let epoch = 0, lastFrame = 0, drawing = false, lastDetection = null, dragging = -1, replacing = -1, choosing = false;
 let detectionErrors = 0, lastDetectionTime = 0, outlineDrawing = false;
 let flightStart, flightEnd, pulseEnd, flightResolve, flightSequence = 0;
+let shapeSequence = 0, shapeRunning = false, shapeTimer, shapeSource, shapePixels;
 
 onLoad(options => {
   paperBatch.value = options?.batch === "paper";
@@ -65,6 +71,7 @@ onShow(() => {
 });
 onResize(async () => { cancelCaptureFeedback(); await nextTick(); if (!disposed) await measure(); });
 watch([mode, error, () => pages.value.length, waiting], async () => { await nextTick(); if (!disposed) await measure(); });
+watch([pending, ratioIndex, corners], queueShapePreview, { deep: true });
 onHide(() => { foreground = false; if (!jobs.cancel()) releaseCamera(); });
 onUnload(() => {
   disposed = true; resumePicker?.(); if (!jobs.cancel()) releaseCamera(); processor.dispose(); renderer?.dispose();
@@ -81,6 +88,7 @@ function clearOutline() {
   if (old) renderer?.remove(old);
 }
 function releaseCamera() {
+  clearShapePreview(); renderer?.cancelPending();
   processor.cancel();
   cancelCaptureFeedback();
   epoch++; stopFrames?.(); stopFrames = null; browserCamera?.close(); browserCamera = null;
@@ -227,7 +235,7 @@ async function privacyContract() {
   try { await openScanPrivacyContract(); }
   catch (failure) { showFailure(failure); }
 }
-function copyError() { uni.setClipboardData({ data: `写字星 v0.18.0 扫描
+function copyError() { uni.setClipboardData({ data: `写字星 v0.19.0 扫描
 ${error.value}
 ${errorDetail.value}`, fail: () => uni.showModal({ title: "请长按复制错误详情", showCancel: false,
   content: errorDetail.value || error.value }) }); }
@@ -294,7 +302,6 @@ async function updateLiveOutline(detection, frame, token) {
 function toggleAutomatic() {
   automatic.value = !automatic.value; gate.restart(); progress.value = 0;
 }
-function nextPage() { gate.nextPage(); waiting.value = false; progress.value = 0; }
 
 async function capture(fromAutomatic = false) {
   if (!cameraReady.value || busy.value || full.value) return;
@@ -334,12 +341,31 @@ async function processSource(source, fromAutomatic, token, fromImport = false, p
   if (token !== epoch || disposed) throw new Error("扫描已暂停，请重新拍摄。");
   const detection = selectCaptureDetection(image, previewDetection, sameFrame);
   if (!detection || detection.confidence < 0.7) {
+    if (fromAutomatic) {
+      // An uncertain still must not interrupt the teacher's next sheet or use
+      // guessed corners. Keep the full page for optional end-of-batch review.
+      const output = await makePage(source, image, null, token);
+      pages.value = [...pages.value, output]; selected.value = pages.value.length - 1;
+      notice.value = "已保留此页，结束后可检查边缘；请换上下一张";
+      animateCapture(output, token);
+      if (full.value) { busy.value = false; reviewPage(selected.value); }
+      return;
+    }
     busy.value = false;
     await editSource({ source, width: image.width, height: image.height, corners: detection?.corners, fromImport }, -1);
     notice.value = "未识别到完整边缘，请拖动四角框住整张纸";
     return;
   }
   const output = await makePage(source, image, detection.corners, token);
+  let identity = "";
+  try { decodePaperCode(output.code); identity = output.code.trim(); } catch { /* Other QR codes do not identify a student's page. */ }
+  gate.setIdentity(identity);
+  if (fromAutomatic && identity && pages.value.some(page => page.code?.trim() === identity)) {
+    renderer.remove(output.photo.url);
+    if (!pages.value.some(page => page.source === source)) renderer.remove(source);
+    notice.value = "本页已收好，请更换下一张";
+    return;
+  }
   pages.value = [...pages.value, output]; selected.value = pages.value.length - 1;
   notice.value = "扫描件已加入，请移开本页后放入下一张";
   if (!fromImport) {
@@ -353,13 +379,13 @@ async function processSource(source, fromAutomatic, token, fromImport = false, p
 }
 async function makePage(source, image, quad, token, aspectRatio = 0) {
   const cancelled = () => disposed || token !== epoch || !foreground;
-  const { image: enhanced, code } = await processor.process(image, quad, { cancelled, aspectRatio, readCode: paperBatch.value,
+  const { image: enhanced, code } = await processor.process(image, quad, { cancelled, aspectRatio, readCode: paperBatch.value && !!quad,
     onStage: text => { if (!cancelled()) processingStage.value = text; } });
   if (cancelled()) throw new Error("扫描已暂停，请重试。");
   processingStage.value = "正在生成扫描件…";
   const url = await renderer.exportImage(enhanced);
   if (cancelled()) { renderer.remove(url); throw new Error("扫描已暂停，请重试。"); }
-  return { source, code, aspectRatio, width: image.width, height: image.height, previewWidth: enhanced.width, previewHeight: enhanced.height, corners: quad.map(p => ({ ...p })),
+  return { source, code, aspectRatio, needsReview: !quad, corrected: !!quad, width: image.width, height: image.height, previewWidth: enhanced.width, previewHeight: enhanced.height, corners: quad?.map(p => ({ ...p })) || null,
     photo: { id: `scan-${Date.now()}-${Math.random().toString(36).slice(2)}`, url, name: "作业扫描件.jpg", sample: false } };
 }
 async function importPage(sourceType = "album") {
@@ -412,6 +438,43 @@ async function editSource(entry, index) {
   ratioIndex.value = Math.max(0, ratioValues.indexOf(entry.aspectRatio || 0));
   corners.value = entry.corners?.map(p => ({ ...p })) || [{ x: 0.06, y: 0.06 }, { x: 0.94, y: 0.06 }, { x: 0.94, y: 0.94 }, { x: 0.06, y: 0.94 }];
   await nextTick(); await measure();
+}
+function clearShapePreview() {
+  shapeSequence++; clearTimeout(shapeTimer);
+  if (shapePreview.value?.url) renderer?.remove(shapePreview.value.url);
+  shapePreview.value = null; shapeError.value = ""; shapeSource = null; shapePixels = null;
+}
+function queueShapePreview() {
+  shapeSequence++; clearTimeout(shapeTimer);
+  if (!pending.value || mode.value !== "corners" || !validQuad(corners.value)) return;
+  shapeTimer = setTimeout(updateShapePreview, 100);
+}
+async function updateShapePreview() {
+  if (shapeRunning || !pending.value || mode.value !== "corners") return;
+  const sequence = shapeSequence, source = pending.value.source;
+  const stale = () => disposed || sequence !== shapeSequence || !pending.value || mode.value !== "corners";
+  shapeRunning = true; shapeBusy.value = true; shapeError.value = "";
+  try {
+    await ensureRenderer();
+    if (stale()) return;
+    if (shapeSource !== source || !shapePixels) {
+      const pixels = await renderer.readPreview(source);
+      if (stale()) return;
+      shapeSource = source; shapePixels = pixels;
+    }
+    const output = await rectifyDocument(shapePixels, corners.value.map(p => ({ ...p })), { maxEdge: 320,
+      aspectRatio: ratioValues[ratioIndex.value], cancelled: stale });
+    if (stale()) return;
+    const url = await renderer.exportPreview(output);
+    if (stale()) { renderer.remove(url); return; }
+    const previous = shapePreview.value;
+    shapePreview.value = { url, width: output.width, height: output.height };
+    if (previous?.url) renderer.remove(previous.url);
+  } catch (failure) { if (!stale()) shapeError.value = "预览未生成，请重新选择形状或调整边角"; }
+  finally {
+    shapeRunning = false; shapeBusy.value = false;
+    if (!disposed && sequence !== shapeSequence && pending.value && mode.value === "corners") shapeTimer = setTimeout(updateShapePreview, 0);
+  }
 }
 function pointStyle(point) { return { left: `${fit.value.left + point.x * fit.value.width}px`, top: `${fit.value.top + point.y * fit.value.height}px` }; }
 function edgeStyle(point, index) {
@@ -475,7 +538,7 @@ async function finish() {
   try {
     const saved = await persistScanPages(renderer, pages.value.map(entry => entry.photo), () => disposed || token !== epoch);
     const result = paperBatch.value ? saved.map((photo, index) => ({
-      id: photo.id, photo, code: pages.value[index].code || "", corrected: true, manual: false,
+      id: photo.id, photo, code: pages.value[index].code || "", corrected: pages.value[index].corrected !== false, manual: false,
     })) : saved;
     channel.emit("scanned", result); delivered.value = true;
     uni.navigateBack({ fail: () => { error.value = "扫描件已添加，请返回作业提交页。"; } });
@@ -501,6 +564,8 @@ function leave() {
       <text class="scan-count">{{ pages.length }} / {{ capacity }} 页</text>
     </view>
     <view class="scan-status" role="status">{{ mode === 'live' ? frameText : busy ? (saving ? '正在保存扫描件…' : processingText) : mode === 'corners' ? '拖动四角框住纸张，保留完整笔迹' + (importQueue.length ? ' · 后续还有 ' + importQueue.length + ' 张' : '') : '双指放大、拖动查看笔迹，轻点查看全图' }}</view>
+    <view v-if="reviewNeeded && mode !== 'corners'" class="scan-review-note">{{ reviewNeeded }} 页已保留完整画面，可在结束后检查边缘</view>
+    <view v-if="mode === 'review' && current?.needsReview" class="scan-review-note">此页边缘待检查，可点“调整边角与比例”修正</view>
     <view id="scan-stage" class="scan-stage" @touchmove.stop.prevent="moveCorner" @touchend="dragging = -1" @touchcancel="dragging = -1" @mousemove="moveCorner" @mouseup="dragging = -1" @mouseleave="dragging = -1">
       <!-- #ifdef H5 -->
       <view v-show="mode === 'live'" id="scan-browser-camera" class="scan-camera" />
@@ -556,13 +621,12 @@ function leave() {
           <text class="scan-muted">{{ automatic ? '放稳后自动拍摄' : '点击按钮拍摄' }}</text>
         </view>
         <view class="scan-progress"><view :style="{ width: automatic && !waiting ? Math.round(progress * 100) + '%' : '0%' }" /></view>
-        <button v-if="automatic && waiting" class="scan-text-button scan-next" :disabled="busy" @click="nextPage">已换好下一页，继续识别</button>
         <view class="scan-actions">
           <button class="scan-side-action" :disabled="busy || full || !initialized" @click="importPage('album')"><text class="scan-action-icon">▧</text><text>从相册扫描</text></button>
           <button class="scan-shutter" aria-label="拍摄扫描" :disabled="busy || !cameraReady || full" @click="capture(false)"><view class="scan-shutter-inner" /></button>
           <button class="scan-side-action" :disabled="busy || !pages.length" @click="reviewPage(pages.length - 1)"><view v-if="pages.length" id="scan-capture-thumb" :class="['scan-thumb-slot', { 'scan-thumb-arrived': thumbnailPulse }]"><image class="scan-thumb" :src="pages[pages.length - 1].photo.url" mode="aspectFit" /></view><text v-else class="scan-action-icon">▤</text><text>已扫描 {{ pages.length }} 页</text></button>
         </view>
-        <button v-if="pages.length" class="scan-primary scan-finish" :disabled="busy" @click="finish">完成，添加 {{ pages.length }} 页</button>
+        <button v-if="pages.length" class="scan-primary scan-finish" :disabled="busy" @click="finish">结束扫描，添加 {{ pages.length }} 页</button>
       </template>
       <template v-else-if="mode === 'review'">
         <view class="scan-pagination"><button :disabled="busy || selected === 0" @click="selected--">‹ 上一页</button><text>{{ selected + 1 }} / {{ pages.length }}</text><button :disabled="busy || selected >= pages.length - 1" @click="selected++">下一页 ›</button></view>
@@ -570,9 +634,18 @@ function leave() {
         <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy || full" @click="startCamera">继续扫描</button><button class="scan-primary" :disabled="busy || delivered" @click="finish">完成 {{ pages.length }} 页</button></view>
       </template>
       <template v-else>
-        <picker class="scan-ratio-picker" :range="ratioOptions" :value="ratioIndex" :disabled="busy" @change="ratioIndex = Number($event.detail.value)">
-          <view>纸张比例：{{ ratioOptions[ratioIndex] }} <text>更改 ›</text></view>
-        </picker>
+        <view class="scan-shape-row">
+          <view class="scan-shape-choice">
+            <picker class="scan-ratio-picker" :range="ratioOptions" :value="ratioIndex" :disabled="busy" @change="ratioIndex = Number($event.detail.value)">
+              <view>成片形状：{{ ratioOptions[ratioIndex] }} <text>更改 ›</text></view>
+            </picker>
+            <text class="scan-muted">调整扫描件的宽高，请按真实纸张选择</text>
+          </view>
+          <view class="scan-shape-preview">
+            <image v-if="shapePreview" :src="shapePreview.url" mode="scaleToFill" :style="{width:shapeSize.width+'px',height:shapeSize.height+'px'}" />
+            <text>{{ shapeBusy ? '正在更新预览…' : shapeError || '成片预览' }}</text>
+          </view>
+        </view>
         <view class="scan-review-actions"><button class="scan-secondary" :disabled="busy" @click="cancelCorners">{{ importQueue.length ? '跳过此张' : '取消调整' }}</button><button class="scan-primary" :disabled="busy" @click="confirmCorners">确认并处理</button></view>
       </template>
     </view>
@@ -582,6 +655,7 @@ function leave() {
     <!-- #ifdef MP-WEIXIN -->
     <canvas id="scan-work-canvas" type="2d" class="scan-hidden-canvas" />
     <canvas id="scan-outline-canvas" type="2d" class="scan-hidden-canvas" />
+    <canvas id="scan-shape-canvas" type="2d" class="scan-hidden-canvas" />
     <!-- #endif -->
   </view>
 </template>
@@ -635,6 +709,11 @@ function leave() {
 .scan-review-actions button { flex: 1; }
 .scan-ratio-picker { padding: 9px 0; font-size: 13px; color: #e6f5ee; }
 .scan-ratio-picker text { margin-left: 8px; color: #6ee2c1; }
+.scan-shape-row { display: flex; align-items: center; gap: 12px; }
+.scan-shape-choice { flex: 1; min-width: 0; }
+.scan-shape-preview { width: 112px; min-height: 110px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; color: #a9bcb5; font-size: 10px; }
+.scan-shape-preview image { display: block; background: #fff; }
+.scan-review-note { padding: 5px 14px; text-align: center; background: #393422; color: #ffe4a3; font-size: 12px; }
 .scan-edit-edge { position: absolute; height: 2px; transform-origin: left center; background: #00efb9; pointer-events: none; }
 .scan-corner { position: absolute; width: 36px; height: 36px; margin-left: -18px; margin-top: -18px; border-radius: 50%; border: 2px solid #fff; background: #008e71; color: #fff; font-size: 14px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 9px #0008; touch-action: none; }
 .scan-hidden-canvas { position: fixed; left: -5000px; top: -5000px; width: 2px; height: 2px; pointer-events: none; }

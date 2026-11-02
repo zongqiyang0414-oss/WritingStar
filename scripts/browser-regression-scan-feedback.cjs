@@ -12,7 +12,9 @@ const server = http.createServer((request, response) => {
   if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {response.writeHead(404); response.end(); return;}
   response.writeHead(200, {'Content-Type':types[path.extname(file)] || 'application/octet-stream'}); fs.createReadStream(file).pipe(response);
 });
-const output = name => path.resolve(__dirname, '../outputs/' + name);
+const artifactVersion=process.env.WRITINGSTAR_SCAN_ARTIFACT_VERSION||'v016';
+const artifactDate=process.env.WRITINGSTAR_SCAN_ARTIFACT_DATE||'20261030';
+const output = name => path.resolve(__dirname, '../outputs/' + name.replace('v016',artifactVersion).replace('20261030',artifactDate));
 (async () => {
   let browser;
   try {
@@ -33,7 +35,7 @@ const output = name => path.resolve(__dirname, '../outputs/' + name);
       }; requestAnimationFrame(sample);
       Object.defineProperty(navigator.mediaDevices,'getUserMedia',{configurable:true,value:async () => {
         const canvas=document.createElement('canvas');canvas.width=720;canvas.height=960;
-        const c=canvas.getContext('2d');c.fillStyle='#746b57';c.fillRect(0,0,720,960);
+        const c=canvas.getContext('2d');window.__scanScene=c;c.fillStyle='#746b57';c.fillRect(0,0,720,960);
         c.fillStyle='#e2ded4';c.fillRect(90,80,540,800);c.strokeStyle='#444';c.lineWidth=2;c.strokeRect(130,130,460,680);
         c.font='24px sans-serif';c.fillStyle='#252525';c.fillText('Scan detail test',155,175);
         for(let i=0;i<12;i++){c.font=(12+i%3)+'px sans-serif';c.fillText('Fine print and retained pen strokes '+i,155,225+i*28);}
@@ -59,7 +61,7 @@ const output = name => path.resolve(__dirname, '../outputs/' + name);
     const first=samples[0],last=samples.at(-1);
     assert.ok(first.width>last.width*5 && last.y>first.y+100 && last.x>first.x+50,'photo shrinks and flies down to the right');
     assert.ok(Math.abs(last.x+last.width/2-last.target.x-last.target.width/2)<5 && Math.abs(last.y+last.height/2-last.target.y-last.target.height/2)<5,'motion lands on the measured thumbnail');
-    const frames='/workspace/scratch/scan-feedback-v016/movie';fs.mkdirSync(frames,{recursive:true});
+    const frames=`/workspace/scratch/scan-feedback-${artifactVersion}/movie`;fs.mkdirSync(frames,{recursive:true});
     const captured=movie.filter(frame=>frame.time>=first.time-.06&&frame.time<=last.time+.15);
     captured.forEach((frame,index)=>fs.writeFileSync(path.join(frames,`frame-${String(index).padStart(3,'0')}.png`),Buffer.from(frame.data,'base64')));
     fs.writeFileSync(path.join(frames,'timing.json'),JSON.stringify(captured.map(frame=>frame.time)));
@@ -95,7 +97,8 @@ const output = name => path.resolve(__dirname, '../outputs/' + name);
     assert.equal((await matrix()).scale,1,'new page starts at whole-page size');
     await button('上一页').click();assert.equal((await matrix()).scale,1,'page switching resets view');
     await button('继续扫描').click();await page.locator('.scan-outline').waitFor();
-    await page.locator('.scan-mode-toggle').click();await button('已换好下一页，继续识别').click();
+    await page.locator('.scan-mode-toggle').click();
+    await page.evaluate(()=>{const c=window.__scanScene;c.strokeStyle='#333';c.lineWidth=7;for(let i=0;i<6;i++){c.beginPath();c.moveTo(160,240+i*35);c.lineTo(450,255+i*35);c.stroke();}});
     await page.locator('.scan-capture-flight').waitFor();
     await page.locator('.scan-side-action').filter({hasText:'已扫描'}).click();await viewer.waitFor();
     await page.waitForTimeout(700);

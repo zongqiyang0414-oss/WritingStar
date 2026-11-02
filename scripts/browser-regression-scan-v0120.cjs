@@ -30,9 +30,10 @@ function stored() {
     const bind=async code=>{await page.locator('.binding-login').click();await page.locator('.binding-code input').fill(code);await button('查看绑定信息').click();await button(/^\s*确认\s*$/,page.locator('.binding-view')).click();await page.locator('.greeting').waitFor();};
     const noOverflow=async()=>{for(const width of [320,390,1280]){await page.setViewportSize({width,height:900});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`overflow at ${width}`);}await page.setViewportSize({width:390,height:900});};
     await page.addInitScript(() => {
-      window.__capture = { paper: '', present: true, streams: [], slowOutline: true, livePngExports: 0 };
+      window.__capture = { paper: '', present: true, streams: [], slowOutline: true, livePngExports: 0, shots: 0 };
       const encode=HTMLCanvasElement.prototype.toDataURL;
       HTMLCanvasElement.prototype.toDataURL=function(type,...args){
+        if(type==='image/jpeg'&&this.width===960&&this.height===720&&window.__capture.streams.length)window.__capture.shots++;
         // Reproduce an outline export exceeding the old 650ms reset. The
         // physical page stays still; rendering must not prevent the shutter.
         if(type==='image/png' && window.__capture.slowOutline){if(window.__capture.streams.length)window.__capture.livePngExports++;const until=performance.now()+680;while(performance.now()<until){}}
@@ -84,17 +85,20 @@ function stored() {
     await page.evaluate(()=>window.__capture.slowOutline=false);
     console.log(`Stationary page captured with vector outline: ${firstCaptureMs}ms including opening camera and processing; no per-frame PNG export.`);
     assert.match(await page.locator('.scan-count').innerText(),/1 \/ 60/);
-    await page.waitForTimeout(1800);
+    await page.waitForTimeout(3200);
     assert.match(await page.locator('.scan-count').innerText(),/^1/,'the same paper must not be captured again');
     assert.equal(await page.locator('#scan-browser-camera video').count(),1,'automatic capture keeps the camera live');
     await page.screenshot({path:path.resolve(__dirname,`../outputs/${artifactVersion}-scan-auto-${artifactDate}.png`)});
-    // Removing a page and introducing the next page automatically rearms capture.
-    await page.evaluate(()=>window.__capture.present=false);await page.waitForTimeout(1500);
+    // Swap directly onto the next sheet, without an empty-scene delay or tap.
     await page.evaluate(image=>window.__capture.paper=image,images[1]);
     await page.evaluate(()=>window.__capture.present=true);
     await page.waitForFunction(()=>document.querySelector('.scan-count')?.textContent.startsWith('2'));
     await page.waitForTimeout(1800);
     assert.match(await page.locator('.scan-count').innerText(), /^2/);
+    const capturedBeforeDuplicate=await page.evaluate(()=>window.__capture.shots);
+    await page.evaluate(image=>window.__capture.paper=image,images[0]);
+    await page.waitForFunction(before=>window.__capture.shots>before&&!document.querySelector('.scan-shutter')?.hasAttribute('disabled'),capturedBeforeDuplicate);
+    assert.match(await page.locator('.scan-count').innerText(),/^2/,'a previously collected student/page code is not added twice by automatic scanning');
     await page.locator('.scan-side-action').filter({hasText:'已扫描'}).click();
     await button('调整边角').waitFor();
     assert.ok((await page.locator('.scan-result img').getAttribute('src')).startsWith('data:image/jpeg;'));

@@ -68,17 +68,26 @@ const server = http.createServer((req,res) => {
     assert.ok(quality.blue>100,`blue pen survives enhancement (${quality.blue} sampled pixels)`);
     assert.ok(quality.red>100,`red stamp survives enhancement (${quality.red} sampled pixels)`);
     await page.screenshot({path:path.resolve(__dirname,`../outputs/scan-album-multiple-${artifactVersion}-${artifactDate}.png`)});
-    await button('调整边角').click();
-    await page.locator('.scan-ratio-picker').click();
-    await page.locator('.uni-picker-view-group').hover();
-    await page.mouse.wheel(0,40);
-    await page.locator('.uni-picker-action-confirm').click();
-    await button('确认并处理').click();
-    await button('调整边角').waitFor();
-    const dimensions=await page.locator('.scan-result img').evaluate(img=>({width:img.naturalWidth,height:img.naturalHeight}));
-    assert.ok(Math.abs(dimensions.width/dimensions.height-210/297)<.003,'explicit A4 dimensions survive enhance/JPEG');
-    assert.match(await page.locator('.scan-count').innerText(),/^3/,'ratio adjustment replaces one page');
-    await button('调整边角').click();assert.match(await page.locator('.scan-ratio-picker').innerText(),/竖版/);
+    const shapeOutputs=[];
+    for(const ratio of [210/297,297/210,1]) {
+      await button('调整边角').click();
+      await page.locator('.scan-ratio-picker').click();
+      await page.locator('.uni-picker-view-group').hover();
+      await page.mouse.wheel(0,40);
+      await page.locator('.uni-picker-action-confirm').click();
+      await page.waitForFunction(ratio=>{
+        const img=document.querySelector('.scan-shape-preview img');
+        return img?.naturalWidth>0&&Math.abs(img.naturalWidth/img.naturalHeight-ratio)<.01;
+      },ratio);
+      await button('确认并处理').click();
+      await button('调整边角').waitFor();
+      const dimensions=await page.locator('.scan-result img').evaluate(img=>({width:img.naturalWidth,height:img.naturalHeight}));
+      assert.ok(Math.abs(dimensions.width/dimensions.height-ratio)<.003,'selected shape survives enhancement/JPEG');
+      shapeOutputs.push(dimensions);
+      assert.match(await page.locator('.scan-count').innerText(),/^3/,'shape adjustment replaces one page');
+    }
+    await button('调整边角').click();assert.match(await page.locator('.scan-ratio-picker').innerText(),/正方形/);
+    await page.waitForFunction(()=>document.querySelector('.scan-shape-preview img')?.naturalWidth>0);
     await page.screenshot({path:path.resolve(__dirname,`../outputs/scan-ratio-${artifactVersion}-${artifactDate}.png`)});
     await button('取消调整').click();
     // Hold an actual scanner image decode, then click Stop. Existing pages
@@ -110,6 +119,6 @@ const server = http.createServer((req,res) => {
     await page.locator('.scan-error').waitFor();assert.match(await page.locator('.scan-error').innerText(),/还可添加 2 页/);
     assert.match(await page.locator('.scan-count').innerText(),/^0/,'over-limit choice does not partially import');
     assert.deepEqual(errors,[]);
-    console.log('Album multiple input, order, retained colors, A4 picker, stop during decode, existing-page access, stale-result rejection, queue resume and capacity limit passed.',quality,dimensions);
+    console.log('Album multiple input, order, retained colors, live portrait/landscape/square previews and outputs, stop, existing-page access, stale-result rejection, queue resume and capacity limit passed.',quality,shapeOutputs);
   } finally {await browser?.close();server.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
