@@ -15,13 +15,13 @@ const shutter = template.match(/<button\b[^>]*class="scan-shutter"[^>]+>/)[0];
 const thumbnail = [...template.matchAll(/<button\b[^>]*class="scan-side-action"[^>]+>/g)][1][0];
 const countKey = template.match(/class="scan-count"[^>]*>{{([^}]+)}}/)[1];
 
-function createPage({ denied = false, canvasUnavailable = false, mediaFailure = '', paper = false, stalledPhoto = false, stalledExport = false, fastTimeouts = false, uncertainStill = false, qrData = '' } = {}) {
+function createPage({ denied = false, canvasUnavailable = false, mediaFailure = '', paper = false, stalledPhoto = false, stalledCopy = false, fastTimeouts = false, uncertainStill = false, qrData = '' } = {}) {
   let definition, viewerDefinition, canvasQueries = 0, requests = 0, pickerReturn, contractOpens = 0, systemPhotos = 0, previews = [];
   const lifecycle = {}, cache = {};
   let frameCallback, photoCallback, exportCallback, clock = 1000, frameStarts = 0, frameStops = 0;
   const removed = [];
-  let pageVariant = 0;
-  const files = new Map(), copies = [], delivered = [], trace = [];
+  let pageVariant = 0, captures = 0;
+  const files = new Map([['/tmp/album.png',{width:4032,height:3024,bytes:'album-original'}],['/tmp/system-camera.png',{width:3024,height:4032,bytes:'system-original'}]]), copies = [], delivered = [], trace = [];
   class ScanDate extends Date { static now() { return clock; } }
   const pixels = (width, height) => {
     const data = new Uint8ClampedArray(width * height * 4).fill(255);
@@ -37,7 +37,7 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
     width: 2, height: 2,
     requestAnimationFrame(fn) { queueMicrotask(fn); },
     createImage() {
-      return { width: paper ? 384 : 24, height: paper ? 512 : 32, set src(value) { this.path = value; queueMicrotask(() => this.onload()); } };
+      return { width: paper ? 3024 : 24, height: paper ? 4032 : 32, set src(value) { this.path = value; queueMicrotask(() => this.onload()); } };
     },
     getContext() {
       const target = this;
@@ -62,10 +62,10 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
     },
     createCameraContext() { return {
       onCameraFrame(fn) { frameCallback = fn; return { start() { frameStarts++; }, stop() { frameStops++; } }; },
-      takePhoto(options) { photoCallback = options; if (!stalledPhoto) options.success({ tempImagePath: '/tmp/capture.jpg' }); },
+      takePhoto(options) { photoCallback = options; if (!stalledPhoto) {files.set('/tmp/capture.png',{width:3024,height:4032,bytes:'camera-original-'+(++captures)});options.success({tempImagePath:'/tmp/capture.png'});} },
     }; },
     canvasToTempFilePath(options) {
-      if (options.fileType === 'jpg') { exportCallback = options; if (stalledExport) return; }
+      assert.notEqual(options.fileType,'jpg','photo pipeline must never export a replacement JPEG');
       const file = options.fileType === 'jpg' ? '/tmp/output.jpg' : '/tmp/outline.png';
       files.set(file,{width:options.destWidth,height:options.destHeight});
       options.success({ tempFilePath: file });
@@ -73,13 +73,13 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
     getFileInfo(options) { options.success({ size: 10000 }); },
     chooseImage(options) {
       assert.deepEqual(Array.from(options.sourceType), ['camera']); systemPhotos++;
-      options.success({ tempFilePaths: ['/tmp/system-camera.jpg'] });
+      options.success({ tempFilePaths: ['/tmp/system-camera.png'] });
     },
     setClipboardData(options) { options.fail({ errMsg: 'setClipboardData:fail api scope is not declared in privacy agreement' }); },
     showModal(options) { assert.ok(options.content); },
     previewImage(options) { previews.push(options); },
     getFileSystemManager() { return {
-      copyFile(options) { const dimensions=files.get(options.srcPath); files.set(options.destPath,dimensions); copies.push({...dimensions,...options}); options.success(); },
+      copyFile(options) { if(stalledCopy){exportCallback=options;return;} const dimensions=files.get(options.srcPath); files.set(options.destPath,dimensions); copies.push({...dimensions,...options}); options.success(); },
       unlink(options) { removed.push(options.filePath); files.delete(options.filePath); options.success?.(); },
     }; },
     navigateBack() {},
@@ -95,7 +95,7 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
       assert.deepEqual(Array.from(options.sourceType), ['album']);
       if (mediaFailure) { options.fail({ errMsg: mediaFailure }); return; }
       lifecycle.onHide.forEach(callback => callback());
-      options.success({ tempFiles: [{ tempFilePath: '/tmp/album.jpg' }] });
+      options.success({ tempFiles: [{ tempFilePath: '/tmp/album.png' }] });
       // Real picker success can precede the page's onShow notification.
       pickerReturn = setTimeout(() => lifecycle.onShow.forEach(callback => callback()), 20);
     },
@@ -138,7 +138,8 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
     get frameStarts() { return frameStarts; }, get frameStops() { return frameStops; },
     emitFrame() { clock += 350; const image = pixels(384,512); frameCallback({ ...image, data: image.data.buffer }); },
     latePhoto() { photoCallback.success({tempImagePath:'/tmp/late-capture.jpg'}); },
-    lateExport() { exportCallback.success({tempFilePath:'/tmp/late-output.jpg'}); },
+    lateCopy() { exportCallback.success({}); },
+    get lateCopyPath() {return exportCallback?.destPath;},
     get removed() { return removed; },
     get trace() { return trace; }, get copies() { return copies; }, get delivered() { return delivered; },
     setPage(value) { pageVariant = value; },
@@ -172,7 +173,7 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   const requests = denied.requests;
   await denied.render()[event(album, 'bindtap')]();
   assert.equal(denied.requests, requests, 'album must not ask for camera permission');
-  assert.match(JSON.stringify(denied.render()), /确认并处理|corners|拖动四角/);
+  assert.match(JSON.stringify(denied.render()), /原照片|review/);
   assert.doesNotMatch(JSON.stringify(denied.render()), /扫描已暂停|相册未能打开/);
   denied.close();
 
@@ -194,7 +195,7 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   const capture = template.match(/<button\b[^>]+>使用系统相机拍摄/)[0];
   await system.render()[event(capture, 'bindtap')]();
   assert.equal(system.systemPhotos, 1);
-  assert.match(JSON.stringify(system.render()), /确认并处理|corners|拖动四角/);
+  assert.match(JSON.stringify(system.render()), /原照片|review/);
   system.close();
 
   // Actual compiled capture -> process -> result -> tap workflow. The iOS
@@ -216,28 +217,23 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   }
   await successful.render()[event(thumbnail,'bindtap')]();
   assert.notEqual(successful.render()[event(camera,'wx:if')],true,'thumbnail tap enters review and releases camera');
-  const continueTag=template.match(/<button\b[^>]+>继续扫描/)[0];
+  const continueTag=template.match(/<button\b[^>]+>继续拍照/)[0];
   assert.equal(successful.render()[event(continueTag,'disabled')],false);
   await successful.render()[event(continueTag,'bindtap')](); successful.render()[event(camera,'bindinitdone')]();
   await successful.render()[event(shutter,'bindtap')]();assert.equal(successful.count,4,'manual shutter still works after opening and returning from continuous scan');
-  const editTag=template.match(/<button\b[^>]+>调整边角与比例/)[0];
-  const pickerTag=template.match(/<picker\b[^>]+>/)[0];
-  const confirmTag=template.match(/<button\b[^>]+>确认并处理/)[0];
-  let previous=successful.copies.filter(copy=>copy.destPath.includes('/scan-preview-')).at(-1).destPath;
-  for(const [option,expected] of [[2,297/210],[3,1]]) {
-    await successful.render()[event(editTag,'bindtap')]();await vue.nextTick();
-    successful.render()[event(pickerTag,'bindchange')]({detail:{value:String(option)}});
-    await until(()=>{
-      const preview=successful.copies.filter(copy=>copy.destPath.includes('/shape-preview-')).at(-1);
-      return preview&&Math.abs(preview.width/preview.height-expected)<.01;
-    },'native shape preview must visibly change width and height');
-    await successful.render()[event(confirmTag,'bindtap')]();
-    const output=successful.copies.filter(copy=>copy.destPath.includes('/scan-preview-')).at(-1);
-    assert.ok(Math.abs(output.width/output.height-expected)<.01,'picker ratio reaches final native canvas export');
-    assert.notEqual(output.destPath,previous,'edited photo gets a fresh URI even if native temp paths repeat');
-    assert.ok(successful.removed.includes(previous));previous=output.destPath;
-    assert.equal(successful.count,4,'shape change replaces one page');
+  assert.doesNotMatch(template,/调整边角|成片形状|确认并处理|<picker/,'photo capture exposes no resampling controls');
+  const completeTag=template.match(/<button\b[^>]+>完成 /)[0];
+  await successful.render()[event(completeTag,'bindtap')]();
+  const originals=successful.delivered[0].rows;
+  assert.equal(originals.length,4);
+  assert.equal(new Set(originals.map(row=>row.photo.url)).size,4,'reused native temp URI still produces independent originals');
+  for(const [index,row] of originals.entries()){
+    assert.equal(row.corrected,false);assert.equal(row.photo.original,true);assert.equal(row.photo.width,3024);assert.equal(row.photo.height,4032);
+    assert.ok(row.photo.url.endsWith('.png'),'PNG original format retained');
+    assert.equal(successful.copies.find(copy=>copy.destPath===row.photo.url).bytes,'camera-original-'+(index+1),'original content retained across later captures');
+    assert.equal(row.code,'','shared generic QR is not treated as a student identity');
   }
+  assert.equal(successful.copies.length,4,'successful finish hands off existing originals without another batch copy');
   successful.close();
 
   const uncertain=createPage({paper:true,uncertainStill:true});
@@ -245,10 +241,9 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   for(let i=0;i<5;i++){uncertain.emitFrame();await new Promise(resolve=>setTimeout(resolve,5));}
   await until(()=>uncertain.count===1&&!uncertain.render()[event(shutter,'disabled')],'uncertain auto crop must preserve a page and continue');
   assert.equal(uncertain.render()[event(camera,'wx:if')],true);
-  const reviewNote=template.match(/<view\b[^>]*class="scan-review-note"[^>]*>/)[0];
-  assert.equal(uncertain.render()[event(reviewNote,'wx:if')],true,'uncertain retained pages have a visible batch review notice');
   const finishTag=template.match(/<button\b[^>]*scan-finish[^>]+>/)[0];await uncertain.render()[event(finishTag,'bindtap')]();
   assert.equal(uncertain.delivered[0].rows[0].corrected,false,'uncertain page is not mislabeled as automatically corrected');
+  assert.equal(uncertain.delivered[0].rows[0].photo.original,true);
   assert.equal(uncertain.delivered[0].rows[0].code,'','uncertain full-frame photo must not assign a background student code');
   uncertain.close();
 
@@ -261,13 +256,13 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   stopped.latePhoto();await new Promise(resolve=>setTimeout(resolve,10));assert.equal(stopped.count,0,'stale native capture must not append a page');
   stopped.close();
 
-  const timedOut=createPage({paper:true,stalledExport:true,fastTimeouts:true});
+  const timedOut=createPage({paper:true,stalledCopy:true,fastTimeouts:true});
   await timedOut.render()[event(start,'bindtap')](); timedOut.render()[event(camera,'bindinitdone')]();
   await timedOut.render()[event(shutter,'bindtap')]();
   assert.match(JSON.stringify(timedOut.render()),/超时/);
   assert.equal(timedOut.render()[event(album,'disabled')],false,'missing export callback must not lock the page forever');
-  timedOut.lateExport();await new Promise(resolve=>setTimeout(resolve,10));assert.equal(timedOut.count,0);
-  assert.ok(timedOut.removed.includes('/tmp/late-output.jpg'));timedOut.close();
+  timedOut.lateCopy();await new Promise(resolve=>setTimeout(resolve,10));assert.equal(timedOut.count,0);
+  assert.ok(timedOut.removed.includes(timedOut.lateCopyPath));timedOut.close();
 
   // Run real compiled mini-program event bindings with native client coordinates.
   // Browser touch input does not establish that WXML catches the same gestures.
@@ -292,5 +287,5 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   assert.equal(touchHost.previews[0].current,'/tmp/scan-test.jpg');
   assert.equal(touchHost.previews[0].urls.length,2);
   touchHost.close();
-  console.log('WeChat compiled scan checks passed: native consent, picker lifecycle, continuous three-page auto capture without confirmation, uncertain full-frame retention, live/final landscape and square dimensions, fresh edited-image paths, thumbnail/review/continue/manual capture, frame pause/resume, stopped photo, export timeout/late cleanup, no blocking capture layer, native pinch and full-image preview.');
+  console.log('WeChat compiled original-photo checks passed: native consent, picker lifecycle, continuous three-page auto capture without confirmation, uncertain full-frame retention, unchanged original bytes/dimensions/format, no photo JPEG export, unique originals and ownership handoff, thumbnail/review/continue/manual capture, frame pause/resume, stopped photo, export timeout/late cleanup, no blocking capture layer, native pinch and full-image preview.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

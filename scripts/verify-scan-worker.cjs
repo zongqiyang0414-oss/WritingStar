@@ -11,6 +11,9 @@ vm.runInNewContext(fs.readFileSync(path.join(root,'workers/scan.js'),'utf8'),{wo
  await receive({type:'process',id:2,width,height,buffer,corners:[{x:.1,y:.1},{x:.9,y:.1},{x:.9,y:.9},{x:.1,y:.9}],options:{readCode:false,aspectRatio:210/297}});
  const output=messages.at(-1);assert.equal(output.id,2);assert.ok(!output.error,output.error);assert.ok(Math.abs(output.width/output.height-210/297)<.01);
  assert.equal(output.buffer.byteLength,output.width*output.height*4);assert.ok(new Uint8ClampedArray(output.buffer)[0]>230);assert.ok(messages.some(m=>m.stage));
+ const untouched=new Uint8ClampedArray(width*height*4).fill(173);
+ await receive({type:'process',id:3,width,height,buffer:untouched.buffer,corners:[{x:.1,y:.1},{x:.9,y:.1},{x:.9,y:.9},{x:.1,y:.9}],options:{readCode:false,identifyOnly:true}});
+ const original=messages.at(-1);assert.equal(original.width,width);assert.equal(original.height,height);assert.deepEqual(Array.from(new Uint8ClampedArray(original.buffer)),Array.from(untouched));
  // Also load the actual uni-app-compiled client and connect its wx.createWorker
  // to the isolated bundle. This catches compiler API aliases and wire formats.
  const module={exports:{}};let clientMessage,workerMessage,created=0,terminated=0;
@@ -21,8 +24,8 @@ vm.runInNewContext(fs.readFileSync(path.join(root,'workers/scan.js'),'utf8'),{wo
  const processor=module.exports.createScanProcessor();
  for(let i=0;i<2;i++) {
   const source=new Uint8ClampedArray(width*height*4).fill(210);
-  const result=await processor.process({width,height,data:source},null,{readCode:false});
-  assert.equal(result.image.width,width);assert.ok(result.image.data[0]>230);assert.equal(source[0],210);
+  const result=await processor.process({width,height,data:source},null,{readCode:false,identifyOnly:true});
+  assert.equal(result.image.width,width);assert.equal(result.image.height,height);assert.deepEqual(result.image.data,source);assert.equal(source[0],210);
  }
  assert.equal(created,1);processor.dispose();assert.equal(terminated,1);
  console.log('Compiled WeChat worker: binary probe, isolated pixel pipeline, A4 ratio and stage messages passed.');

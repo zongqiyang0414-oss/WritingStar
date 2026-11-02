@@ -1,8 +1,7 @@
 import jsQR from "jsqr";
-import { paperId } from "../services/paperWorkflow.js";
+import { paperId, decodePaperCode } from "../services/paperWorkflow.js";
 import { analyzeDocument } from "./documentScan.js";
 import { processScanPixels } from "./scanProcessing.js";
-import { SCAN_SOURCE_MAX_EDGE, MAX_SCAN_BYTES, SCAN_JPEG_QUALITIES } from "./scanQuality.js";
 
 // Four solid corner marks give a stable target even on a light desktop.
 export function detectPaperCorners({ data, width, height }, { markersOnly = false } = {}) {
@@ -98,7 +97,7 @@ export async function loadScanImage(url) {
   await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = () => reject(new Error("图片无法读取，请换一张重试。")); image.src = url; });
   return image;
 }
-function canvasFor(source, max = SCAN_SOURCE_MAX_EDGE) {
+function canvasFor(source, max = 1600) {
   const sw = source.videoWidth || source.naturalWidth || source.width, sh = source.videoHeight || source.naturalHeight || source.height;
   if (!sw || !sh) throw new Error("相机尚未就绪，请稍后再拍。");
   const ratio = Math.min(1, max / Math.max(sw, sh)), canvas = document.createElement("canvas");
@@ -114,23 +113,20 @@ export function inspectScanFrame(source) {
     || detectPaperCorners(data, { markersOnly: true });
   return { corners, markerEstimate: !detected && !!corners, width: canvas.width, height: canvas.height };
 }
-export async function processScanSource(source, name = "扫描答题卡") {
-  let canvas = canvasFor(source), context = canvas.getContext("2d", {willReadFrequently: true});
-  let pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-  const inspect = inspectScanFrame(source), corners = inspect.corners?.map(p => ({ x: p.x / (inspect.width - 1), y: p.y / (inspect.height - 1) }));
-  const { image: processed, code } = await processScanPixels(pixels, corners, { sourceCodeFallback: inspect.markerEstimate });
-  canvas.width = processed.width; canvas.height = processed.height;
-  const finalContext = canvas.getContext("2d", {willReadFrequently: true});
-  const target = finalContext.createImageData(processed.width, processed.height);
-  target.data.set(processed.data); finalContext.putImageData(target, 0, 0);
-  let url;
-  for (const quality of SCAN_JPEG_QUALITIES) {
-    url = canvas.toDataURL("image/jpeg", quality);
-    if (Math.ceil((url.length - url.indexOf(",") - 1) * 3 / 4) <= MAX_SCAN_BYTES) break;
-    url = null;
-  }
-  if (!url) throw new Error("扫描图片仍过大，请减少画面杂物后重试。");
-  return { id: paperId("scan"), photo: { id: paperId("photo"), url, name, sample: false }, code, corrected: !!corners, manual: false };
+export async function processScanSource(source, name = "作业原照片", originalUrl = source.src) {
+  if (!originalUrl?.startsWith("data:image/")) throw new Error("请从原照片文件导入，以便保留完整图片。");
+  const canvas = canvasFor(source), context = canvas.getContext("2d", {willReadFrequently:true});
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height), inspect = inspectScanFrame(source);
+  const corners = inspect.corners?.map(p => ({x:p.x/(inspect.width-1),y:p.y/(inspect.height-1)}));
+  let code = "";
+  try {
+    const result = await processScanPixels(pixels, corners || null, {identifyOnly:true});
+    try { decodePaperCode(result.code); code = result.code.trim(); } catch { /* No verified student identity. */ }
+  } catch {
+    // Identification is optional; retain the valid original for manual matching.
+  } finally { canvas.width = canvas.height = 1; }
+  return {id:paperId("scan"),photo:{id:paperId("photo"),url:originalUrl,name,sample:false,original:true,
+    width:source.naturalWidth||source.width,height:source.naturalHeight||source.height},code,corrected:false,manual:false};
 }
 export function chooseScanFiles(remaining = 60) {
   return new Promise((resolve, reject) => {

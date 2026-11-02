@@ -33,10 +33,11 @@ function stored() {
       window.__capture = { paper: '', present: true, streams: [], slowOutline: true, livePngExports: 0, shots: 0 };
       const encode=HTMLCanvasElement.prototype.toDataURL;
       HTMLCanvasElement.prototype.toDataURL=function(type,...args){
-        if(type==='image/jpeg'&&this.width===960&&this.height===720&&window.__capture.streams.length)window.__capture.shots++;
+        const capture=this.width===960&&this.height===720&&window.__capture.streams.length;
+        if(capture)window.__capture.shots++;
         // Reproduce an outline export exceeding the old 650ms reset. The
         // physical page stays still; rendering must not prevent the shutter.
-        if(type==='image/png' && window.__capture.slowOutline){if(window.__capture.streams.length)window.__capture.livePngExports++;const until=performance.now()+680;while(performance.now()<until){}}
+        if(type==='image/png' && !capture && window.__capture.slowOutline){if(window.__capture.streams.length)window.__capture.livePngExports++;const until=performance.now()+680;while(performance.now()<until){}}
         return encode.call(this,type,...args);
       };
       Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable:true, value: async () => {
@@ -61,7 +62,7 @@ function stored() {
     const images = [first, await page.locator('.paper-preview-image img').getAttribute('src')];
     await button(/去.*扫描/).click();
     await page.evaluate(image=>{window.__capture.paper=image;}, images[0]);
-    await button('开启相机扫描').click();await page.locator('.scanner-page').waitFor();
+    await button('开启自动拍照').click();await page.locator('.scanner-page').waitFor();
     assert.equal(await page.locator('#scan-browser-camera video').count(),0,'opening the page does not request camera permission');
     assert.match(await page.locator('.scan-mode-toggle').innerText(),/已开启/,'automatic scanning is on by default');
     const autoStarted=Date.now();
@@ -99,24 +100,24 @@ function stored() {
     await page.evaluate(image=>window.__capture.paper=image,images[0]);
     await page.waitForFunction(before=>window.__capture.shots>before&&!document.querySelector('.scan-shutter')?.hasAttribute('disabled'),capturedBeforeDuplicate);
     assert.match(await page.locator('.scan-count').innerText(),/^2/,'a previously collected student/page code is not added twice by automatic scanning');
-    await page.locator('.scan-side-action').filter({hasText:'已扫描'}).click();
-    await button('调整边角').waitFor();
-    assert.ok((await page.locator('.scan-result img').getAttribute('src')).startsWith('data:image/jpeg;'));
+    await page.locator('.scan-side-action').filter({hasText:'已拍摄'}).click();
+    await button('删除此页').waitFor();
+    assert.ok((await page.locator('.scan-result img').getAttribute('src')).startsWith('data:image/png;'));
     await page.screenshot({path:path.resolve(__dirname,`../outputs/${artifactVersion}-scan-result-${artifactDate}.png`)});
     // The manual switch stops automatic capture; the shutter still creates a page.
-    await button('继续扫描').click();await page.locator('.scan-outline').waitFor();
+    await button('继续拍照').click();await page.locator('.scan-outline').waitFor();
     await page.locator('.scan-mode-toggle').click();assert.match(await page.locator('.scan-mode-toggle').innerText(),/已关闭/);
     await page.evaluate(()=>window.__capture.present=false);await page.waitForTimeout(1500);
     await page.evaluate(()=>window.__capture.present=true);await page.waitForTimeout(2200);
     assert.match(await page.locator('.scan-count').innerText(),/^2/,'manual mode must not capture automatically');
-    await page.locator('.scan-shutter').click();await button('调整边角').waitFor();
+    await page.locator('.scan-shutter').click();await button('删除此页').waitFor();
     assert.match(await page.locator('.scan-count').innerText(),/^3/);
     await button('删除此页').click();assert.match(await page.locator('.scan-count').innerText(),/^2/);
     // Both processed pages must retain the original card identifiers.
     await button(/^完成 \d+ 页$/).click();await page.locator('.scan-page-card').first().waitFor();
     assert.equal(await page.locator('.scan-page-card').count(),2);
     assert.match(await page.locator('.scan-page-card').first().innerText(),/小禾.*第 1 页/);
-    assert.match(await page.locator('.scan-page-card').first().innerText(),/已自动校正/);
+    assert.match(await page.locator('.scan-page-card').first().innerText(),/原照片保留/);
     assert.ok(await page.evaluate(()=>window.__capture.streams.every(s=>s.getTracks().every(t=>t.readyState==='ended'))));
     // Album enhancement must retain QR duplicate rejection.
     const sourceFile='/tmp/writingstar-v0120-page2.png';fs.writeFileSync(sourceFile,Buffer.from(images[1].split(',')[1],'base64'));
@@ -124,11 +125,14 @@ function stored() {
     await page.waitForFunction(()=>document.querySelector('.paper-error')?.textContent.includes('未能添加'));
     assert.equal(await page.locator('.scan-page-card').count(),2);
     assert.match(await page.locator('.scan-student-group').first().innerText(),/可提交/);
+    const retainedOriginals=await page.locator('.scan-page-thumb img').evaluateAll(images=>images.map(img=>img.src));
     await page.screenshot({path:path.resolve(__dirname,`../outputs/${artifactVersion}-scan-inbox-${artifactDate}.png`),fullPage:true});
     await button('统一提交并开始AI批阅').click();await confirm();await page.locator('.scan-empty').waitFor();
     const submissions=(await page.evaluate(stored)).submissions.filter(s=>s.assignmentId===assignment.id);
     assert.equal(submissions.length,1);assert.equal(submissions[0].paper.source,'teacher-scan');
     assert.deepEqual(submissions[0].paper.pages.map(p=>p.page),[1,2]);assert.ok(submissions[0].photos.every(p=>!p.sample));
+    assert.ok(submissions[0].photos.every(p=>p.original&&p.width===960&&p.height===720));
+    assert.ok(submissions[0].photos.every(p=>retainedOriginals.includes(p.url)),'formal submission retains the exact reviewed original');
     await noOverflow();assert.deepEqual(errors,[]);
     console.log('Scan default automatic capture, full-camera outline alignment, same-page lock, next-page rearm, manual capture, QR identity, duplicate protection, 60-page inbox, ordered submission and camera release passed.');
   } finally { await browser?.close();server.close(); }

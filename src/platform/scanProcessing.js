@@ -2,9 +2,20 @@ import { rectifyDocument, enhanceDocument } from "./documentScan.js";
 import { readPaperScanCode } from "./scanCode.js";
 import { SCAN_OUTPUT_MAX_EDGE } from "./scanQuality.js";
 
-export async function processScanPixels(image, corners, { readCode = true, sourceCodeFallback = false, cancelled = () => false, maxEdge = SCAN_OUTPUT_MAX_EDGE, aspectRatio = 0, cooperative = true, onStage = () => {} } = {}) {
+export async function processScanPixels(image, corners, { readCode = true, identifyOnly = false, sourceCodeFallback = false, cancelled = () => false, maxEdge = SCAN_OUTPUT_MAX_EDGE, aspectRatio = 0, cooperative = true, onStage = () => {} } = {}) {
   const check = () => { if (cancelled()) throw new Error("扫描已暂停，请重试。"); };
   check();
+  if (identifyOnly) {
+    // This is a bounded analysis copy, never the file saved or shown to the
+    // teacher. Only the confirmed paper region can contribute a student code.
+    if (!readCode || !corners) return { image, code: "" };
+    onStage("正在识别学生码…");
+    const region = await rectifyDocument(image, corners, { maxEdge: 1600, cancelled, cooperative });
+    check();
+    const code = readPaperScanCode(region);
+    check();
+    return { image, code };
+  }
   onStage("正在拉正纸面…");
   // Uncertain borders still retain the whole frame, with the same bounded
   // output budget and bilinear sampling as a corrected page.

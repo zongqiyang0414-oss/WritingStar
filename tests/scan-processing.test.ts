@@ -68,3 +68,14 @@ test('扫描默认保留2400像素细节，不确定全图同样限制输出且�
  const small=await processScanPixels(blank(300,400),q,{readCode:false});
  assert.ok(small.image.width<=300&&small.image.height<=400,'small sources are not enlarged');
 });
+
+test('原图模式只在分析副本中识码，不增强、缩放或改写返回像素，不确定边缘不读背景码',async()=>{
+ const image=blank(900,1100),inside='WS1|selected-page|1|2|TEST';
+ drawCode(image,inside,340,110,4);drawCode(image,'WS1|background-page|1|2|OTHER',650,600,4);
+ const before=image.data.slice(),stages=[];
+ const q=[{x:50/899,y:50/1099},{x:550/899,y:50/1099},{x:550/899,y:950/1099},{x:50/899,y:950/1099}];
+ const result=await processScanPixels(image,q,{identifyOnly:true,onStage:value=>stages.push(value)});
+ assert.equal(result.image,image);assert.equal(result.code,inside);assert.deepEqual(image.data,before);
+ assert.deepEqual(stages,['正在识别学生码…']);
+ const uncertain=await processScanPixels(image,null,{identifyOnly:true});assert.equal(uncertain.code,'');assert.equal(uncertain.image,image);
+});

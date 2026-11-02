@@ -216,7 +216,7 @@ function toggleFeedbackDimension(id) {
       </view>
       <view class="intro-foot">
         <text class="tiny-dot" />
-        原型展示 · v0.20.0
+        原型展示 · v0.21.0
       </view>
     </view>
     <!-- #endif -->
@@ -1128,7 +1128,7 @@ function toggleFeedbackDimension(id) {
                                   />
                                 </view>
                                 <view class="evidence-note">
-                                  照片将自动优化大小，请确认字迹清晰，最多提交6页。
+                                  按原照片保存，请确认字迹清晰；最多6页，单张不超过20MB。
                                 </view>
                                 <button
                                   class="primary spaced"

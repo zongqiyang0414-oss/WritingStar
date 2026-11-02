@@ -76,6 +76,11 @@ export interface Photo {
   url: string;
   name: string;
   sample: boolean;
+  /** Original selected/captured bytes; analysis previews never replace this file. */
+  original?: boolean;
+  width?: number;
+  height?: number;
+  captureCorners?: { x: number; y: number }[] | null;
 }
 export interface TeacherSummary {
   id: string;

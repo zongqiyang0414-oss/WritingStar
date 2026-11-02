@@ -109,17 +109,20 @@ test('四角检测与透视映射保留完整页面；纯背景不会被自动�
   for(const [u,v,i] of [[0,0,0],[1,0,1],[1,1,2],[0,1,3]]) {const p=perspectivePoint(quad,u,v);assert.ok(Math.abs(p.x-quad[i].x)<1e-6);assert.ok(Math.abs(p.y-quad[i].y)<1e-6);}
   data.fill(255); assert.equal(detectPaperCorners({data,width,height}),null);
 });
-test('微信扫描适配读取画布学生码并保存永久图片；失败可保留原图人工确认', async () => {
-  const {cards}=await setup(), code=encodePaperCode(cards[0],1,2), matrix=qrMatrix(code), size=(matrix.length+8)*4;
-  const data=new Uint8ClampedArray(size*size*4).fill(255);
-  for(let y=0;y<matrix.length;y++)for(let x=0;x<matrix.length;x++)if(matrix[y][x])for(let yy=0;yy<4;yy++)for(let xx=0;xx<4;xx++){const i=(((y+4)*4+yy)*size+(x+4)*4+xx)*4;data[i]=data[i+1]=data[i+2]=0;}
+test('微信拍照适配只在纸张分析副本识码，保存原文件；失败可保留原图人工确认', async () => {
+  const {cards}=await setup(), code=encodePaperCode(cards[0],1,2), matrix=qrMatrix(code), width=420,height=580;
+  const data=new Uint8ClampedArray(width*height*4).fill(255);
+  // A photographed sheet with a real border; a QR bitmap alone cannot prove
+  // which document is selected and used to depend on unrelated QR patterns.
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++)if(x<35||x>=width-35||y<30||y>=height-30){const i=(y*width+x)*4;data[i]=data[i+1]=data[i+2]=65;}
+  for(let y=0;y<matrix.length;y++)for(let x=0;x<matrix.length;x++)if(matrix[y][x])for(let yy=0;yy<4;yy++)for(let xx=0;xx<4;xx++){const i=(((y+4)*4+yy+85)*width+(x+4)*4+xx+70)*4;data[i]=data[i+1]=data[i+2]=0;}
   const previous=globalThis.uni,saved=[],sizes=[];
   globalThis.uni={
-    getImageInfo:options=>options.success({width:size,height:size,path:'/tmp/original'}),
+    getImageInfo:options=>options.success({width,height,path:'/tmp/original'}),
     createCanvasContext:()=>({drawImage(){},draw:(_keep,done)=>done()}),
     canvasGetImageData:options=>options.success({data}),
-    canvasPutImageData:options=>options.success({}),
-    canvasToTempFilePath:options=>options.success({tempFilePath:'/tmp/processed.jpg'}),
+    canvasPutImageData:()=>assert.fail('identifier analysis must not produce replacement pixels'),
+    canvasToTempFilePath:()=>assert.fail('the selected original must be saved without JPEG export'),
     getFileInfo:options=>options.success({size:1100*1024}),
     saveFile:options=>{saved.push(options.tempFilePath);options.success({savedFilePath:'/saved/'+saved.length});},
     chooseImage:options=>{assert.equal(options.count,9);assert.deepEqual(options.sizeType,['original']);options.fail({errMsg:'chooseImage:fail cancel'});},
@@ -128,7 +131,7 @@ test('微信扫描适配读取画布学生码并保存永久图片；失败可�
     const photo={id:'photo-device',url:'/tmp/original',name:'作品',sample:false};
     const row=await processDeviceScan(photo,'test-canvas',{},async(w,h)=>{sizes.push([w,h]);});
     assert.equal(row.code,code);assert.equal(row.photo.url,'/saved/1');assert.equal(row.photo.sample,false);
-    assert.deepEqual(sizes[0],[size,size]);assert.deepEqual(saved,['/tmp/processed.jpg']);
+    assert.deepEqual(sizes[0],[width,height]);assert.deepEqual(saved,['/tmp/original']);assert.equal(row.photo.original,true);assert.equal(row.corrected,false);
     const fallback=await preserveDeviceScan(photo);assert.equal(fallback.code,'');assert.equal(fallback.photo.url,'/saved/2');
     assert.deepEqual(await chooseDeviceScanImages(60),[]);
   }finally{globalThis.uni=previous;}

@@ -131,3 +131,21 @@ test('微信相册按剩余页数多选并保留页序，系统相机仍只拍�
     assert.deepEqual(await native.chooseScanSources('album', 0), []);
   } finally { globalThis.uni = originalUni; globalThis.wx = originalWx; }
 });
+
+test('微信原照片复制保留二进制和PNG扩展名，取消交付不删除原件，完成交付后释放页面仍保留照片', async () => {
+ const previousUni=globalThis.uni,previousWx=globalThis.wx;
+ const input=Buffer.from('89504e470d0a1a0a0000000d49484452','hex'),files=new Map([['/tmp/camera.png',input]]);
+ globalThis.wx={env:{USER_DATA_PATH:'/saved'}};
+ globalThis.uni={createSelectorQuery(){const q={in(){return q;},select(){return q;},fields(){return q;},exec(resolve){resolve([{node:{}},{node:{}}]);}};return q;},
+  canvasToTempFilePath(){assert.fail('original file cannot pass through an image encoder');},
+  getFileSystemManager(){return {copyFile(options){files.set(options.destPath,Buffer.from(files.get(options.srcPath)));options.success();},unlink(options){files.delete(options.filePath);options.success?.();}};}};
+ try {
+  const native=await nativeModule(),renderer=await native.createScanRenderer({});renderer.track('/tmp/camera.png');
+  const original=await renderer.keepOriginal('/tmp/camera.png');assert.match(original,/photo-original-.*\.png$/);assert.deepEqual(files.get(original),input);
+  let checks=0;await assert.rejects(native.persistScanPages(renderer,[{id:'p',url:original,original:true}],()=>++checks>1),/中断/);
+  assert.deepEqual(files.get(original),input,'rollback leaves the owned original available for retry');
+  const result=await native.persistScanPages(renderer,[{id:'p',url:original,original:true}]);
+  assert.equal(result[0].url,original,'handoff does not create another encoded or copied page');renderer.dispose();
+  assert.deepEqual(files.get(original),input,'page release cannot delete delivered originals');
+ } finally {globalThis.uni=previousUni;globalThis.wx=previousWx;}
+});

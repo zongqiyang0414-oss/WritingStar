@@ -8,6 +8,7 @@ import { chooseDeviceScanImages, processDeviceScan, preserveDeviceScan } from ".
 // #endif
 // #ifdef H5
 import { chooseScanFiles, loadScanImage, processScanSource } from "../platform/documentScanner.js";
+import { readBrowserPhotoFile } from "../platform/photos.js";
 // #endif
 const props = defineProps({ state: Object, assignment: Object, cards: Array, teacher: Boolean, studentId: String, identityId: String, busy: Boolean });
 const emit = defineEmits(["submit", "cards", "ai", "confirm"]);
@@ -50,19 +51,18 @@ async function importImages() {
     const files = await chooseScanFiles(MAX_SCAN_PAGES - rows.value.length);
     for (let i = 0; i < files.length && alive; i++) {
       progress.value = `识别与保存 ${i + 1} / ${files.length}`;
-      const url = URL.createObjectURL(files[i]);
       try {
+        const url = await readBrowserPhotoFile(files[i]);
         const source = await loadScanImage(url), row = await processScanSource(source, files[i].name);
         await append(row);
       } catch (failure) { failures++; error.value = `${files[i].name}：${failure.message}`; }
-      finally { URL.revokeObjectURL(url); }
       await new Promise(resolve => setTimeout(resolve, 10));
     }
     // #endif
     // #ifndef H5
     const photos = await chooseDeviceScanImages(MAX_SCAN_PAGES - rows.value.length);
     for (const photo of photos) {
-      progress.value = "识别学生码并校正页面…";
+      progress.value = "保留原照片并识别学生码…";
       try { await append(await processDeviceScan(photo, "scan-processing", instance.proxy, async (width,height) => {canvasWidth.value=width;canvasHeight.value=height;await nextTick();})); }
       catch (failure) {
         try { await append(await preserveDeviceScan(photo)); error.value = "部分图片未能自动处理，原图已保存，请人工确认学生和页码。"; }
@@ -159,15 +159,15 @@ onUnmounted(() => {
     <template v-else>
       <view class="scan-summary"><view><text>{{ rows.length }}</text>已收页面</view><view><text>{{ ready.length }}</text>可提交学生</view><view><text>{{ summary.unresolved.length }}</text>待确认页面</view></view>
       <view class="card scan-capture-card">
-        <view class="paper-inline"><view class="section-title">{{ teacher ? '连续扫描 / 批量导入' : '添加已完成的答题卡' }}</view><text class="scan-local-badge">{{ saving ? '保存中…' : initialized ? '草稿自动保存' : '恢复草稿…' }}</text></view>
-        <view class="small subtle spaced-small">识别四角与学生码 → 自动校正 → 按学生和页码归档</view>
-        <view class="scan-import-actions"><button class="primary" :disabled="busy || processing || cameraStarting || !initialized" @click="startCamera">{{ cameraStarting ? '开启相机…' : '开启相机扫描' }}</button><button class="secondary" :disabled="busy || processing || !initialized || rows.length >= 60" @click="importImages">{{ processing ? '正在处理…' : '批量导入照片' }}</button></view>
+        <view class="paper-inline"><view class="section-title">{{ teacher ? '自动拍照 / 批量导入' : '添加已完成的答题卡' }}</view><text class="scan-local-badge">{{ saving ? '保存中…' : initialized ? '草稿自动保存' : '恢复草稿…' }}</text></view>
+        <view class="small subtle spaced-small">自动框选拍照 → 保留原照片 → 按学生和页码归档</view>
+        <view class="scan-import-actions"><button class="primary" :disabled="busy || processing || cameraStarting || !initialized" @click="startCamera">{{ cameraStarting ? '开启相机…' : '开启自动拍照' }}</button><button class="secondary" :disabled="busy || processing || !initialized || rows.length >= 60" @click="importImages">{{ processing ? '正在处理…' : '批量导入照片' }}</button></view>
         <view v-if="processing" class="small subtle spaced-small">{{ progress || '正在读取图片…' }}</view>
-        <view class="tiny subtle spaced-small">支持 JPG / PNG / WebP；可导入扫描软件导出的图片，每批最多 60 页。</view>
+        <view class="tiny subtle spaced-small">保留 JPG / PNG / WebP 原照片，不裁剪、不增强；每批最多 60 页。</view>
       </view>
 
       <view v-if="error" class="paper-error" role="alert">{{ error }}</view>
-      <view v-if="!rows.length" class="card scan-empty"><view class="scan-empty-symbol">▤</view><view class="strong">暂无扫描或导入的答题卡</view><view class="small subtle spaced-small">请点击上方“开启相机扫描”或“批量导入照片”添加作业。添加成功后，扫描结果会在这里按学生和页码归档；学生码模糊时可人工确认。</view><button class="text-button spaced" @click="emit('cards')">查看 / 打印答题卡 ›</button></view>
+      <view v-if="!rows.length" class="card scan-empty"><view class="scan-empty-symbol">▤</view><view class="strong">暂无扫描或导入的答题卡</view><view class="small subtle spaced-small">请点击上方“开启自动拍照”或“批量导入照片”添加作业。添加成功后，扫描结果会在这里按学生和页码归档；学生码模糊时可人工确认。</view><button class="text-button spaced" @click="emit('cards')">查看 / 打印答题卡 ›</button></view>
       <view v-if="summary.groups.length" class="section-heading"><view class="section-title">按学生归档</view><text class="tiny subtle">自动按页码排序</text></view>
       <view v-for="group in summary.groups" :key="group.student.id" class="card scan-student-group">
         <view class="paper-inline"><view><view class="strong">{{ group.student.name }}</view><view class="tiny subtle">{{ group.rows.length }} / {{ group.total }} 页 · {{ group.rows.some(r => r.manual) ? '含人工确认' : '学生码已对应' }}</view></view><text :class="['badge', group.ready ? 'complete' : 'pending']">{{ group.ready ? '可提交' : '需处理' }}</text></view>
@@ -175,7 +175,7 @@ onUnmounted(() => {
       </view>
       <view v-if="rows.length" class="section-heading"><view class="section-title">扫描收件箱</view><button class="text-button" :disabled="busy || processing" @click="clear">清空草稿</button></view>
       <view v-for="(row, index) in rows" :key="row.id" class="card scan-page-card">
-        <view class="scan-page-main"><image :src="row.photo.url" class="scan-page-thumb" mode="aspectFit" @click="preview(row)" /><view class="grow"><view class="strong">{{ matching.get(row.id) ? matching.get(row.id).student.name + ' · 第 ' + matching.get(row.id).page + ' 页' : '第 ' + (index + 1) + ' 张 · 待确认' }}</view><view class="tiny subtle">{{ row.corrected ? '已自动校正' : '原图保留，请检查边缘' }} · {{ matching.get(row.id) ? row.code ? '学生码识别' : '人工确认' : '待核对学生码' }}</view><view v-if="issues.get(row.id)" class="scan-group-issue">{{ issues.get(row.id) }}</view><view class="scan-row-actions"><button class="text-button" :disabled="busy || processing" @click="edit(row)">{{ matching.get(row.id) ? '核对信息' : '人工确认' }}</button><button class="text-button" :disabled="busy || processing" @click="remove(row.id)">移除</button></view></view></view>
+        <view class="scan-page-main"><image :src="row.photo.url" class="scan-page-thumb" mode="aspectFit" @click="preview(row)" /><view class="grow"><view class="strong">{{ matching.get(row.id) ? matching.get(row.id).student.name + ' · 第 ' + matching.get(row.id).page + ' 页' : '第 ' + (index + 1) + ' 张 · 待确认' }}</view><view class="tiny subtle">{{ row.photo.original ? '原照片保留' : row.corrected ? '历史扫描件' : '原图保留' }} · {{ matching.get(row.id) ? row.code ? '学生码识别' : '人工确认' : '待核对学生码' }}</view><view v-if="issues.get(row.id)" class="scan-group-issue">{{ issues.get(row.id) }}</view><view class="scan-row-actions"><button class="text-button" :disabled="busy || processing" @click="edit(row)">{{ matching.get(row.id) ? '核对信息' : '人工确认' }}</button><button class="text-button" :disabled="busy || processing" @click="remove(row.id)">移除</button></view></view></view>
         <view v-if="editId === row.id" class="scan-identity-editor">
           <view class="tiny subtle">有清晰学生码时按码归档；无法读取时，请对照原图确认学生和页码。</view>
           <input class="form-input scan-code-input" placeholder="粘贴卡片底部完整学生码（可选）" v-model="editCode" maxlength="180" />

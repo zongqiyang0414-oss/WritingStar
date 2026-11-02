@@ -73,12 +73,12 @@ export function createScanProcessor({ workerFactory, fallback = processScanPixel
       };
       if (!available) return runFallback();
       try {
-        const { readCode = true, sourceCodeFallback = false, maxEdge = SCAN_OUTPUT_MAX_EDGE, aspectRatio = 0 } = options;
+        const { readCode = true, identifyOnly = false, sourceCodeFallback = false, maxEdge = SCAN_OUTPUT_MAX_EDGE, aspectRatio = 0 } = options;
         const data = image.data;
         const buffer = data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
           ? data.buffer : data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
         const result = await request({ type: "process", width: image.width, height: image.height, buffer, corners,
-          options: { readCode, sourceCodeFallback, maxEdge, aspectRatio } }, taskTimeout, options.onStage);
+          options: { readCode, identifyOnly, sourceCodeFallback, maxEdge, aspectRatio } }, taskTimeout, options.onStage);
         if (cancelled()) throw paused();
         if (!(result.buffer instanceof ArrayBuffer) || result.buffer.byteLength !== result.width * result.height * 4) throw unavailable();
         return { image: { width: result.width, height: result.height, data: new Uint8ClampedArray(result.buffer) }, code: result.code || "" };

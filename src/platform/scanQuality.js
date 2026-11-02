@@ -1,5 +1,5 @@
-// Keep live detection small; only the captured still uses this detail budget.
-// Scans have a separate JPEG budget from ordinary submission photos (800 KiB).
+// Legacy pixel-processing/export helpers only. Original-photo capture/import
+// uses separate bounded analysis pixels and never applies these output limits.
 export const SCAN_SOURCE_MAX_EDGE = 2800;
 export const SCAN_OUTPUT_MAX_EDGE = 2400;
 export const MAX_SCAN_BYTES = 1536 * 1024;

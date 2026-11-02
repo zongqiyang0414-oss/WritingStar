@@ -2,8 +2,8 @@
   "name": "写字星交互原型",
   "appid": "",
   "description": "写字星教师、学生与学校管理前端原型",
-  "versionName": "0.20.0",
-  "versionCode": 200,
+  "versionName": "0.21.0",
+  "versionCode": 210,
   "transformPx": false,
   "h5": {
     "title": "写字星",
