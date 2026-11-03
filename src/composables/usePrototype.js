@@ -11,6 +11,8 @@ import {
 import { STORAGE_KEY, createPrototypeService } from "../services/index.js";
 import {
   activeStudents,
+  assignmentStudents,
+  studentHasAssignment,
   assignmentCounts,
   assignmentCompleted,
   classAssignments,
@@ -215,7 +217,7 @@ export function usePrototype() {
         ).length,
     ),
     scopedAssignments = computed(() =>
-      classAssignments(state.value, currentClass.value.id).reverse(),
+      classAssignments(state.value, currentClass.value.id).reverse().filter(assignment => isTeacher.value || studentHasAssignment(assignment, boundStudent.value?.id || "") || latest(assignment.id, boundStudent.value?.id || "")),
     ),
     assignmentCountsById = computed(() =>
       new Map(scopedAssignments.value.map((assignment) => [
@@ -412,10 +414,7 @@ export function usePrototype() {
     ),
     studentsInAssignment = computed(() => {
       var e;
-      return activeStudents(
-        state.value,
-        selectedAssignment.value?.classId || "",
-      )
+      return assignmentStudents(state.value, selectedAssignment.value || { classId: "" })
         .map((e) => ({
           ...e,
           submission: latest(assignmentId.value, e.id),
@@ -672,7 +671,7 @@ export function usePrototype() {
   }
   async function submitPaper(payload) {
     await runAction(async () => {
-      const result = await service.submitPaperBatch(selectedAssignment.value.id, payload.rows, role.value, failSubmit.value, failAnalysis.value);
+      const result = await service.submitPaperBatch(selectedAssignment.value.id, payload.rows, role.value, failSubmit.value, failAnalysis.value, payload.allowIncomplete === true);
       refresh(); await payload.complete();
       notify(`${result.length} 位学生的答题卡已提交，开始AI批阅`);
       if (!isTeacher.value && result[0]) {

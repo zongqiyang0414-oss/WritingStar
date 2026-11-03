@@ -4,6 +4,7 @@ import { onResize } from "@dcloudio/uni-app";
 import { displayPhoto } from "../services/presentation.js";
 import { createScanRenderer } from "../platform/scanner.js";
 import { createWorkOrientation } from "../platform/imageOrientation.js";
+import { landscapePageHeight } from "../platform/pageInsets.js";
 
 const props = defineProps({ photos: { type: Array, default: () => [] }, page: { type: Number, default: 0 }, title: { type: String, default: "作业原图" } });
 const emit = defineEmits(["update:page"]);
@@ -11,19 +12,16 @@ const instance = getCurrentInstance();
 let resizeObserver;
 let orientation, orientationPromise, mounted = false, disposed = false, orientationEpoch = 0;
 const views = new Map(), viewRevision = ref(0), orienting = ref(false), orientationError = ref("");
-const width = ref(300), dimensions = ref({}), failed = ref(false);
+const width = ref(300), windowHeight = ref(0), failed = ref(false);
 const index = computed(() => Math.max(0, Math.min(props.page, props.photos.length - 1)));
 const current = computed(() => props.photos[index.value]);
 const source = computed(() => current.value ? displayPhoto(current.value.url) : "");
 const shownSource = computed(() => { viewRevision.value; return views.get(source.value)?.url || source.value; });
-const size = computed(() => dimensions.value[current.value?.id || current.value?.url] || { width: 1, height: 1 });
-const height = computed(() => Math.round(Math.max(180, Math.min(460, width.value * size.value.height / size.value.width))));
+const height = computed(() => landscapePageHeight(width.value, windowHeight.value));
 watch([() => current.value?.id, () => current.value?.url], () => { failed.value = false; orientationError.value = ""; if (mounted) correctDirection(); });
 function select(page) { if (page >= 0 && page < props.photos.length) emit("update:page", page); }
 function loaded(event, url) {
   if (url !== shownSource.value) return;
-  const { width, height } = event.detail;
-  if (current.value && width > 0 && height > 0) dimensions.value[current.value.id || current.value.url] = { width, height };
   failed.value = false;
 }
 async function ensureOrientation() {
@@ -76,6 +74,13 @@ async function preview() {
 }
 async function measure() {
   await nextTick();
+  // #ifdef H5
+  windowHeight.value = window.innerHeight;
+  // #endif
+  // #ifdef MP-WEIXIN
+  const info = uni.getWindowInfo?.() || uni.getSystemInfoSync?.() || {};
+  windowHeight.value = info.windowHeight || 0;
+  // #endif
   uni.createSelectorQuery().in(instance.proxy).select('.work-viewer-canvas').boundingClientRect(rect => { if (rect?.width) width.value = rect.width; }).exec();
 }
 onMounted(() => {

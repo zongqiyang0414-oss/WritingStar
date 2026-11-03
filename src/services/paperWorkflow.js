@@ -1,4 +1,5 @@
 import { canResubmit } from "./submissionPolicy.js";
+import { assignmentStudents, studentHasAssignment } from "./school.js";
 // Local prototype contract; opaque card IDs identify records, not authentication.
 export const PAPER_VERSION = 1;
 export const MAX_SCAN_PAGES = 60;
@@ -17,7 +18,7 @@ export function pageCount(value = 2) {
 }
 export function createPaperPacket(state, assignment, count = 2, previous = null) {
   const pages = pageCount(count);
-  const cards = state.students.filter(s => s.classId === assignment.classId && !s.archived).map(student => ({
+  const cards = assignmentStudents(state, assignment).map(student => ({
     id: previous?.cards.find(card => card.studentId === student.id)?.id || paperId(),
     studentId: student.id, studentName: student.name,
     studentNumber: student.studentNumber || "", className: assignment.className,
@@ -52,6 +53,7 @@ export function resolvePaperCode(state, assignmentId, code) {
   if (assignment.paperPacket.pages !== parsed.total) throw new Error("答题卡版本不匹配，请使用本次作业的答题卡。");
   const student = state.students.find(s => s.id === card.studentId);
   if (!student || student.archived || student.classId !== assignment.classId) throw new Error("该学生已调班或归档，请联系老师确认。");
+  if (!studentHasAssignment(assignment, student.id)) throw new Error("该学生未接取本次作业。");
   return { ...parsed, student, card };
 }
 // Always re-resolve QR identity from the current registry at submission time.
@@ -68,14 +70,14 @@ export function scanGroups(state, assignmentId, rows, ownStudentId = "") {
         if (!row.manual || !row.studentId) throw new Error("未识别学生码，待人工确认。");
         const card = packet?.cards.find(c => c.studentId === row.studentId);
         const student = state.students.find(s => s.id === row.studentId && !s.archived && s.classId === assignment.classId);
-        if (!card || !student) throw new Error("请选择本次作业的在班学生。");
+        if (!card || !student || !studentHasAssignment(assignment, student.id)) throw new Error("请选择本次作业的在班学生。");
         const page = Number(row.page);
         if (!Number.isInteger(page) || page < 1 || page > packet.pages) throw new Error("请核对页面序号。");
         match = { card, student, page, total: packet.pages };
       }
       if (ownStudentId && match.student.id !== ownStudentId) throw new Error("这张答题卡属于其他学生，请上传本人的答题卡。");
       if (!groups.has(match.student.id)) groups.set(match.student.id, {
-        student: match.student, card: match.card, total: match.total, rows: [], issues: [],
+        student: match.student, card: match.card, total: match.total, rows: [], issues: [], warnings: [], missingPages: [],
       });
       groups.get(match.student.id).rows.push({ ...row, page: match.page, manual: !row.code });
     } catch (failure) { unresolved.push({ ...row, issue: failure.message }); }
@@ -86,7 +88,8 @@ export function scanGroups(state, assignmentId, rows, ownStudentId = "") {
     if (new Set(pages).size !== pages.length) group.issues.push("存在重复页，请移除或重新确认页码");
     if (new Set(group.rows.map(r => r.photo.id)).size !== group.rows.length) group.issues.push("同一张照片被重复添加");
     const missing = Array.from({length: group.total}, (_, i) => i + 1).filter(p => !pages.includes(p));
-    if (missing.length) group.issues.push(`缺少第 ${missing.join("、")} 页`);
+    group.missingPages = missing;
+    if (missing.length) group.warnings.push(`缺少第 ${missing.join("、")} 页；如只写了部分页，可直接提交现有页面`);
     const latest = state.submissions.filter(s => s.assignmentId === assignmentId && s.studentId === group.student.id)
       .sort((a, b) => b.version - a.version)[0];
     if (latest && (!ownStudentId || !canResubmit(latest))) group.issues.push(ownStudentId
@@ -96,7 +99,7 @@ export function scanGroups(state, assignmentId, rows, ownStudentId = "") {
   }
   return { groups: [...groups.values()], unresolved };
 }
-export function validatePaperBatch(state, assignmentId, rows, ownStudentId = "") {
+export function validatePaperBatch(state, assignmentId, rows, ownStudentId = "", allowIncomplete = false) {
   if (!rows.length || rows.length > MAX_SCAN_PAGES) throw new Error("每批请添加 1–60 页答题卡。");
   if (new Set(rows.map(r => r.id)).size !== rows.length || new Set(rows.map(r => r.photo?.id)).size !== rows.length)
     throw new Error("同一张扫描照片不能重复提交。");
@@ -104,5 +107,7 @@ export function validatePaperBatch(state, assignmentId, rows, ownStudentId = "")
   if (result.unresolved.length) throw new Error(result.unresolved[0].issue);
   const invalid = result.groups.find(g => !g.ready);
   if (invalid) throw new Error(`${invalid.student.name}：${invalid.issues.join("；")}。`);
+  const incomplete = result.groups.find(group => group.missingPages.length);
+  if (incomplete && !allowIncomplete) throw new Error(`${incomplete.student.name}：缺少第 ${incomplete.missingPages.join("、")} 页，请确认仅提交现有页面。`);
   return result.groups;
 }

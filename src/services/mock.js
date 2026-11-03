@@ -22,7 +22,8 @@ import { withClassPractice } from "./classPractice.js";
 import { prepareAdministration, previewAdminBinding } from "./administration.js";
 import { AiReviewService, AI_RUNNING, createAiTask, settleAiTask } from "./aiReview.js";
 
-import { latestSubmission } from "./school.js";
+import { latestSubmission, assignmentStudents, studentHasAssignment } from "./school.js";
+import { prepareAssignmentParticipants, updateAssignmentParticipants } from "./assignmentParticipants.js";
 import { createPaperPacket, pageCount, paperId, resolvePaperCode, validatePaperBatch } from "./paperWorkflow.js";
 import { BUILTIN_ASSIGNMENT_TEMPLATES, assignmentContent } from "./assignmentTemplates.js";
 
@@ -137,7 +138,10 @@ export class MockService extends AiReviewService {
     const prepared = prepareSubmissionPolicy(this.state);
     const policyChanged = prepared !== this.state;
     this.state = prepared;
-    (s && 6 === s.schemaVersion && s.administrationVersion === 1 && !policyChanged) || storage.write(this.state);
+    const rostered = prepareAssignmentParticipants(this.state);
+    const rosterChanged = rostered !== this.state;
+    this.state = rostered;
+    (s && 6 === s.schemaVersion && s.administrationVersion === 1 && !policyChanged && !rosterChanged) || storage.write(this.state);
   }
   read() {
     return clone(this.state);
@@ -146,6 +150,7 @@ export class MockService extends AiReviewService {
     return freezeSnapshot(this.state);
   }
   commit(state) {
+    state = updateAssignmentParticipants(this.state, state, this.clock());
     // Roster changes and their cards are saved atomically. Never rotate issued IDs.
     if (state.students !== this.state.students || state.classes !== this.state.classes) {
       state = { ...state, assignments: state.assignments.map(assignment => assignment.paperPacket
@@ -166,7 +171,7 @@ export class MockService extends AiReviewService {
     const assignments = this.state.assignments.map(assignment => {
       const packet = assignment.paperPacket;
       if (!packet) return assignment;
-      const missing = this.state.students.some(student => student.classId === assignment.classId && !student.archived && !packet.cards.some(card => card.studentId === student.id));
+      const missing = assignmentStudents(this.state, assignment).some(student => !packet.cards.some(card => card.studentId === student.id));
       if (!missing) return assignment;
       changed = true;
       return { ...assignment, paperPacket: createPaperPacket(this.state, assignment, packet.pages, packet) };
@@ -368,6 +373,7 @@ export class MockService extends AiReviewService {
       throw new Error("当前学生已不在班级，原作品保留，请联系学校管理员。");
     if (n.classId !== i.classId)
       throw new Error("只能提交当前学生所在班级的作业。");
+    if (!studentHasAssignment(n, i.id)) throw new Error("本次作业不在该学生的接取名单中。");
     if (Date.parse(n.dueAt) <= this.clock().getTime() && !canResubmit(this.latest(assignmentId, i.id)))
       throw new Error("作业已截止，暂不能提交。");
     return saveSubmission(this, assignmentId, i, photos, note, role, fail, failAnalysis);
@@ -379,6 +385,7 @@ export class MockService extends AiReviewService {
     const student = this.state.students.find((item) => item.id === studentId);
     if (!student || student.archived || student.classId !== assignment.classId)
       throw new Error("请选择本班在班学生，不能为已调班或归档的学生代交。");
+    if (!studentHasAssignment(assignment, student.id)) throw new Error("本次作业不在该学生的接取名单中。");
     return saveSubmission(this, assignmentId, student, photos, note, role, fail, failAnalysis);
   }
   async issuePaperCards(assignmentId, role, pages = 2) {
@@ -399,7 +406,7 @@ export class MockService extends AiReviewService {
       if (own.archived || own.classId !== assignment.classId) throw new Error("只能查看本人所在班级的答题卡。");
     }
     if (!assignment.paperPacket) return [];
-    return clone(assignment.paperPacket.cards.filter(card => (!own || card.studentId === own.id)
+    return clone(assignment.paperPacket.cards.filter(card => studentHasAssignment(assignment, card.studentId) && (!own || card.studentId === own.id)
       && this.state.students.some(s => s.id === card.studentId && s.classId === assignment.classId && !s.archived)));
   }
   paperMatch(assignmentId, code, role) {
@@ -407,7 +414,7 @@ export class MockService extends AiReviewService {
     if (!this.paperCards(assignmentId, role).some(c => c.id === match.card.id)) throw new Error("只能识别本人的答题卡。");
     return clone(match);
   }
-  async submitPaperBatch(assignmentId, rows, role, fail = false, failAnalysis = false) {
+  async submitPaperBatch(assignmentId, rows, role, fail = false, failAnalysis = false, allowIncomplete = false) {
     const assignment = this.state.assignments.find(a => a.id === assignmentId);
     if (!assignment) throw new Error("作业不存在。");
     let own = "";
@@ -418,7 +425,7 @@ export class MockService extends AiReviewService {
       if (Date.parse(assignment.dueAt) <= this.clock().getTime() && !canResubmit(this.latest(assignmentId, student.id))) throw new Error("作业已截止，请联系老师补交。");
       own = student.id;
     }
-    const groups = validatePaperBatch(this.state, assignmentId, rows, own);
+    const groups = validatePaperBatch(this.state, assignmentId, rows, own, allowIncomplete);
     if (fail) throw new Error("提交失败，扫描页面已保留，请重试。");
     const batchId = paperId("batch");
     const submissions = groups.map(group => {
@@ -426,6 +433,7 @@ export class MockService extends AiReviewService {
       submission.paper = {
         batchId, cardId: group.card.id, source: role === "teacher" ? "teacher-scan" : "student-paper",
         pages: group.rows.map(r => ({ page: r.page, manual: r.manual })),
+        expectedPages: group.total, missingPages: [...group.missingPages],
       };
       return submission;
     });
@@ -513,11 +521,12 @@ export class MockService extends AiReviewService {
   async manualReview(submissionId, role) {
     this.teachingSubmission(submissionId, role);
     const s = this.get(this.state, submissionId);
-    if ("failed" !== s.status && "processing" !== s.status)
+    if (!["failed", "processing", "pending"].includes(s.status))
       throw new Error("当前作品无需转入人工批阅。");
+    if (s.status === "pending" && !AI_RUNNING.includes(s.aiReview?.state)) return;
     this.updateSubmission(submissionId, {
       status: "pending",
-      draft: emptyReview(),
+      draft: s.draft || emptyReview(),
       draftRevision: (s.draftRevision || 0) + 1,
       ...(s.aiReview && AI_RUNNING.includes(s.aiReview.state) && { aiReview: { ...s.aiReview, state: "cancelled" } }),
     });
@@ -548,7 +557,10 @@ export class MockService extends AiReviewService {
       teacher,
     }));
     const pages = pageCount(input.paperPages ?? 2);
-    for (const assignment of assignments) assignment.paperPacket = createPaperPacket(this.state, assignment, pages);
+    for (const assignment of assignments) {
+      assignment.participantIds = assignmentStudents(this.state, assignment).map(student => student.id);
+      assignment.paperPacket = createPaperPacket(this.state, assignment, pages);
+    }
     this.commit({ ...this.state, assignments: [...assignments, ...this.state.assignments] });
     return clone(assignments);
   }

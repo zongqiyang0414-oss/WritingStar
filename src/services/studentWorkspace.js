@@ -1,4 +1,4 @@
-import { classAssignments, latestSubmission } from "./school.js";
+import { classAssignments, latestSubmission, studentHasAssignment } from "./school.js";
 import { canResubmit } from "./submissionPolicy.js";
 
 export const STUDENT_TASK_CATEGORIES = [
@@ -25,7 +25,7 @@ export function studentSubmissionLabel(submission) {
 export function studentTasks(state, studentId, now = Date.now()) {
   const student = state.students.find(item => item.id === studentId);
   if (!student) return [];
-  return [...classAssignments(state, student.classId)].reverse().map(assignment => {
+  return [...classAssignments(state, student.classId)].reverse().filter(assignment => studentHasAssignment(assignment, studentId) || latestSubmission(state, assignment.id, studentId)).map(assignment => {
     const submission = latestSubmission(state, assignment.id, studentId);
     return { assignment, category: studentTaskCategory(assignment, submission, now) };
   });
@@ -43,7 +43,7 @@ export function studentNotifications(state, studentId) {
       submissionId: submission?.id || "", createdAt: time, read: !!reads[id] });
   };
   for (const assignment of state.assignments) {
-    const currentClass = !student.archived && assignment.classId === student.classId;
+    const currentClass = !student.archived && assignment.classId === student.classId && studentHasAssignment(assignment, studentId);
     const latest = latestSubmission(state, assignment.id, studentId);
     if (currentClass) add("assignment", assignment, assignment.createdAt);
     // Keep results consistent with records/growth: superseded submissions do

@@ -7,7 +7,7 @@ import { presentReview } from "../services/presentation.js";
 import { rubric, total } from "../services/rubric.js";
 
 const props = defineProps({ submission: {}, assignment: {}, student: {}, task: {}, teacher: Boolean, busy: Boolean, canResubmit: Boolean, canAllowResubmission: Boolean });
-const emit = defineEmits(["start"]);
+const emit = defineEmits(["start", "manual"]);
 const clock = ref(Date.now());
 const timer = setInterval(() => { clock.value = Date.now(); }, 1000);
 onUnmounted(() => clearInterval(timer));
@@ -77,6 +77,10 @@ function toggleDimension(id) {
       <view v-else-if="phase === 'unavailable'" class="paragraph small">AI服务尚未开通，本次暂时无法生成结果。老师批阅完成后，可在作业记录中查看反馈。</view>
       <view v-else-if="phase === 'failed'" class="paragraph small">{{ task?.autoRetryCount ? '已自动重试一次，仍未完成。' : '本次批阅未完成。' }}可以使用原图重新批阅，无需再次上传。</view>
       <view v-else class="paragraph small">老师完成批阅后，可在作业记录中查看反馈。</view>
+      <template v-if="teacher && submission.status !== 'published' && !resubmissionOpen(submission)">
+        <view class="paragraph small">你可以直接进行教师批阅，填写评分和评语后发布反馈。</view>
+        <button class="primary full-width spaced" :disabled="busy" @click="emit('manual')">教师批阅</button>
+      </template>
       <template v-if="!teacher && !wrongPhoto && ['failed', 'unavailable'].includes(phase)">
         <button v-if="phase === 'failed' || !retry?.reason" class="primary full-width spaced" :disabled="!retryEnabled" @click="emit('start')">{{ busy ? '正在安排…' : retrySeconds && !retry?.reason ? `请在 ${retrySeconds} 秒后重试` : '用原图重新批阅' }}</button>
         <view v-if="phase === 'failed'" class="paragraph small subtle">{{ retry?.reason || `本份作品还可重试 ${retry?.remaining || 0} 次；每次间隔60秒，24小时内最多5次。` }}</view>

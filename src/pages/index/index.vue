@@ -21,7 +21,11 @@ import AnswerCardPanel from "../../components/AnswerCardPanel.vue";
 import PaperScanner from "../../components/PaperScanner.vue";
 import { displayPhoto } from "../../services/presentation.js";
 import { growthIllustration } from "../../services/assets.js";
-import { ref, watch } from "vue";
+import { ref, watch, onMounted } from "vue";
+import { nativeNavigationMetrics } from "../../platform/pageInsets.js";
+// #ifdef MP-WEIXIN
+import { onResize } from "@dcloudio/uni-app";
+// #endif
 import { usePrototype } from "../../composables/usePrototype.js";
 
 const { bottomInset: bottomInset } = {
@@ -192,6 +196,20 @@ const { bottomInset: bottomInset } = {
     bindingHelp: bindingHelp,
   } = usePrototype();
 const feedbackCollapsed = ref([]);
+const nativeNavigation = ref(false), nativeInsets = ref({ top: 0, height: 44, bottom: 0, menuSpace: 96 });
+// #ifdef MP-WEIXIN
+nativeNavigation.value = true;
+function updateNativeInsets() {
+  const info = uni.getWindowInfo?.() || uni.getSystemInfoSync?.() || {};
+  let capsule = {};
+  try { capsule = uni.getMenuButtonBoundingClientRect?.() || {}; } catch {}
+  nativeInsets.value = nativeNavigationMetrics(info, capsule);
+  bottomInset.value = nativeInsets.value.bottom;
+}
+updateNativeInsets();
+onMounted(updateNativeInsets);
+onResize(updateNativeInsets);
+// #endif
 watch([category, selectedSubmission], () => { feedbackCollapsed.value = []; });
 function toggleFeedbackDimension(id) {
   feedbackCollapsed.value = feedbackCollapsed.value.includes(id)
@@ -202,7 +220,7 @@ function toggleFeedbackDimension(id) {
 </script>
 
 <template>
-  <view class="stage" :style="{ '--wechat-bottom-inset': bottomInset + 'px' }">
+  <view :class="['stage', { 'native-layout': nativeNavigation, 'native-detail': nativeNavigation && !isAdmin && !isRoot && !needsBinding }]" :style="{ '--wechat-bottom-inset': bottomInset + 'px', '--native-top-inset': nativeInsets.top + 'px', '--native-nav-height': nativeInsets.height + 'px', '--native-menu-space': nativeInsets.menuSpace + 'px' }">
     <!-- #ifdef H5 -->
     <view class="desktop-intro">
       <view class="intro-brand"><view class="brand-logo-frame desktop-logo-frame"><image class="desktop-brand-logo" src="/static/brand/writingstar-logo-horizontal-transparent.png" mode="aspectFit" aria-label="写字星" /></view></view>
@@ -223,7 +241,7 @@ function toggleFeedbackDimension(id) {
       </view>
       <view class="intro-foot">
         <text class="tiny-dot" />
-        原型展示 · v0.23.0
+        原型展示 · v0.24.0
       </view>
     </view>
     <!-- #endif -->
@@ -303,7 +321,7 @@ function toggleFeedbackDimension(id) {
             <template v-else>
               <view
                 :key="0"
-                :class="['page-heading', { 'root-heading': isRoot, 'pinned-heading': !isRoot }]"
+                :class="['page-heading', { 'root-heading': isRoot, 'pinned-heading': !isRoot, 'native-page-heading': nativeNavigation && !isRoot && !needsBinding }]"
               >
                 <template v-if="isRoot" />
                 <template v-else>
@@ -326,6 +344,7 @@ function toggleFeedbackDimension(id) {
                 </template>
               </view>
             </template>
+            <view v-if="nativeNavigation && !isRoot && !needsBinding" class="native-nav-spacer" />
             <template v-if="needsBinding">
               <InvitationBinding
                 :key="1"
@@ -368,6 +387,7 @@ function toggleFeedbackDimension(id) {
                 :teacher="isTeacher"
                 :busy="busy"
                 @start="startSingleAi"
+                @manual="manual(selectedSubmission)"
                 @refresh="refreshAi"
                 :can-resubmit="canSubmit"
                 :can-allow-resubmission="canAllowResubmission(selectedSubmission)"
@@ -532,7 +552,7 @@ function toggleFeedbackDimension(id) {
                         </template>
                         <template v-else>
                           <template v-if="isTeacher">
-                            <text :key="2" class="badge green"> 进行中 </text>
+                            <text :key="2" class="badge green">{{ assignmentPeriod === 'closed' ? '已完成' : '进行中' }}</text>
                           </template>
                           <template v-else>
                             <text :class="['badge', studentTaskBadge(item2)]">{{ studentTaskLabel(item2) }}</text>

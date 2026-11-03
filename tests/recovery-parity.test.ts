@@ -33,6 +33,13 @@ const withCurrentSchoolName = state => {
   }
   return current;
 };
+// Roster snapshots are new metadata; compare the recovered legacy content
+// separately, while enrollment behavior is exercised in its own tests.
+function legacyContent(state) {
+  const current = copy(state);
+  for (const assignment of current.assignments) delete assignment.participantIds;
+  return current;
+}
 const clock = () => new Date('2026-10-15T10:00:00Z');
 function service(Service, initial = null) {
   let saved = copy(initial);
@@ -45,7 +52,7 @@ test('除已确认学校名和示例建议文案外，初始状态与已发布v0
 test('学校、班级、53名学生及13项作业的全部练习数据与发布版本一致', () => {
   const source = service(MockService), deployed = service(baseline.Service);
   source.prepareClassPractice(); deployed.prepareClassPractice();
-  assert.deepEqual(source.read(), prepareAdministration(withCurrentSchoolName(deployed.read())));
+  assert.deepEqual(legacyContent(source.read()), prepareAdministration(withCurrentSchoolName(deployed.read())));
   assert.equal(source.read().students.filter(student => student.classId === 'class-1').length, 53);
   assert.equal(source.read().assignments.filter(assignment => assignment.classId === 'class-1').length, 13);
 });
@@ -54,7 +61,7 @@ for (const schemaVersion of [3, 4, 5, 6]) test(`schema ${schemaVersion}数据迁
   old.schemaVersion = schemaVersion;
   old.accounts.parent = {signedIn:true, studentId:'student-1'};
   if (schemaVersion < 5) {delete old.teachers; delete old.teacherAccount;}
-  assert.deepEqual(service(MockService, old).read(), prepareAdministration(copy(service(baseline.Service, old).read())));
+  assert.deepEqual(legacyContent(service(MockService, old).read()), prepareAdministration(copy(service(baseline.Service, old).read())));
 });
 test('绑定、保存草稿、发布与刷新后的全部状态延续已发布版本', async () => {
   const source = service(MockService), deployed = service(baseline.Service);
@@ -68,5 +75,5 @@ test('绑定、保存草稿、发布与刷新后的全部状态延续已发布�
     assert.equal(current.feedback('submission-1', 'student'), null);
     await current.publish('submission-1', review, 'teacher');
   }
-  assert.deepEqual(source.read(), prepareAdministration(withCurrentSchoolName(deployed.read())));
+  assert.deepEqual(legacyContent(source.read()), prepareAdministration(withCurrentSchoolName(deployed.read())));
 });

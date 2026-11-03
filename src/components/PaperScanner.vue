@@ -14,7 +14,7 @@ const props = defineProps({ state: Object, assignment: Object, cards: Array, tea
 const emit = defineEmits(["submit", "cards", "ai", "confirm"]);
 const rows = ref([]), error = ref(""), saving = ref(false), processing = ref(false), progress = ref(""), initialized = ref(false);
 const cameraStarting = ref(false);
-const editId = ref(""), editStudent = ref(0), editPage = ref(0), editCode = ref("");
+const editId = ref(""), editStudent = ref(0), editPage = ref(0);
 const summary = computed(() => scanGroups(props.state, props.assignment.id, rows.value, props.teacher ? "" : props.studentId));
 const ready = computed(() => summary.value.groups.filter(g => g.ready));
 const matching = computed(() => new Map(summary.value.groups.flatMap(g => g.rows.map(r => [r.id, { ...r, student: g.student }]))));
@@ -100,15 +100,15 @@ function startCamera() {
 }
 function edit(row) {
   const match = matching.value.get(row.id);
-  editId.value = row.id; editCode.value = row.code || "";
+  editId.value = row.id;
   editStudent.value = Math.max(0, students.value.findIndex(s => s.id === match?.student.id || s.id === row.studentId));
   editPage.value = Math.max(0, (match?.page || row.page || 1) - 1);
 }
 async function confirmIdentity() {
   const row = rows.value.find(r => r.id === editId.value);
   if (!row || !students.value[editStudent.value]) return;
-  rows.value = rows.value.map(r => r.id === row.id ? { ...r, code: editCode.value.trim(),
-    manual: !editCode.value.trim(), studentId: students.value[editStudent.value].id, page: editPage.value + 1 } : r);
+  rows.value = rows.value.map(r => r.id === row.id ? { ...r, code: "",
+    manual: true, studentId: students.value[editStudent.value].id, page: editPage.value + 1 } : r);
   editId.value = "";
   try { await persist(); } catch {}
 }
@@ -122,10 +122,12 @@ function submitReady() {
   stopCamera();
   const selected = ready.value.flatMap(g => g.rows), ids = new Set(selected.map(r => r.id));
   if (!selected.length) return;
+  const incomplete = ready.value.filter(group => group.missingPages.length);
+  const warning = incomplete.length ? `\n缺页提醒：${incomplete.map(group => `${group.student.name}缺少第${group.missingPages.join("、")}页`).join("；")}。如只写了部分页，可以仅提交现有页面。` : "";
   emit("confirm", { title: props.teacher ? `提交 ${ready.value.length} 位学生的答题卡？` : "确认提交本次答题卡？",
-    body: `共 ${selected.length} 页，已按学生码和页码归档。提交后进入AI批阅。`,
+    body: `共 ${selected.length} 页，已按学生码和页码归档。提交后进入AI批阅。${warning}`,
     confirm: "确认提交", action: () => {
-      emit("submit", { rows: selected, complete: async () => {
+      emit("submit", { rows: selected, allowIncomplete: incomplete.length > 0, complete: async () => {
         rows.value = rows.value.filter(r => !ids.has(r.id));
         try { await persist(); } catch {}
       } });
@@ -161,29 +163,28 @@ onUnmounted(() => {
       <view class="card scan-capture-card">
         <view class="paper-inline"><view class="section-title">{{ teacher ? '自动拍照 / 批量导入' : '添加已完成的答题卡' }}</view><text class="scan-local-badge">{{ saving ? '保存中…' : initialized ? '草稿自动保存' : '恢复草稿…' }}</text></view>
         <view class="small subtle spaced-small">自动框选拍照 → 裁剪文档范围 → 按学生和页码归档</view>
-        <view class="scan-import-actions"><button class="primary" :disabled="busy || processing || cameraStarting || !initialized" @click="startCamera">{{ cameraStarting ? '开启相机…' : '开启自动拍照' }}</button><button class="secondary" :disabled="busy || processing || !initialized || rows.length >= 60" @click="importImages">{{ processing ? '正在处理…' : '批量导入照片' }}</button></view>
+        <view class="scan-import-actions"><button class="primary" :disabled="busy || processing || cameraStarting || !initialized" @click="startCamera">{{ cameraStarting ? '开启相机…' : '拍照上传' }}</button><button class="secondary" :disabled="busy || processing || !initialized || rows.length >= 60" @click="importImages">{{ processing ? '正在处理…' : '相册上传' }}</button></view>
         <view v-if="processing" class="small subtle spaced-small">{{ progress || '正在读取图片…' }}</view>
         <view class="tiny subtle spaced-small">拍照后按框裁剪，保留字迹原色；批量导入保留原文件，每批最多60页。</view>
       </view>
 
       <view v-if="error" class="paper-error" role="alert">{{ error }}</view>
-      <view v-if="!rows.length" class="card scan-empty"><view class="scan-empty-symbol">▤</view><view class="strong">暂无扫描或导入的答题卡</view><view class="small subtle spaced-small">请点击上方“开启自动拍照”或“批量导入照片”添加作业。添加成功后，扫描结果会在这里按学生和页码归档；学生码模糊时可人工确认。</view><button class="text-button spaced" @click="emit('cards')">查看 / 打印答题卡 ›</button></view>
+      <view v-if="!rows.length" class="card scan-empty"><view class="scan-empty-symbol">▤</view><view class="strong">暂无扫描或导入的答题卡</view><view class="small subtle spaced-small">请点击上方“拍照上传”或“相册上传”添加作业。添加成功后，扫描结果会在这里按学生和页码归档；学生码模糊时可人工确认。</view><button class="text-button spaced" @click="emit('cards')">查看 / 打印答题卡 ›</button></view>
       <view v-if="summary.groups.length" class="section-heading"><view class="section-title">按学生归档</view><text class="tiny subtle">自动按页码排序</text></view>
       <view v-for="group in summary.groups" :key="group.student.id" class="card scan-student-group">
-        <view class="paper-inline"><view><view class="strong">{{ group.student.name }}</view><view class="tiny subtle">{{ group.rows.length }} / {{ group.total }} 页 · {{ group.rows.some(r => r.manual) ? '含人工确认' : '学生码已对应' }}</view></view><text :class="['badge', group.ready ? 'complete' : 'pending']">{{ group.ready ? '可提交' : '需处理' }}</text></view>
-        <view v-for="issue in group.issues" :key="issue" class="scan-group-issue">{{ issue }}</view>
+        <view class="paper-inline"><view><view class="strong">{{ group.student.name }}</view><view class="tiny subtle">{{ group.rows.length }} / {{ group.total }} 页 · {{ group.rows.some(r => r.manual) ? '含人工确认' : '学生码已对应' }}</view></view><text :class="['badge', group.ready ? 'complete' : 'pending']">{{ group.ready ? group.missingPages.length ? '可提交 · 缺页提醒' : '可提交' : '需处理' }}</text></view>
+        <view v-for="issue in group.issues" :key="issue" class="scan-group-issue">{{ issue }}</view><view v-for="warning in group.warnings" :key="warning" class="scan-group-issue">{{ warning }}</view>
       </view>
       <view v-if="rows.length" class="section-heading"><view class="section-title">扫描收件箱</view><button class="text-button" :disabled="busy || processing" @click="clear">清空草稿</button></view>
       <view v-for="(row, index) in rows" :key="row.id" class="card scan-page-card">
         <view class="scan-page-main"><image :src="row.photo.url" class="scan-page-thumb" mode="aspectFit" @click="preview(row)" /><view class="grow"><view class="strong">{{ matching.get(row.id) ? matching.get(row.id).student.name + ' · 第 ' + matching.get(row.id).page + ' 页' : '第 ' + (index + 1) + ' 张 · 待确认' }}</view><view class="tiny subtle">{{ row.photo.cropped ? '已裁剪 · 保留原色' : row.photo.original ? '原照片保留' : row.corrected ? '历史扫描件' : '原图保留' }} · {{ matching.get(row.id) ? row.code ? '学生码识别' : '人工确认' : '待核对学生码' }}</view><view v-if="issues.get(row.id)" class="scan-group-issue">{{ issues.get(row.id) }}</view><view class="scan-row-actions"><button class="text-button" :disabled="busy || processing" @click="edit(row)">{{ matching.get(row.id) ? '核对信息' : '人工确认' }}</button><button class="text-button" :disabled="busy || processing" @click="remove(row.id)">移除</button></view></view></view>
         <view v-if="editId === row.id" class="scan-identity-editor">
           <view class="tiny subtle">有清晰学生码时按码归档；无法读取时，请对照原图确认学生和页码。</view>
-          <input class="form-input scan-code-input" placeholder="粘贴卡片底部完整学生码（可选）" v-model="editCode" maxlength="180" />
-          <template v-if="!editCode.trim()"><picker :range="students" range-key="name" :value="editStudent" @change="editStudent = Number($event.detail.value)"><view class="paper-select">学生：{{ students[editStudent]?.name }} <text>﹀</text></view></picker><picker :range="pageLabels" :value="editPage" @change="editPage = Number($event.detail.value)"><view class="paper-select">页码：{{ pageLabels[editPage] }} <text>﹀</text></view></picker></template>
+          <template><picker :range="students" range-key="name" :value="editStudent" @change="editStudent = Number($event.detail.value)"><view class="paper-select">学生：{{ students[editStudent]?.name }} <text>﹀</text></view></picker><picker :range="pageLabels" :value="editPage" @change="editPage = Number($event.detail.value)"><view class="paper-select">页码：{{ pageLabels[editPage] }} <text>﹀</text></view></picker></template>
           <view class="scan-row-actions"><button class="primary" @click="confirmIdentity">确认归档信息</button><button class="text-button" @click="editId = ''">取消</button></view>
         </view>
       </view>
-      <view v-if="rows.length" class="card scan-submit-card"><view class="strong">{{ ready.length }} 位学生 · {{ ready.reduce((n, g) => n + g.rows.length, 0) }} 页可提交</view><view class="small subtle spaced-small">缺页、重页与待确认页面保留在收件箱，补齐后可继续提交。</view><button class="primary full-width spaced" :disabled="busy || processing || !ready.length || saving || !initialized" @click="submitReady">{{ busy ? '正在提交…' : teacher ? '统一提交并开始AI批阅' : '提交答题卡并开始AI批阅' }}</button></view>
+      <view v-if="rows.length" class="card scan-submit-card"><view class="strong">{{ ready.length }} 位学生 · {{ ready.reduce((n, g) => n + g.rows.length, 0) }} 页可提交</view><view class="small subtle spaced-small">缺页仅作提醒，可提交已完成的页面；重复页与待确认页面需先处理。</view><button class="primary full-width spaced" :disabled="busy || processing || !ready.length || saving || !initialized" @click="submitReady">{{ busy ? '正在提交…' : teacher ? '统一提交并开始AI批阅' : '提交答题卡并开始AI批阅' }}</button></view>
       <button v-if="teacher" class="text-button full-width spaced" :disabled="busy || processing" @click="emit('ai')">查看全班AI批阅进度 ›</button>
     </template>
     <!-- #ifndef H5 -->

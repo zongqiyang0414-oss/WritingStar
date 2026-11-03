@@ -193,7 +193,8 @@ test('单人及批量调班保留原图、反馈、历史班级作业和学生�
   await service.transferStudents({ sourceClassId: 'class-1', targetClassId: 'class-2', studentIds: ['student-1', 'student-2'] }, 'admin');
   const moved = service.read();
   assert.deepEqual(moved.submissions, before.submissions);
-  assert.deepEqual(moved.assignments, before.assignments);
+  assert.deepEqual(moved.assignments.map(({ participantIds, ...assignment }) => assignment), before.assignments.map(({ participantIds, ...assignment }) => assignment));
+  assert.ok(moved.assignments.find(item => item.id === 'assignment-class-2').participantIds.includes('student-1'), '调入学生接取目标班进行中的作业');
   assert.deepEqual(moved.accounts, before.accounts);
   assert.equal(getBoundStudent(moved, 'student').classId, 'class-2');
   assert.deepEqual(service.feedback('submission-1', 'student'), sampleReview());

@@ -1,5 +1,6 @@
 import {
   activeStudents,
+  assignmentStudents,
   assignmentCounts,
   assignmentCompleted,
   classAssignments,
@@ -36,7 +37,8 @@ export function classStatisticsModel(state, classId, now) {
         counts: assignmentCounts(state, assignment),
       })),
       trend: assignments.map((assignment) => {
-        const published = students
+        const participants = assignmentStudents(state, assignment);
+        const published = participants
           .map((student) =>
             latestSubmission(state, assignment.id, student.id)?.published,
           )
@@ -44,7 +46,7 @@ export function classStatisticsModel(state, classId, now) {
         return {
           id: assignment.id,
           label: assignment.title,
-          note: `已审核 ${published.length} / ${students.length} 人`,
+          note: `已审核 ${published.length} / ${participants.length} 人`,
           detail: `布置：${formatDate(assignment.createdAt)} · 截止：${formatDate(assignment.dueAt)}`,
           handwriting: mean(published.map((review) => total(review.handwriting))),
           composition: mean(published.map((review) => total(review.composition))),

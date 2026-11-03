@@ -1,7 +1,7 @@
 import { AdministrationService } from "./administration.js";
 import { sampleReview } from "./seed.js";
 import { DIMENSION_IDS, validateReview, total } from "./rubric.js";
-import { activeStudents, formerAssignmentStudents, latestSubmission } from "./school.js";
+import { assignmentStudents, formerAssignmentStudents, latestSubmission } from "./school.js";
 import { canResubmit } from "./submissionPolicy.js";
 import { teacherSummary } from "./identity.js";
 
@@ -136,7 +136,7 @@ export function aiPublishStatus(submission) {
 export function aiAssignmentRows(state, assignmentId) {
   const assignment = state.assignments.find((item) => item.id === assignmentId);
   if (!assignment) return [];
-  const current = activeStudents(state, assignment.classId);
+  const current = assignmentStudents(state, assignment);
   const former = formerAssignmentStudents(state, assignmentId);
   return [...current, ...former].map((student) => {
     const submission = latestSubmission(state, assignmentId, student.id);

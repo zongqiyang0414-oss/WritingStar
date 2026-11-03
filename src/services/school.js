@@ -32,6 +32,16 @@ function submissionIndex(state) {
 export function activeStudents(state, classId) {
   return state.students.filter((e) => e.classId === classId && !e.archived);
 }
+export function assignmentStudents(state, assignment) {
+  assignment = state.assignments.find(item => item.id === assignment.id) || assignment;
+  const members = activeStudents(state, assignment.classId);
+  if (!Array.isArray(assignment.participantIds)) return members;
+  const ids = new Set(assignment.participantIds);
+  return members.filter(student => ids.has(student.id));
+}
+export function studentHasAssignment(assignment, studentId) {
+  return !Array.isArray(assignment.participantIds) || assignment.participantIds.includes(studentId);
+}
 export function taskStatus(submission) {
   return submission
     ? "published" === submission.status
@@ -67,7 +77,7 @@ export function formerAssignmentStudents(state, assignmentId) {
     .filter((item) => item.submission);
 }
 export function assignmentCounts(state, assignment) {
-  const t = activeStudents(state, assignment.classId),
+  const t = assignmentStudents(state, assignment),
     latest = submissionIndex(state).latest.get(assignment.id),
     s = {
       missing: 0,
@@ -100,6 +110,7 @@ export function studentReports(state, classId) {
     for (const assignment of assignments) {
       const submission = index.latest.get(assignment.id)?.get(student.id),
         published = submission?.published;
+      if (!studentHasAssignment(assignment, student.id) && !submission) continue;
       if (!submission) missing++;
       else if (submission.status === "published") completed++;
       else pending++;
@@ -121,9 +132,13 @@ export function studentReports(state, classId) {
   });
 }
 
-export function assignmentCompleted(state, assignment, now = Date.now(), counts = assignmentCounts(state, assignment)) {
+export function assignmentCompleted(state, assignment, now = Date.now(), counts = null) {
+  assignment = state.assignments.find(item => item.id === assignment.id) || assignment;
+  counts ||= assignmentCounts(state, assignment);
   if (assignment.dueAt && Date.parse(assignment.dueAt) <= now) return true;
-  return counts.total > 0 && counts.completed === counts.total && activeStudents(state, assignment.classId).every(student => {
+  const members = assignmentStudents(state, assignment);
+  const reviewed = counts.total > 0 && counts.completed === counts.total || counts.total === 0 && assignment.participantIds?.length > 0 && assignment.participantIds.every(id => latestSubmission(state, assignment.id, id)?.status === "published");
+  return !!reviewed && (members.length ? members : (assignment.participantIds || []).map(id => ({ id }))).every(student => {
     const submission = latestSubmission(state, assignment.id, student.id);
     return !submission?.resubmission || !!submission.resubmission.consumedAt;
   });
