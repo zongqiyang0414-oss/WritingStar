@@ -9,6 +9,7 @@
 - PDF.js 6.5.438与web-streams-polyfill4.5.0；build-pdf-engine.mjs必须生成pdf-import引擎与pdf-fonts／pdf-cmaps资源并保留许可证。每包2 MiB、总20 MiB检查保持。pdfCanvas的ArrayBuffer类型标识克隆不可退回instanceof，否则兼容层可能漏掉字体路径。原生无DOM路径／矩阵适配与标准绘制逐像素一致已验证。
 - 原生PDF引擎必须CommonJS且禁用ES动态import语法／Node分支，构建有AST检查；内嵌的worker源码字符串不等于外层动态import。不要直接把浏览器版mjs复制进微信包。字体、页面取消与分包回归见verify-pdf-import.mts／verify-weixin-pdf.mts。
 - 220项测试、类型检查、双端构建、实际浏览器重复定位／打回／四页PDF两生归档、触屏左右滑／缩放隔离通过。独立verify-pdf-import.mts及编译页verify-weixin-pdf.mts验证字体像素、容量拒绝、取消迟到清理。iPhone物理灯光／清晰度、PDF耗时内存仍待真机复测；详见docs/批阅定位与PDF上传-v025.md及交付状态。
+- 最终应用7a4869b已上传main，Site源码bfde817于2026-11-03 22:38:13北京时间原私有站点部署succeeded，微信ZIP已完成。此后交付文档补录不增版本、不重建或重复部署未变应用。
 
 ## 2026-11-03 · v0.24.0 · 最新main上的九条批注
 
