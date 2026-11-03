@@ -43,16 +43,28 @@ export function startNativeFrames(context, callback, onError) {
   return () => { active = false; try { listener?.stop(); } catch { /* Already stopped by the camera. */ } };
 }
 
-export function takeNativePhoto(context) {
+export async function takeNativePhoto(context) {
   let quality = "high";
   // Newer WeChat offers the original still. Older clients retain their known
   // high-quality path; preview-frame resolution is independent of this choice.
   // #ifdef MP-WEIXIN
-  try { if (typeof wx !== "undefined" && wx.canIUse?.("CameraContext.takePhoto.object.quality.original")) quality = "original"; } catch { /* Older capability API. */ }
+  try {
+    if (typeof wx !== "undefined") {
+      const sdk=wx.getAppBaseInfo?.().SDKVersion || '';
+      const [major=0,minor=0]=sdk.split('.').map(Number);
+      if(wx.canIUse?.("CameraContext.takePhoto.object.quality.original") || major>2 || major===2&&minor>=24) quality="original";
+    }
+  } catch { /* Older capability API. */ }
   // #endif
   return scanCallback((resolve, reject) => context.takePhoto({
     quality, success: result => resolve(result.tempImagePath),
-    fail: failure => reject(nativeScanError(failure)),
+    fail: failure => {
+      // A few older clients report capability inconsistently. Fall back only
+      // for a rejected quality parameter, never for permission/device failures.
+      if(quality==='original' && /quality|invalid.*param|param.*invalid/i.test(failure?.errMsg||''))
+        context.takePhoto({quality:'high',success:result=>resolve(result.tempImagePath),fail:error=>reject(nativeScanError(error))});
+      else reject(nativeScanError(failure));
+    },
   }), { message: "拍照等待超时，请重新开启相机后重试。", onLateValue: path => {
     // #ifdef MP-WEIXIN
     uni.getFileSystemManager().unlink({ filePath: path, fail: () => {} });
@@ -386,8 +398,15 @@ export async function openBrowserCamera(host, onFrame) {
   if (!navigator.mediaDevices?.getUserMedia) throw scanAccessError("当前浏览器不支持实时相机。可从相册扫描。", "web-camera-unsupported");
   if (!host) throw new Error("相机预览区尚未就绪，请重新打开扫描页。");
   let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false }); }
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 3840 }, height: { ideal: 2880 } }, audio: false }); }
   catch (failure) { throw browserScanError(failure); }
+  const cameraTrack=stream.getVideoTracks?.()[0];
+  try {
+    const caps=cameraTrack?.getCapabilities?.()||{},advanced={};
+    if(caps.focusMode?.includes('continuous'))advanced.focusMode='continuous';
+    if(caps.exposureMode?.includes('continuous'))advanced.exposureMode='continuous';
+    if(Object.keys(advanced).length)await cameraTrack.applyConstraints({advanced:[advanced]});
+  }catch{/* Unsupported focus/exposure controls must not block the camera. */}
   const video = document.createElement("video"), canvas = document.createElement("canvas");
   video.muted = true; video.autoplay = true; video.playsInline = true;
   video.setAttribute("playsinline", "true"); video.setAttribute("webkit-playsinline", "true");
@@ -395,7 +414,7 @@ export async function openBrowserCamera(host, onFrame) {
   // video on a portrait phone. The outline uses the same contain transform.
   video.style.cssText = "width:100%;height:100%;object-fit:contain;display:block";
   video.srcObject = stream; host.appendChild(video);
-  let timer, closed = false, captureMatchesVideo = false;
+  let timer, closed = false, captureMatchesVideo = false, torchRequested=false;
   const close = () => { closed = true; clearInterval(timer); stream.getTracks().forEach(track => track.stop()); video.srcObject = null; video.remove(); };
   try { await video.play(); }
   catch { close(); throw new Error("相机预览启动失败，请点击重新开启。"); }
@@ -410,6 +429,7 @@ export async function openBrowserCamera(host, onFrame) {
   return { close, async setTorch(enabled) {
     if (closed) throw new Error("相机已关闭，请重新开启。");
     await applyCameraTorch(stream.getVideoTracks?.()[0], enabled);
+    torchRequested=enabled;
     if (closed) throw new Error("相机已关闭，请重新开启。");
   }, matchesFrame(width, height) {
     // Analysis sizes are rounded to whole pixels; allow that sub-pixel aspect
@@ -418,8 +438,15 @@ export async function openBrowserCamera(host, onFrame) {
   }, async capture() {
     if (closed || !video.videoWidth || video.readyState < 2) throw new Error("相机还未就绪，请稍后重试。");
     const track = stream.getVideoTracks?.()[0];
+    if(torchRequested)await applyCameraTorch(track,true);
     if (track && typeof ImageCapture !== "undefined") {
-      const blob = await scanCallback((resolve, reject) => new ImageCapture(track).takePhoto().then(resolve,reject), {timeout:6000}).catch(() => null);
+      const capture=new ImageCapture(track);
+      let settings;
+      if(torchRequested){try{const caps=await capture.getPhotoCapabilities?.();if(caps?.fillLightMode?.includes('flash'))settings={fillLightMode:'flash'};}catch{}}
+      const blob = await scanCallback((resolve, reject) => capture.takePhoto(settings).then(resolve,reject), {timeout:6000}).catch(() => null);
+      // Still capture may reset the track's lamp. Reapply the explicit request
+      // before continuing automatic detection, rather than trusting old UI state.
+      if(torchRequested&&!closed)await applyCameraTorch(track,true);
       if (closed) throw new Error("拍照已暂停，请重新拍摄。");
       if (blob) { captureMatchesVideo = false; return new Promise((resolve,reject) => {
         const reader = new FileReader(); reader.onload = () => resolve(String(reader.result));

@@ -43,6 +43,7 @@ const { bottomInset: bottomInset } = {
     screen: screen,
     category: category,
     review: review,
+    reviewFocus: reviewFocus,
     panel: panel,
     photoIndex: photoIndex,
     openDimension: openDimension,
@@ -241,7 +242,7 @@ function toggleFeedbackDimension(id) {
       </view>
       <view class="intro-foot">
         <text class="tiny-dot" />
-        原型展示 · v0.24.0
+        原型展示 · v0.25.0
       </view>
     </view>
     <!-- #endif -->
@@ -720,7 +721,7 @@ function toggleFeedbackDimension(id) {
                             <view v-if="isTeacher || !boundStudent?.archived" class="card paper-assignment-entry">
                               <view class="paper-inline"><view class="paper-entry-icon">▤</view><view class="grow"><view class="section-title">纸上完成，自动归档</view><view class="tiny subtle">{{ selectedAssignment.paperPacket ? '每人 ' + selectedAssignment.paperPacket.pages + ' 页专属答题卡 · 学生码自动对应' : '生成带学生码的专属答题卡' }}</view></view></view>
                               <view class="paper-entry-flow"><text>布置作业</text><text>›</text><text>打印答题卡</text><text>›</text><text>扫描提交</text><text>›</text><text>AI批阅</text></view>
-                              <view class="scan-import-actions"><button class="secondary" :disabled="busy" @click="openPaperCards">{{ isTeacher ? '查看 / 打印答题卡' : '下载 / 打印答题卡' }}</button><button class="primary" :disabled="busy" @click="openPaperScan">{{ isTeacher ? '批量扫描上传' : '上传答题卡' }}</button></view>
+                              <view class="scan-import-actions"><button class="secondary" :disabled="busy" @click="openPaperCards">{{ isTeacher ? '查看 / 打印答题卡' : '下载 / 打印答题卡' }}</button><button class="primary" :disabled="busy" @click="openPaperScan">{{ isTeacher ? '批量上传' : '上传答题卡' }}</button></view>
                               <view v-if="!isTeacher" class="tiny subtle spaced-small">家长可协助打印和拍照，提交后可查看本人的AI学习建议。</view>
                             </view>
                             <view v-if="!isTeacher && !boundStudent?.archived" class="card excellent-entry">
@@ -824,6 +825,7 @@ function toggleFeedbackDimension(id) {
                                         查看详情
                                         ›
                                       </button>
+                                      <button v-if="canAllowResubmission(item4.submission)" class="text-button return-work-action" :disabled="busy || canResubmit(item4.submission)" @click.stop="agreeResubmission(item4.submission)">{{ canResubmit(item4.submission) ? '待学生重交' : '打回作业' }}</button>
                                     </template>
                                   </view>
                                 </view>
@@ -984,13 +986,14 @@ function toggleFeedbackDimension(id) {
                                   <view class="card photo-reader"><WorkViewer :photos="selectedSubmission.photos" v-model:page="photoIndex" /><view v-if="selectedSubmission.note" class="paragraph small">提交说明：{{ selectedSubmission.note }}</view></view>
 
 
-                              <view class="ai-review-shortcut"><view><view class="strong">AI双写建议</view><view class="tiny subtle">{{ aiStateLabel(selectedSubmission) }}</view></view><button class="text-button" :disabled="busy" @click="openAiReview(selectedSubmission)">查看AI批阅 ›</button></view>
                                   <view v-if="selectedSubmission.status === 'pending'" class="notice review-source-note">{{ selectedSubmission.aiReview?.result ? (selectedSubmission.draftRevision ? '当前显示的是教师在AI批阅结果基础上修改的分数和评价。可点击分数或评价继续修改。' : '下方分数和评价为AI批阅结果。如需调整，教师可点击分数或评价直接修改。') : 'AI批阅尚无可用结果，教师可直接填写或修改分数和评价。' }}</view>
+                                  <view v-if="['failed', 'processing'].includes(selectedSubmission.status) && !canResubmit(selectedSubmission)" class="notice"><view class="small">AI结果暂未就绪，也可以直接进行教师批阅。</view><button class="primary full-width spaced" :disabled="busy" @click="manual(selectedSubmission)">教师批阅</button></view>
                                   <ReviewEditor
                                     v-if="['pending', 'published'].includes(selectedSubmission.status)"
                                     :review="review"
                                     :category="category"
                                     :open-dimension="openDimension"
+                                    :focus-request="reviewFocus"
                                     :readonly="
                                       busy || 'published' === selectedSubmission.status || canResubmit(selectedSubmission)
                                     "
@@ -1156,18 +1159,12 @@ function toggleFeedbackDimension(id) {
                                           {{ total(feedback.handwriting) }}
                                           <text> / 100 </text>
                                         </view>
-                                        <view class="small subtle">
-                                          把每一个字写清楚
-                                        </view>
                                       </view>
                                       <view class="score-tile warm">
                                         <view class="small"> 写作评价 </view>
                                         <view class="score-value">
                                           {{ total(feedback.composition) }}
                                           <text> / 100 </text>
-                                        </view>
-                                        <view class="small subtle">
-                                          把自己的感受写具体
                                         </view>
                                       </view>
                                     </view>
@@ -1241,7 +1238,7 @@ function toggleFeedbackDimension(id) {
                                       </button>
                                     </view>
                                     <view class="card">
-                                      <view class="section-title">总体评价</view>
+                                      <view class="section-title">{{ category === 'composition' ? '教师寄语（作文总体评价）' : '教师寄语（书写总体评价）' }}</view>
                                       <view class="paragraph">
                                         {{ feedback[category].summary }}
                                       </view>

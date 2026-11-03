@@ -56,11 +56,12 @@ test('微信裁剪直接读取完整照片，只做同尺寸区域拷贝并导�
 
 test('网页原生静态照片不复用视频框，只有同视野视频帧快照允许复用坐标',async()=>{
  const previous={document:globalThis.document,window:globalThis.window,navigator:Object.getOwnPropertyDescriptor(globalThis,'navigator'),ImageCapture:globalThis.ImageCapture,FileReader:globalThis.FileReader};
- const track={stop(){}},stream={getTracks:()=>[track],getVideoTracks:()=>[track]};
+ let torch=false,cameraConstraints,photoSettings;
+ const track={stop(){},getCapabilities:()=>({torch:true,focusMode:['continuous'],exposureMode:['continuous']}),getSettings:()=>({torch}),async applyConstraints(options){if('torch' in options.advanced[0])torch=options.advanced[0].torch;}},stream={getTracks:()=>[track],getVideoTracks:()=>[track]};
  globalThis.window={isSecureContext:true};
- Object.defineProperty(globalThis,'navigator',{configurable:true,value:{mediaDevices:{getUserMedia:async()=>stream}}});
+ Object.defineProperty(globalThis,'navigator',{configurable:true,value:{mediaDevices:{getUserMedia:async options=>{cameraConstraints=options;return stream;}}}});
  globalThis.document={createElement(tag){return tag==='video'?{videoWidth:960,videoHeight:720,readyState:4,setAttribute(){},style:{},async play(){},remove(){}}:{getContext:()=>({drawImage(){},getImageData(){return {width:1,height:1,data:new Uint8ClampedArray(4)};}}),toDataURL:()=> 'data:image/png;base64,FRAME'};}};
- globalThis.ImageCapture=class{async takePhoto(){return {};}};
+ globalThis.ImageCapture=class{async getPhotoCapabilities(){return {fillLightMode:['flash']};}async takePhoto(settings){photoSettings=settings;torch=false;return {};}};
  globalThis.FileReader=class{result='data:image/jpeg;base64,STILL';readAsDataURL(){queueMicrotask(()=>this.onload());}};
  let camera;
  try{
@@ -68,10 +69,22 @@ test('网页原生静态照片不复用视频框，只有同视野视频帧快�
   source=source.replace(/\/\/ #ifdef MP-WEIXIN[\s\S]*?\/\/ #endif/g,'').replace(/from "(\.\/[^\"]+)"/g,(_,name)=>`from "${new URL('../src/platform/'+name,import.meta.url).href}"`);
   const {openBrowserCamera}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
   camera=await openBrowserCamera({appendChild(){}},()=>{});
+  assert.equal(cameraConstraints.video.width.ideal,3840);await camera.setTorch(true);
   assert.match(await camera.capture(),/STILL/);assert.equal(camera.matchesFrame(480,360),false,'same aspect alone does not prove still-photo field of view');
+  assert.deepEqual(photoSettings,{fillLightMode:'flash'});assert.equal(torch,true,'OS extinguished light is restored after still capture');
   globalThis.ImageCapture=undefined;assert.match(await camera.capture(),/FRAME/);assert.equal(camera.matchesFrame(480,360),true);
  }finally{
   camera?.close();globalThis.document=previous.document;globalThis.window=previous.window;globalThis.ImageCapture=previous.ImageCapture;globalThis.FileReader=previous.FileReader;
   if(previous.navigator)Object.defineProperty(globalThis,'navigator',previous.navigator);else delete globalThis.navigator;
  }
+});
+
+test('微信原图能力按SDK兼容读取，仅质量参数不支持时回退high',async()=>{
+ const previousWx=globalThis.wx;globalThis.wx={getAppBaseInfo:()=>({SDKVersion:'3.14.0'}),canIUse:()=>false};
+ try{
+  const native=await nativeModule(),qualities=[];
+  const path=await native.takeNativePhoto({takePhoto(options){qualities.push(options.quality);if(options.quality==='original')options.fail({errMsg:'takePhoto:fail invalid quality parameter'});else options.success({tempImagePath:'/tmp/high.jpg'});}});
+  assert.equal(path,'/tmp/high.jpg');assert.deepEqual(qualities,['original','high']);
+  let attempts=0;await assert.rejects(native.takeNativePhoto({takePhoto(options){attempts++;options.fail({errMsg:'takePhoto:fail auth deny'});}}));assert.equal(attempts,1,'permission denial must not trigger a fallback capture');
+ }finally{globalThis.wx=previousWx;}
 });

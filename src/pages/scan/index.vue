@@ -23,7 +23,8 @@ const realtime = ref(true), starting = ref(false), error = ref(""), notice = ref
 const outlineUrl = ref(""), progress = ref(0), waiting = ref(false), pages = shallowRef([]), selected = ref(0), capacity = ref(MAX_PHOTOS);
 const paperBatch = ref(false);
 const flashOn = ref(false), flashBusy = ref(false), flashUnavailable = ref(false);
-const nativeFlash = computed(() => flashOn.value ? "torch" : "off");
+const nativeCapturing = ref(false), flashRequested = ref(false);
+const nativeFlash = computed(() => flashOn.value ? nativeCapturing.value ? "on" : "torch" : "off");
 const importQueue = shallowRef([]), importStatus = ref(""), processingStage = ref("");
 const importsPaused = ref(false), jobs = createScanJobs();
 const stage = ref({ width: 300, height: 400, left: 0, top: 0 });
@@ -90,7 +91,7 @@ function releaseCamera() {
   cancelCaptureFeedback();
   epoch++; stopFrames?.(); stopFrames = null; browserCamera?.close(); browserCamera = null;
   nativeContext = null; cameraMounted.value = false; cameraReady.value = false; starting.value = false;
-  flashOn.value = false; flashBusy.value = false;
+  flashOn.value = false; flashBusy.value = false; nativeCapturing.value = false;
   lastDetection = null; lastDetectionTime = 0; lastFrame = 0; detectionErrors = 0; liveDetector.reset(); gate.restart(); progress.value = 0; waiting.value = gate.locked; clearOutline();
 }
 function interruptProcessing(reason) {
@@ -193,6 +194,10 @@ async function startCamera() {
     const camera = await openBrowserCamera(document.getElementById("scan-browser-camera"), frame => receiveFrame(frame));
     if (disposed || !foreground || token !== epoch) { camera.close(); return; }
     browserCamera = camera; cameraReady.value = true; starting.value = false;
+    if (flashRequested.value) {
+      try {await camera.setTorch(true);flashOn.value=true;}
+      catch(failure){flashRequested.value=false;flashOn.value=false;error.value=failure.message||'补光灯恢复失败，可继续拍照。';}
+    }
     notice.value = "将整张作业放入画面，四周留出一些背景";
     // #endif
   } catch (failure) {
@@ -204,6 +209,7 @@ async function startCamera() {
 function nativeReady() {
   if (!cameraMounted.value || !foreground || disposed) return;
   nativeContext = uni.createCameraContext(); cameraReady.value = true; starting.value = false;
+  flashOn.value = flashRequested.value;
   notice.value = "将整张作业放入画面，四周留出一些背景";
   resumeNativeFrames();
 }
@@ -218,7 +224,7 @@ function resumeNativeFrames() {
 function cameraError(event) {
   const failure = event?.detail || event;
   if (flashOn.value && /torch|flash|闪光|补光/i.test(failure?.errMsg || failure?.message || "")) {
-    flashOn.value = false; flashUnavailable.value = true; error.value = "此设备暂不支持补光灯，可继续拍照。"; return;
+    flashOn.value = false; flashRequested.value = false; flashUnavailable.value = true; error.value = "此设备暂不支持补光灯，可继续拍照。"; return;
   }
   releaseCamera(); showFailure(failure);
 }
@@ -230,7 +236,7 @@ async function toggleFlash() {
     // #ifdef H5
     await browserCamera.setTorch(enabled);
     // #endif
-    if (token === epoch && cameraReady.value && !disposed) flashOn.value = enabled;
+    if (token === epoch && cameraReady.value && !disposed) { flashOn.value = enabled; flashRequested.value = enabled; }
   } catch (failure) {
     if (token === epoch && !disposed) { flashOn.value = previouslyOn; flashUnavailable.value = failure.code === "TORCH_UNSUPPORTED"; error.value = failure.message || "补光灯未能切换，请重试。"; }
   } finally { if (token === epoch) flashBusy.value = false; }
@@ -253,7 +259,7 @@ async function privacyContract() {
   try { await openScanPrivacyContract(); }
   catch (failure) { showFailure(failure); }
 }
-function copyError() { uni.setClipboardData({ data: `写字星 v0.24.0 拍照
+function copyError() { uni.setClipboardData({ data: `写字星 v0.25.0 拍照
 ${error.value}
 ${errorDetail.value}`, fail: () => uni.showModal({ title: "请长按复制错误详情", showCancel: false,
   content: errorDetail.value || error.value }) }); }
@@ -334,7 +340,14 @@ async function capture(fromAutomatic = false) {
       source = await browserCamera.capture();
       // #endif
       // #ifdef MP-WEIXIN
-      source = await takeNativePhoto(nativeContext);
+      // iOS can extinguish torch when taking a still. Use the still-photo flash
+      // mode during exposure, then change the bound property back to torch.
+      nativeCapturing.value = true;
+      await nextTick();
+      if (flashOn.value) await new Promise(resolve => setTimeout(resolve, 180));
+      if(token!==epoch||!foreground||disposed)throw new Error('拍照已暂停，请重新拍摄。');
+      try { source = await takeNativePhoto(nativeContext); }
+      finally { nativeCapturing.value = false; await nextTick(); }
       await ensureRenderer(); renderer.track(source);
       // #endif
       if (token !== epoch || disposed) { renderer.remove(source); return; }
@@ -561,8 +574,9 @@ function leave() {
       <view class="scan-heading"><text class="scan-title">作业拍照</text><text v-if="mode !== 'live'" class="scan-subtitle">{{ mode === 'crop' ? '调整裁剪范围' : mode === 'review' ? '查看裁剪照片' : '自动框选 · 按框裁剪' }}</text></view>
       <text class="scan-count">{{ pages.length }} / {{ capacity }} 页</text>
     </view>
-    <view class="scan-status" role="status">{{ mode === 'live' ? frameText : busy ? (saving ? '正在保存照片…' : processingText) : mode === 'crop' ? '拖动四个角调整保留范围' : '双指放大、拖动查看笔迹，轻点查看全图' }}</view>
+    <view class="scan-status" role="status">{{ mode === 'live' ? frameText : busy ? (saving ? '正在保存照片…' : processingText) : mode === 'crop' ? '拖动四个角调整保留范围' : '左右滑动翻页 · 双指放大后拖动 · 轻点查看全图' }}</view>
     <view class="scan-original-note">{{ mode === 'live' && flashOn ? '闪光灯常亮补光 · 按文档范围裁剪' : '保留字迹颜色和细节，仅裁去周边背景' }}</view>
+    <view v-if="mode === 'review' && current && Math.max(current.photo.sourceWidth || current.width, current.photo.sourceHeight || current.height) < 2200" class="scan-review-note">照片分辨率偏低。建议补光、放稳对焦后重拍，或从文件上传导入高清原件。</view>
     <view v-if="cropReviewCount && mode !== 'crop'" class="scan-review-note">{{ cropReviewCount }} 页已保留，结束后可检查裁剪范围</view>
     <view id="scan-stage" class="scan-stage" @touchmove.stop.prevent="moveCrop" @touchend="draggingCrop=-1" @touchcancel="draggingCrop=-1" @mousemove="moveCrop" @mouseup="draggingCrop=-1" @mouseleave="draggingCrop=-1">
       <!-- #ifdef H5 -->
@@ -587,7 +601,7 @@ function leave() {
           <!-- #endif -->
         </view>
       </template>
-      <ScanImageViewer v-else-if="mode === 'review' && current" :key="current.photo.id" :src="current.photo.url" :urls="pages.map(page => page.photo.url)" />
+      <ScanImageViewer v-else-if="mode === 'review' && current" :key="current.photo.id" :src="current.photo.url" :urls="pages.map(page => page.photo.url)" @page="change => reviewPage(selected + change)" />
       <template v-else-if="mode === 'crop' && current">
         <image class="scan-result scan-crop-source" :src="current.source" mode="aspectFit" />
         <view v-for="(point,index) in cropCorners" :key="'edge'+index" class="scan-crop-edge" :style="cropEdgeStyle(point,index)" />

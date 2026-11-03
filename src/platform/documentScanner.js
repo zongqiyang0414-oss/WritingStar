@@ -114,11 +114,14 @@ export function inspectScanFrame(source) {
     || detectPaperCorners(data, { markersOnly: true });
   return { corners, markerEstimate: !detected && !!corners, width: canvas.width, height: canvas.height };
 }
-export async function processScanSource(source, name = "作业原照片", originalUrl = source.src) {
+export async function processScanSource(source, name = "作业原照片", originalUrl = source.src, documentPage = false) {
   if (!originalUrl?.startsWith("data:image/")) throw new Error("请从原照片文件导入，以便保留完整图片。");
   const canvas = canvasFor(source), context = canvas.getContext("2d", {willReadFrequently:true});
   const pixels = context.getImageData(0, 0, canvas.width, canvas.height), inspect = inspectScanFrame(source);
-  const corners = inspect.corners?.map(p => ({x:p.x/(inspect.width-1),y:p.y/(inspect.height-1)}));
+  // A PDF render already has an explicit page boundary. Photograph imports
+  // retain their conservative physical-border requirement.
+  const corners = documentPage ? [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}]
+    : inspect.corners?.map(p => ({x:p.x/(inspect.width-1),y:p.y/(inspect.height-1)}));
   let code = "";
   try {
     const result = await processScanPixels(pixels, corners || null, {identifyOnly:true});

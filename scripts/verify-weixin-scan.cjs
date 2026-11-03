@@ -137,6 +137,7 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
     get previews() { return previews; },
     get count() { return Number(render()[countKey]); },
     get frameStarts() { return frameStarts; }, get frameStops() { return frameStops; },
+    get hasPendingPhoto() { return !!photoCallback; },
     emitFrame() { clock += 350; const image = pixels(384,512); frameCallback({ ...image, data: image.data.buffer }); },
     latePhoto() { photoCallback.success({tempImagePath:'/tmp/late-capture.jpg'}); },
     lateCopy() { exportCallback.success({}); },
@@ -205,6 +206,18 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
   assert.equal(lighting.render()[event(camera,'flash')],'off');assert.equal(lighting.render()[event(camera,'wx:if')],true,'unsupported flash does not terminate camera');
   lighting.close();
 
+  const litCapture = createPage({paper:true});
+  await litCapture.render()[event(start,'bindtap')]();litCapture.render()[event(camera,'bindinitdone')]();
+  await litCapture.render()[event(lightTag,'bindtap')]();
+  for(let i=0;i<5;i++){litCapture.emitFrame();await new Promise(resolve=>setTimeout(resolve,5));}
+  await until(()=>litCapture.render()[event(camera,'flash')]==='on','native exposure must use flash on, not stale torch');
+  await until(()=>litCapture.count===1&&!litCapture.render()[event(shutter,'disabled')],'lit automatic capture must finish');
+  assert.equal(litCapture.render()[event(camera,'flash')],'torch','automatic capture must explicitly restore continuous torch');
+  await litCapture.render()[event(thumbnail,'bindtap')]();assert.notEqual(litCapture.render()[event(camera,'wx:if')],true,'review must unmount camera and turn physical light off');
+  const continueLit=template.match(/<button\b[^>]*class="scan-primary"[^>]+>继续扫描/)[0];
+  await litCapture.render()[event(continueLit,'bindtap')]();litCapture.render()[event(camera,'bindinitdone')]();
+  assert.equal(litCapture.render()[event(camera,'flash')],'torch','continue scanning must preserve the user light preference');litCapture.close();
+
   // Actual compiled capture -> process -> result -> tap workflow. The iOS
   // camera keeps running after automatic capture, but controls must unlock.
   const successful = createPage({paper:true,qrData:'https://school.example/instructions'});
@@ -267,7 +280,7 @@ function createPage({ denied = false, canvasUnavailable = false, mediaFailure = 
 
   const stopped = createPage({stalledPhoto:true});
   await stopped.render()[event(start,'bindtap')](); stopped.render()[event(camera,'bindinitdone')]();
-  const waitingPhoto=stopped.render()[event(shutter,'bindtap')]();await vue.nextTick();
+  const waitingPhoto=stopped.render()[event(shutter,'bindtap')]();await until(()=>stopped.hasPendingPhoto,'capture callback must be registered after the native flash update');
   const stopTag=template.match(/<button\b[^>]*scan-stop[^>]+>/)[0];
   await stopped.render()[event(stopTag,'bindtap')]();await waitingPhoto;
   assert.equal(stopped.render()[event(album,'disabled')],false,'stop must restore other controls without native callback');

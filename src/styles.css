@@ -1049,6 +1049,12 @@ textarea:focus {
 .native-page-heading .heading-spacer { width: var(--native-menu-space); min-width: var(--native-menu-space); }
 .native-page-heading .page-title { position: absolute; left: 50%; transform: translateX(-50%); max-width: calc(100% - var(--native-menu-space) - 90px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .native-nav-spacer { height: calc(var(--native-nav-height) + 23px); }
+.review-needs-input { position: relative; border-radius: 12px; animation: review-required-pulse .7s ease-in-out 3; outline: 2px solid #cd9642; outline-offset: 5px; }
+.review-required-note { color: #895617; font-size: 13px; line-height: 1.6; padding: 8px 0; font-weight: 600; }
+.return-work-action { color: #9b653b; }
+@keyframes review-required-pulse { 0%, 100% { box-shadow: 0 0 0 3px #dba24a20; background-color: #fff8e9; } 50% { box-shadow: 0 0 0 9px #dba24a50; background-color: #ffedc8; } }
+.review-needs-input-again { animation-name: review-required-pulse-again; }
+@keyframes review-required-pulse-again { 0%, 100% { box-shadow: 0 0 0 3px #dba24a20; background-color: #fff8e9; } 50% { box-shadow: 0 0 0 9px #dba24a50; background-color: #ffedc8; } }
 .back-button {
   font-size: 12px;
   color: #718573;

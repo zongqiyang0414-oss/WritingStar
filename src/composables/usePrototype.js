@@ -28,7 +28,7 @@ import {
   emptyReview,
   rubric,
   total,
-  validateReview,
+  reviewIssue,
 } from "../services/rubric.js";
 import { onHide, onShow, onPageScroll } from "@dcloudio/uni-app";
 import { presentReview } from "../services/presentation.js";
@@ -108,6 +108,7 @@ export function usePrototype() {
     category = ref("handwriting"),
     review = ref(emptyReview()),
     reviewBaseline = ref(""),
+    reviewFocus = ref(null),
     panel = ref("evaluation"),
     photoIndex = ref(0),
     openDimension = ref(null),
@@ -634,6 +635,7 @@ export function usePrototype() {
       photoIndex.value = 0;
       openDimension.value = null;
       navigate("review");
+      reviewFocus.value = null;
     });
   }
   function openFeedback(e) {
@@ -784,6 +786,7 @@ export function usePrototype() {
     screen,
     category,
     review,
+    reviewFocus,
     panel,
     photoIndex,
     openDimension,
@@ -1000,8 +1003,12 @@ export function usePrototype() {
     },
     publish: async function () {
       if (busy.value) return;
-      const invalid = validateReview(review.value);
-      if (invalid) { error.value = invalid; return; }
+      const invalid = reviewIssue(review.value);
+      if (invalid) {
+        error.value = invalid.message;
+        reviewFocus.value = { ...invalid, category: invalid.category || category.value, sequence: (reviewFocus.value?.sequence || 0) + 1 };
+        return;
+      }
       await runAction(async () => {
         await service.publish(submissionId.value, review.value, role.value);
         reviewBaseline.value = JSON.stringify(review.value);

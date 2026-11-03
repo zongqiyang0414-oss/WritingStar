@@ -47,19 +47,22 @@ export function total(evaluation) {
     ? a.reduce((e, a) => e + a, 0)
     : null;
 }
-export function validateReview(review) {
+export function reviewIssue(review) {
   if (review.rubricVersion !== RUBRIC_VERSION)
-    return "评价标准版本不一致，请重新加载作品。";
+    return { message: "评价标准版本不一致，请重新加载作品。" };
   for (const a of ["handwriting", "composition"]) {
     const t = "handwriting" === a ? "书写" : "写作";
     for (const s of rubric[a]) {
       const l = review[a].scores[s.id];
       if ("number" != typeof l || !Number.isFinite(l) || l < 0 || l > s.max)
-        return `${t}「${s.name}」请填写 0–${s.max} 的有效分数。`;
+        return { message: `${t}「${s.name}」请填写 0–${s.max} 的有效分数。`, category: a, field: `score-${s.id}`, dimensionId: s.id };
     }
-    if (!review[a].summary.trim()) return `请填写${t}总评。`;
+    if (!review[a].summary.trim()) return { message: `请填写${t}总评。`, category: a, field: "summary" };
   }
-  return review.nextSteps.trim() ? null : "请填写给学生的批阅建议。";
+  return review.nextSteps.trim() ? null : { message: "请填写给学生的批阅建议。", field: "nextSteps" };
+}
+export function validateReview(review) {
+  return reviewIssue(review)?.message || null;
 }
 export function emptyReview() {
   const e = () => ({

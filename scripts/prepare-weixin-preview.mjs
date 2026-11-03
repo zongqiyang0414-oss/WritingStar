@@ -20,6 +20,13 @@ for (const name of ['writingstar-logo-horizontal.png', 'writingstar-logo-app.png
   if (runtime.includes(name)) throw new Error(`Original brand asset is now referenced: ${name}; review mini-program packaging.`);
   await rm(path.join(root, 'static/brand', name), { force: true });
 }
-const bytes = (await Promise.all((await files(root)).map(file => readFile(file)))).reduce((sum, data) => sum + data.length, 0);
-if (bytes > 2 * 1024 * 1024) throw new Error(`Mini-program output exceeds 2 MiB: ${bytes} bytes. Review assets or subpackages.`);
-console.log(`WeChat preview assets prepared: ${bytes} bytes; source originals retained.`);
+const app=JSON.parse(await readFile(path.join(root,'app.json'),'utf8'));
+const packages=app.subPackages||app.subpackages||[],sizes=new Map([['main',0],...packages.map(item=>[item.root.replace(/\/$/,''),0])]);
+for(const file of await files(root)){
+  const name=path.relative(root,file),owner=[...sizes.keys()].find(key=>key!=='main'&&name.startsWith(key+'/'))||'main';
+  sizes.set(owner,sizes.get(owner)+(await readFile(file)).length);
+}
+const bytes=[...sizes.values()].reduce((sum,size)=>sum+size,0);
+for(const [name,size]of sizes)if(size>2*1024*1024)throw new Error(`Mini-program package ${name} exceeds 2 MiB: ${size} bytes.`);
+if(bytes>20*1024*1024)throw new Error(`Mini-program total exceeds 20 MiB: ${bytes} bytes.`);
+console.log(`WeChat preview assets prepared: ${bytes} bytes; packages ${JSON.stringify(Object.fromEntries(sizes))}; source originals retained.`);

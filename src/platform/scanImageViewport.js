@@ -1,5 +1,11 @@
 import { clamp, fitRect } from "./scanGeometry.js";
 
+export function scanPageSwipe(start, end, { scale = 1, multiTouch = false, duration = 0, width = 300 } = {}) {
+  if (!start || !end || multiTouch || scale > 1.01 || duration > 900) return 0;
+  const dx = end.x - start.x, dy = end.y - start.y;
+  return Math.abs(dx) >= Math.max(50, width * .12) && Math.abs(dx) > Math.abs(dy) * 1.6 ? (dx < 0 ? 1 : -1) : 0;
+}
+
 // Image coordinates stay anchored beneath the fingers during a pinch. Bounds
 // use the contained paper, so dragging cannot lose a page in the letterbox.
 export class ScanImageViewport {

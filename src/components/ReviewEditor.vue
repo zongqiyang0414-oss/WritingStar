@@ -1,11 +1,12 @@
 <script setup>
-import { ref, watch, nextTick, getCurrentInstance } from "vue";
+import { ref, watch, nextTick, getCurrentInstance, onUnmounted } from "vue";
 import { rubric, total } from "../services/rubric.js";
 
 const props = defineProps({
   review: {},
   category: {},
   openDimension: {},
+  focusRequest: Object,
   readonly: {
     type: Boolean,
   },
@@ -13,6 +14,30 @@ const props = defineProps({
 const emit = defineEmits(["category", "dimension", "score"]);
 const instance = getCurrentInstance();
 const collapsedDimensions = ref([]);
+const highlighted = ref("");
+let highlightTimer, requestEpoch = 0;
+watch(() => props.focusRequest, async request => {
+  const token = ++requestEpoch;
+  clearTimeout(highlightTimer); highlighted.value = "";
+  if (!request?.field || props.readonly) return;
+  if (request.category !== props.category) emit("category", request.category);
+  await nextTick();
+  collapsedDimensions.value = collapsedDimensions.value.filter(id => id !== request.dimensionId);
+  await nextTick();
+  if (token !== requestEpoch) return;
+  const key = request.field === 'nextSteps' ? 'nextSteps' : `${request.category}-${request.field}`;
+  highlighted.value = key;
+  const query = uni.createSelectorQuery();
+  query.select('.pinned-heading').boundingClientRect(header => {
+    uni.createSelectorQuery().in(instance.proxy).select(`.review-field-${key}`).boundingClientRect()
+      .selectViewport().scrollOffset().exec(([rect, viewport]) => {
+        if (token === requestEpoch && rect && viewport)
+          uni.pageScrollTo({ scrollTop: Math.max(0, rect.top + viewport.scrollTop - (header?.height || 0) - 18), duration: 250 });
+      });
+  }).exec();
+  highlightTimer = setTimeout(() => { if (token === requestEpoch) highlighted.value = ""; }, 4500);
+});
+onUnmounted(() => { requestEpoch++; clearTimeout(highlightTimer); });
 watch(() => [props.category, props.review], () => { collapsedDimensions.value = []; });
 function toggleDimension(id) {
   collapsedDimensions.value = collapsedDimensions.value.includes(id)
@@ -61,8 +86,9 @@ async function goComposition() {
       {{ null === total(review[category]) ? "分数待填写" : "由五个分项计算" }}
     </view>
   </view>
-  <view class="card form-card">
+  <view :class="['card', 'form-card', 'review-field-nextSteps', { 'review-needs-input': highlighted === 'nextSteps', 'review-needs-input-again': highlighted === 'nextSteps' && focusRequest.sequence % 2 === 0 }]">
     <view class="section-title"> 批阅建议 </view>
+    <view v-if="highlighted === 'nextSteps'" class="review-required-note" role="alert">{{ focusRequest.message }}</view>
     <textarea
       :disabled="readonly"
       aria-label="批阅建议"
@@ -77,7 +103,8 @@ async function goComposition() {
     <view class="section-title"> 五大思维 </view>
     <view v-if="!readonly" class="small subtle review-edit-hint">点击分数或评价可直接修改</view>
     <template v-for="item1 in rubric[category]" :key="item1.id">
-      <view class="dimension-editor">
+      <view :class="['dimension-editor', `review-field-${category}-score-${item1.id}`, { 'review-needs-input': highlighted === `${category}-score-${item1.id}`, 'review-needs-input-again': highlighted === `${category}-score-${item1.id}` && focusRequest.sequence % 2 === 0 }]">
+        <view v-if="highlighted === `${category}-score-${item1.id}`" class="review-required-note" role="alert">{{ focusRequest.message }}</view>
         <view class="dimension-heading">
           <button
             class="dimension-label"
@@ -118,10 +145,11 @@ async function goComposition() {
       </view>
     </template>
   </view>
-  <view class="card form-card">
+  <view :class="['card', 'form-card', `review-field-${category}-summary`, { 'review-needs-input': highlighted === `${category}-summary`, 'review-needs-input-again': highlighted === `${category}-summary` && focusRequest.sequence % 2 === 0 }]">
     <view class="section-title">
-      总体评价
+      {{ category === 'composition' ? '教师寄语（作文总体评价）' : '教师寄语（书写总体评价）' }}
     </view>
+    <view v-if="highlighted === `${category}-summary`" class="review-required-note" role="alert">{{ focusRequest.message }}</view>
     <textarea
       :disabled="readonly"
       :aria-label="('handwriting' === category ? '书写' : '写作') + '总评'"

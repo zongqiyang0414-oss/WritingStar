@@ -19,6 +19,11 @@
       }
     }
   ],
+  "subPackages": [
+    { "root": "pdf-import", "name": "pdf-import", "pages": [{ "path": "index", "style": { "navigationBarTitleText": "导入PDF作业" } }] },
+    { "root": "pdf-fonts", "name": "pdf-fonts", "pages": [{ "path": "index" }] },
+    { "root": "pdf-cmaps", "name": "pdf-cmaps", "pages": [{ "path": "index" }] }
+  ],
   "globalStyle": {
     "backgroundColor": "#f4f8f5",
     "navigationBarTextStyle": "black",
