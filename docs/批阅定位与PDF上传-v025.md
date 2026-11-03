@@ -25,6 +25,7 @@
 - 网页动态加载PDF引擎；微信分为`pdf-import`、`pdf-fonts`、`pdf-cmaps`三个分包，运行时本地Canvas2D绘制，全部随微信包分发，无PDF第三方上传或新后端服务。微信文件按钮提供相册图片、微信文件选择两种来源，文件来源支持图片／PDF。
 - 原生Canvas适配矩阵、路径、消息二进制及必要Web全局。PDF.js兼容层可能包装ArrayBuffer构造器，克隆必须按类型标识保留字体路径数据；不能改回仅`instanceof`判断，否则可能静默漏字。单页结束、失败、取消及原生导出／保存迟到回调均清理未交付文件，已交付PNG不删。
 - `build-pdf-engine.mjs`生成自包含引擎、字体与CMap并附许可证。`prepare-weixin-preview.mjs`按app.json实际分包分别检查2 MiB，另查总20 MiB，不删除源文件以掩盖超限。依赖与许可证见[PDF第三方说明](PDF第三方说明-v025.md)。
+- 微信引擎编译为CommonJS，排除Node分支并转换ES动态import；构建通过AST检查原生模块没有动态import语法，避免浏览器成功而微信无法加载。已有全局WorkerMessageHandler使解析直接使用本地引擎，不运行浏览器worker源码字符串。
 
 ## 验证
 

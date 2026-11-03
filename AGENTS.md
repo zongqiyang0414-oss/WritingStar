@@ -7,6 +7,7 @@
 - 原生曝光flash on后恢复torch，查看／后台关灯但保留选择，继续恢复；网页高分辨率／持续对焦、静态补光恢复。微信original能力同时看SDK，只在质量参数拒绝时回退high。低清提示不替代实拍验收，不恢复锐化／压缩。原倍率横滑翻页，放大拖动／双指不翻。
 - 文件上传支持图片与PDF（多份作文），PDF本地逐页200dpi PNG，按有效WS1归档／人工确认，不猜学生；图片20 MB、PDF50 MB、整批60页。PDF页可全页识码，普通照片继续纸边保守规则。原文件名／页码／DPI记录，未建PDF长期入库。取消／迟到导出及保存清理未交付文件，已交付不删。
 - PDF.js 6.5.438与web-streams-polyfill4.5.0；build-pdf-engine.mjs必须生成pdf-import引擎与pdf-fonts／pdf-cmaps资源并保留许可证。每包2 MiB、总20 MiB检查保持。pdfCanvas的ArrayBuffer类型标识克隆不可退回instanceof，否则兼容层可能漏掉字体路径。原生无DOM路径／矩阵适配与标准绘制逐像素一致已验证。
+- 原生PDF引擎必须CommonJS且禁用ES动态import语法／Node分支，构建有AST检查；内嵌的worker源码字符串不等于外层动态import。不要直接把浏览器版mjs复制进微信包。字体、页面取消与分包回归见verify-pdf-import.mts／verify-weixin-pdf.mts。
 - 220项测试、类型检查、双端构建、实际浏览器重复定位／打回／四页PDF两生归档、触屏左右滑／缩放隔离通过。独立verify-pdf-import.mts及编译页verify-weixin-pdf.mts验证字体像素、容量拒绝、取消迟到清理。iPhone物理灯光／清晰度、PDF耗时内存仍待真机复测；详见docs/批阅定位与PDF上传-v025.md及交付状态。
 
 ## 2026-11-03 · v0.24.0 · 最新main上的九条批注
