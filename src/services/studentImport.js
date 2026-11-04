@@ -11,6 +11,7 @@ function importClass(state, classId, role) {
   if (role !== "teacher") throw new Error("请使用教师账号导入学生。");
   const teacher = getBoundTeacher(state);
   if (!teacher) throw new Error("请先登录教师账号。");
+  if (state.teacherAccount.mustChangePassword) throw new Error("请先修改初始密码。");
   const schoolClass = state.classes.find((item) => item.id === classId);
   if (!schoolClass || !teacher.classIds.includes(classId) || !teacher.organizationIds.includes(schoolClass.organizationId))
     throw new Error("只能向自己管理的班级导入学生。");

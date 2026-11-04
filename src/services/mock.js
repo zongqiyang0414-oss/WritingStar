@@ -26,7 +26,7 @@ import { latestSubmission, assignmentStudents, studentHasAssignment } from "./sc
 import { prepareAssignmentParticipants, updateAssignmentParticipants } from "./assignmentParticipants.js";
 import { createPaperPacket, pageCount, paperId, resolvePaperCode, validatePaperBatch } from "./paperWorkflow.js";
 import { BUILTIN_ASSIGNMENT_TEMPLATES, assignmentContent } from "./assignmentTemplates.js";
-import { prepareAccountRegistration, submitTeacherApplication, reviewTeacherApplication, authenticateAccount, issueStudentCredentials } from "./accountRegistration.js";
+import { prepareAccountRegistration, submitTeacherApplication, reviewTeacherApplication, authenticateAccount, changeTeacherPassword, issueStudentCredentials } from "./accountRegistration.js";
 import { importStudentRoster, previewStudentImport } from "./studentImport.js";
 
 export const clone = (e) => JSON.parse(JSON.stringify(e));
@@ -204,6 +204,9 @@ export class MockService extends AiReviewService {
     this.commit(result.state);
     return result.person;
   }
+  async changeTeacherPassword(input, role) {
+    this.commit(changeTeacherPassword(this.state, input, role, this.clock()));
+  }
   studentCredentials(classId, role) {
     this.managedClass(classId, role);
     const next = this.read();
@@ -256,7 +259,7 @@ export class MockService extends AiReviewService {
             if (!e.teacherAccount.signedIn)
               throw new Error("请先登录，再输入教师邀请码。");
             if (e.teacherAccount.teacherId)
-              throw new Error("当前教师身份已绑定，信息有误请联系学校管理员。");
+              throw new Error("当前教师身份已绑定，信息有误请联系老师。");
             const t = a.trim().toUpperCase();
             if (!t) throw new Error("请输入学校提供的邀请码。");
             const s = TEACHER_INVITATIONS.find((e) => e.code === t);
@@ -264,20 +267,20 @@ export class MockService extends AiReviewService {
               throw new Error("这是学生邀请码，请向学校获取教师邀请码。");
             if (!s) throw new Error("邀请码不存在，请核对后重新输入。");
             if ("active" !== s.status)
-              throw new Error("邀请码已过期，请联系学校管理员重新获取。");
+              throw new Error("邀请码已过期，请联系老师重新获取。");
             const l = e.teachers.find((e) => e.id === s.teacherId),
               n = e.organizations.filter((e) =>
                 l?.organizationIds.includes(e.id),
               );
             if (!l || !n.length || n.length !== new Set(l.organizationIds).size)
-              throw new Error("对应教师档案暂不可绑定，请联系学校管理员核对。");
+              throw new Error("对应教师档案暂不可绑定，请联系老师核对。");
             const i = e.classes.filter(
               (e) =>
                 l.classIds.includes(e.id) &&
                 l.organizationIds.includes(e.organizationId),
             );
             if (i.length !== new Set(l.classIds).size)
-              throw new Error("任教信息暂不可用，请联系学校管理员核对。");
+              throw new Error("任教信息暂不可用，请联系老师核对。");
             return {
               code: t,
               role: "teacher",
@@ -347,7 +350,8 @@ export class MockService extends AiReviewService {
   teacher(role) {
     if ("teacher" !== role) throw new Error("此操作需要教师身份。");
     const a = getBoundTeacher(this.state);
-    if (!a) throw new Error("请先登录并完成教师身份绑定。");
+    if (!a) throw new Error("请先登录教师账号。");
+    if (this.state.teacherAccount.mustChangePassword) throw new Error("请先修改初始密码。");
     return a;
   }
   teachingClass(classId, role) {
@@ -412,7 +416,7 @@ export class MockService extends AiReviewService {
     if (!n) throw new Error("作业不存在。");
     const i = this.learner(role);
     if (i.archived)
-      throw new Error("当前学生已不在班级，原作品保留，请联系学校管理员。");
+      throw new Error("当前学生已不在班级，原作品保留，请联系老师。");
     if (n.classId !== i.classId)
       throw new Error("只能提交当前学生所在班级的作业。");
     if (!studentHasAssignment(n, i.id)) throw new Error("本次作业不在该学生的接取名单中。");

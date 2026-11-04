@@ -79,7 +79,7 @@ test("代交只允许已绑定的任教教师和本班在班学生", async () =>
   service.commit(state);
   await assert.rejects(service.submitForStudent(assignment.id, "student-1", samplePhotos, "", "teacher"), /本班在班学生/);
   await service.restartBinding("teacher");
-  await assert.rejects(service.submitForStudent(assignment.id, "student-2", samplePhotos, "", "teacher"), /绑定/);
+  await assert.rejects(service.submitForStudent(assignment.id, "student-2", samplePhotos, "", "teacher"), /登录教师账号/);
   await bind(service, "teacher", "LS2026");
   await assert.rejects(service.submitForStudent(assignment.id, "student-2", samplePhotos, "", "teacher"), /任教范围/);
 });

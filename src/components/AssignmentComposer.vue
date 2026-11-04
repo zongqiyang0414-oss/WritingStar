@@ -84,16 +84,16 @@ async function chooseIllustration() {
         </view>
       </view>
       <view class="field-label">作业标题</view>
-      <textarea class="composer-title-input" :value="title" :disabled="busy" placeholder="请输入清晰完整的题目（必填）" maxlength="50" auto-height :cursor-spacing="100" aria-label="作业标题" @input="emit('update:title', $event.detail.value)" />
+      <textarea class="composer-title-input" :value="title" :disabled="busy" placeholder="请输入题目" maxlength="50" auto-height :cursor-spacing="100" aria-label="作业标题" @input="emit('update:title', $event.detail.value)" />
       <view class="field-label">题目要求</view>
-      <textarea class="composer-requirements-input" :value="requirements" :disabled="busy" placeholder="可分行填写内容要求、字数、书写规范等" maxlength="1500" auto-height :cursor-spacing="100" aria-label="题目要求" @input="emit('update:requirements', $event.detail.value)" />
+      <textarea class="composer-requirements-input" :value="requirements" :disabled="busy" placeholder="选填" maxlength="1500" auto-height :cursor-spacing="100" aria-label="题目要求" @input="emit('update:requirements', $event.detail.value)" />
       <view class="field-label">题目插图（选填）</view>
       <view v-if="illustration" class="composer-illustration-preview"><image :src="displayPhoto(illustration)" mode="aspectFit" class="composer-illustration-image" /></view>
       <view class="composer-illustration-actions">
         <button class="text-button" :disabled="busy || selectingIllustration" @click="chooseIllustration">{{ selectingIllustration ? '正在读取…' : illustration ? '更换插图' : '添加插图' }}</button>
         <button v-if="illustration" class="text-button" :disabled="busy || selectingIllustration" @click="emit('update:illustration', '')">移除插图</button>
       </view>
-      <view class="tiny subtle">标题、要求和插图分区排版。插图将放入正面题目栏下方的图示区域，等比显示。</view>
+      <view class="tiny subtle">标题、要求和插图分区排版。插图放在题目要求下方，保留原有思维导图与写作提纲。</view>
       <view v-if="illustrationError" class="paper-error" role="alert">{{ illustrationError }}</view>
       <view class="composer-template-actions">
         <button v-if="selectedTemplate && !selectedTemplate.builtin" class="text-button" :disabled="busy || !title.trim()" @click="saveTemplate(true)">更新当前模板</button>
@@ -117,7 +117,7 @@ async function chooseIllustration() {
       <view v-if="!classes.length" class="small subtle">暂无可发布的任教班级。</view>
       <view class="small subtle composer-selection-summary">已选 {{ selectedClasses.length }} 个班级<text v-if="selectedStudentCount"> · {{ selectedStudentCount }} 位学生</text></view>
       <view class="field-label">作业用纸</view>
-      <view class="small subtle spaced-small">方圆格作文模板 · A3 横向 · 前后两页。顶部放置三个同页专属二维码，题目栏展示标题、学生信息和要求。学生可下载打印。</view>
+      <view class="small subtle spaced-small">方圆格作文模板 · A3 横向 · 前后两页。三栏顶部各放置一个同页专属二维码，题目栏展示标题、学生信息和要求。学生可下载打印。</view>
     </view>
     <button class="primary full-width spaced" :disabled="busy" @click="emit('publish')">{{ busy ? '发布中…' : '发布作业' }}</button>
   </view>

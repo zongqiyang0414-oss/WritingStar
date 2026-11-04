@@ -252,14 +252,14 @@ async function systemSettings() {
 }
 function permissionHelp() {
   uni.showModal({ title: "相机授权说明", showCancel: false, content: errorAction.value.startsWith("privacy")
-    ? "管理员在电脑浏览器打开 mp.weixin.qq.com，登录AppID为wxe3fefef9eaab17c3的小程序。进入“设置→服务内容声明→用户隐私保护指引”，补充摄像头（拍摄纸质作业）、选中的照片或视频信息（导入作业图片），按平台提示提交并确认生效。手机微信设置里没有这个配置；仅查看指引也不等于已经同意授权。"
+    ? "平台工作人员在电脑浏览器打开 mp.weixin.qq.com，登录AppID为wxe3fefef9eaab17c3的小程序。进入“设置→服务内容声明→用户隐私保护指引”，补充摄像头（拍摄纸质作业）、选中的照片或视频信息（导入作业图片），按平台提示提交并确认生效。手机微信设置里没有这个配置；仅查看指引也不等于已经同意授权。"
     : "在 Chrome 地址栏的网站信息中，允许此网站使用相机。手机还需在系统设置中允许 Chrome 使用相机。请通过 HTTPS 地址直接打开网站；嵌入页可能不支持授权。也可以从相册导入。" });
 }
 async function privacyContract() {
   try { await openScanPrivacyContract(); }
   catch (failure) { showFailure(failure); }
 }
-function copyError() { uni.setClipboardData({ data: `写字星 v0.25.0 拍照
+function copyError() { uni.setClipboardData({ data: `写字星 v0.27.0 拍照
 ${error.value}
 ${errorDetail.value}`, fail: () => uni.showModal({ title: "请长按复制错误详情", showCancel: false,
   content: errorDetail.value || error.value }) }); }

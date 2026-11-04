@@ -38,7 +38,7 @@ test('隐私预检故障不阻止原生相机，真实的系统拒绝仍然阻�
 test('真实接口的未声明、未同意与网络故障分别处理并保留原文', () => {
   const config = nativeScanError({ errMsg: 'camera:fail api scope is not declared in privacy agreement' });
   assert.equal(config.code, 'wx-privacy-config'); assert.equal(config.action, 'privacy-config');
-  assert.match(config.message, /管理员.*电脑/); assert.match(config.detail, /not declared/);
+  assert.match(config.message, /平台工作人员.*电脑/); assert.match(config.detail, /not declared/);
   const denied = nativeScanError({ errMsg: 'camera:fail privacy permission is not authorized' });
   assert.equal(denied.action, 'privacy'); assert.doesNotMatch(denied.message, /缺少隐私声明/);
   const network = nativeScanError({ errMsg: 'camera:fail network timeout' });

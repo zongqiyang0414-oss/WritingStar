@@ -128,6 +128,7 @@ export interface StudentAccount {
 }
 export interface TeacherAccount {
   signedIn: boolean;
+  mustChangePassword?: boolean;
   teacherId: string | null;
 }
 export interface Assignment {
@@ -207,6 +208,10 @@ export interface LoginCredential {
   personId: string;
   username: string;
   password: string;
+  mustChangePassword?: boolean;
+  passwordChangedAt?: string;
+  disabled?: boolean;
+  phoneConflict?: boolean;
   source: "demo" | "issued" | "legacy";
 }
 export interface TeacherApplication {
@@ -226,7 +231,7 @@ export interface PrototypeState {
   schemaVersion: 6;
   studentEntryVersion: 1;
   administrationVersion: 1;
-  accountRegistrationVersion?: 1;
+  accountRegistrationVersion?: 1 | 2;
   teacherApplications?: TeacherApplication[];
   loginCredentials?: LoginCredential[];
   adminAccount: AdministratorAccount;

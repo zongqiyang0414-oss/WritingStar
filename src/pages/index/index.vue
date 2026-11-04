@@ -6,6 +6,7 @@ import StudentNotifications from "../../components/StudentNotifications.vue";
 import SubmissionRecords from "../../components/SubmissionRecords.vue";
 import ClassSelector from "../../components/ClassSelector.vue";
 import ClassStatistics from "../../components/ClassStatistics.vue";
+import TeacherPasswordReset from "../../components/TeacherPasswordReset.vue";
 import InvitationBinding from "../../components/InvitationBinding.vue";
 import OrganizationSelector from "../../components/OrganizationSelector.vue";
 import PrototypeTools from "../../components/PrototypeTools.vue";
@@ -195,6 +196,8 @@ const { bottomInset: bottomInset } = {
     teacherForAssignment: teacherForAssignment,
     teacherForFeedback: teacherForFeedback,
     needsBinding: needsBinding,
+    needsPasswordReset,
+    resetTeacherPassword,
     loginForBinding: loginForBinding,
     previewBinding: previewBinding,
     editBindingCode: editBindingCode,
@@ -248,7 +251,7 @@ function toggleFeedbackDimension(id) {
       </view>
       <view class="intro-foot">
         <text class="tiny-dot" />
-        原型展示 · v0.25.0
+        原型展示 · v0.27.0
       </view>
     </view>
     <!-- #endif -->
@@ -285,6 +288,7 @@ function toggleFeedbackDimension(id) {
           v-if="
             !isTeacher ||
             needsBinding ||
+            needsPasswordReset ||
             teachingClassOptions.length ||
             ('home' !== screen &&
               !screen.startsWith('statistics') &&
@@ -292,7 +296,7 @@ function toggleFeedbackDimension(id) {
           "
         >
           <view :key="2" class="page-body">
-            <template v-if="needsBinding || 'home' === screen" />
+            <template v-if="needsBinding || needsPasswordReset || 'home' === screen" />
             <template v-else>
               <view
                 :key="0"
@@ -322,6 +326,9 @@ function toggleFeedbackDimension(id) {
             <view v-if="nativeNavigation && !isRoot && !needsBinding" class="native-nav-spacer" />
             <template v-if="needsBinding">
               <InvitationBinding :key="role" :role="role" :busy="busy" :application="teacherApplication" :demo-account="demoAccount" @login="loginForBinding" @apply="applyTeacher" />
+            </template>
+            <template v-else-if="needsPasswordReset">
+              <TeacherPasswordReset :busy="busy" @reset="resetTeacherPassword" @logout="logout" />
             </template>
             <template v-else-if="isTeacher && ['adminClasses', 'adminStudents'].includes(screen)">
               <AdminWorkspace :key="currentOrganization?.id" :state="state" :organization="currentOrganization" :administrator="teacherIdentity" :section="screen" :busy="busy" @navigate="go" @action="adminAction" @confirm="modal = $event" @dirty="adminDirty = $event" />
@@ -485,7 +492,7 @@ function toggleFeedbackDimension(id) {
                     </view>
                     <template v-if="boundStudent?.archived">
                       <view :key="0" class="notice">
-                        当前学生已不在班级，作品与教师反馈保留。请联系学校管理员核对。
+                        当前学生已不在班级，作品与教师反馈保留。请联系老师核对。
                       </view>
                     </template>
                     <StudentNotifications compact :notifications="learnerNotifications" :busy="busy" @open="openStudentNotification" @all="openNotifications" />
@@ -1378,12 +1385,7 @@ function toggleFeedbackDimension(id) {
                                               项
                                             </text>
                                           </view>
-                                          <button
-                                            class="text-button full-width spaced"
-                                            @click="bindingHelp"
-                                          >
-                                            任教信息有误？联系学校管理员
-                                          </button>
+
                                         </view>
                                       </template>
                                       <template v-else>
@@ -1443,12 +1445,7 @@ function toggleFeedbackDimension(id) {
                                               {{ myHistory.length }} 份作业 ›
                                             </button>
                                           </view>
-                                          <button
-                                            class="text-button full-width spaced"
-                                            @click="bindingHelp"
-                                          >
-                                            绑定信息有误？联系学校管理员
-                                          </button>
+
                                         </view>
                                       </template>
                                       <button class="secondary full-width spaced logout-button" :disabled="busy" @click="logout">退出登录</button>
@@ -1525,7 +1522,7 @@ function toggleFeedbackDimension(id) {
           </view>
         </template>
       </template>
-      <template v-if="needsBinding" />
+      <template v-if="needsBinding || needsPasswordReset" />
       <template v-else>
         <view
           key="learning-navigation"

@@ -11,11 +11,11 @@ export function nativeScanError(cause, operation = "camera") {
   if (cause?.action !== undefined) return cause;
   const detail = String(cause?.errMsg || cause?.detail?.errMsg || cause?.message || "");
   if (/not.*declared|scope.*declare|privacy.*(?:not configured|not exist|not found|empty)|未配置.*隐私|隐私.*(?:未配置|未声明|不存在)|接口.*声明/i.test(detail))
-    return scanAccessError("微信提示此功能缺少隐私声明。请小程序管理员在电脑登录微信公众平台，配置并发布“用户隐私保护指引”后重试。", "wx-privacy-config", "privacy-config", cause);
+    return scanAccessError("微信提示此功能缺少隐私声明。请平台工作人员在电脑登录微信公众平台，配置并发布“用户隐私保护指引”后重试。", "wx-privacy-config", "privacy-config", cause);
   if (/privacy|隐私/i.test(detail))
     return scanAccessError("微信未完成此次隐私授权。请重新开启相机或选择照片，并在微信弹窗中阅读、同意隐私指引。", "wx-privacy", "privacy", cause);
   if (operation === "privacy")
-    return scanAccessError("隐私指引暂时无法打开，请重试；若仍失败，请管理员检查微信公众平台的指引配置。", "wx-privacy-open", "privacy-config", cause);
+    return scanAccessError("隐私指引暂时无法打开，请重试；若仍失败，请平台工作人员检查微信公众平台的指引配置。", "wx-privacy-open", "privacy-config", cause);
   if (/system.*(deny|denied|permission)|系统.*(权限|拒绝)/i.test(detail))
     return scanAccessError("手机系统未允许微信使用相机。请到手机设置中的微信权限开启相机，再返回重试。", "wx-system-camera", "app-settings", cause);
   if (/auth|permission|deny|denied|权限|授权/i.test(detail))

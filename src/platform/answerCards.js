@@ -4,12 +4,16 @@ import { encodePaperCode } from "../services/paperWorkflow.js";
 // PDF coordinates: preserve the approved A3 landscape front/back layout.
 export const CARD_WIDTH = 1191, CARD_HEIGHT = 842;
 export const CARD_PAPER = { width: 1190.55, height: 841.89 };
-// Three copies share one identity. Four white modules around every code are
-// included in the 24 mm printed square; none touches a registration mark.
-export const CARD_QR_SIZE = 68;
+// One 19 mm code per column. The original writing-grid header band is cleared
+// below, leaving the registration marks and every writing row untouched.
+export const CARD_QR_SIZE = 54;
 export function cardQrRegions(page) {
+  return [201, 575, 949].map(x => ({ x, y: 14, width: CARD_QR_SIZE, height: CARD_QR_SIZE }));
+}
+// v0.26 pages stay readable after redistributing the current page's codes.
+export function legacyCardQrRegions(page) {
   const left = page === 1 ? 64 : 820;
-  return [0, 132, 264].map(offset => ({ x: left + offset, y: 54, width: CARD_QR_SIZE, height: CARD_QR_SIZE }));
+  return [0, 132, 264].map(offset => ({ x: left + offset, y: 54, width: 68, height: 68 }));
 }
 const backgroundLoads = new Map();
 export function cardBackgroundPath(page) {
@@ -87,39 +91,42 @@ export function cardDrawing(assignment, card, page) {
       text(lines[i] + (i === maxLines - 1 && lines.length > maxLines ? "…" : ""), x, y + i * leading, size);
     return Math.min(lines.length, maxLines);
   };
-  // Clear the original blank-panel identity labels, preserving all writing
-  // grids, the mind-map/outline panels and every measured registration mark.
-  rect(left - 8, 53, 346, front ? 363 : 748, "#ffffff");
-  // Clear the mind-map pencil ornament before text, so the overflow notice at
-  // baseline 413 remains intact even when it has font descenders.
-  if (front && assignment.illustration) rect(55, 414, 346, 194, "#ffffff");
+  // Preserve the original mind map, writing outline, grids and all 9/6 marks.
+  rect(left - 8, 53, 346, front ? 361 : 748, "#ffffff");
+  const writingColumns = front ? [427, 801.25] : [50.25, 425];
+  for (const x of writingColumns) rect(x - .5, 53, 351, 22.5, "#ffffff");
   for (const region of cardQrRegions(page)) {
     const unit = region.width / (matrix.length + 8);
     rect(region.x, region.y, region.width, region.height, "#ffffff");
     for (let y = 0; y < matrix.length; y++) for (let x = 0; x < matrix.length; x++)
       if (matrix[y][x]) rect(region.x + (x + 4) * unit, region.y + (y + 4) * unit, unit + .08, unit + .08, "#000000");
   }
-  text(`学生专属码 · 第 ${page} / ${assignment.paperPacket.pages} 页 · 三码同页`, left + 65, 135, 9, "#46554c");
-  const titleLines = block(assignment.title, left, 165, 330, 20, 4, 24);
-  const identityY = 165 + (Math.max(1, titleLines) - 1) * 24 + 30;
+  text(`第 ${page} / ${assignment.paperPacket.pages} 页 · 三栏顶部均可识别`, left, 84, 9, "#46554c");
+  const titleLines = block(assignment.title, left, 108, 330, 20, 4, 24);
+  const identityY = 108 + (Math.max(1, titleLines) - 1) * 24 + 30;
   block(`班级：${card.className}`, left, identityY, 185, 11, 1);
   block(`姓名：${card.studentName}`, left + 195, identityY, 140, 11, 1);
   block(`学号：${card.studentNumber || "—"}`, left, identityY + 20, 230, 11, 1);
   text("分数：________", left + 245, identityY + 20, 11);
+  let followingY = identityY + 47;
+  const illustrationOnPage = front && !!assignment.illustration;
   if (assignment.requirements?.trim()) {
-    const headingY = identityY + 51, contentY = headingY + 24;
-    const lastLineY = front ? 395 : 775, maxLines = Math.max(1, Math.floor((lastLineY - contentY) / 18) + 1);
-    text("题目要求", left, headingY, 14, "#172b22");
-    block(assignment.requirements, left, contentY, 330, 14, maxLines, 18);
-    if (wrapText(assignment.requirements, 330, 14).length > maxLines)
-      text("完整要求请查看学生端本次作业。", left, front ? 413 : 794, 10, "#46554c");
+    const contentY = followingY + 24;
+    const lastLineY = front ? (illustrationOnPage ? 275 : 389) : 775;
+    const maxLines = Math.max(1, Math.floor((lastLineY - contentY) / 18) + 1);
+    text("题目要求", left, followingY, 14, "#172b22");
+    const used = block(assignment.requirements, left, contentY, 330, 14, maxLines, 18);
+    followingY = contentY + used * 18 + 8;
+    if (wrapText(assignment.requirements, 330, 14).length > maxLines) {
+      text("完整要求请查看学生端本次作业。", left, followingY, 9, "#46554c");
+      followingY += 18;
+    }
   }
-  if (front && assignment.illustration) {
-    // A supplied prompt image replaces only the optional mind-map area.
-    // Its ratio is preserved; the outline and both writing columns remain.
-    rect(56, 425, 344, 22, "#edf4ef");
-    text("题目插图", 66, 441, 12, "#263d34");
-    commands.push({ kind: "illustration", source: assignment.illustration, x: 64, y: 453, w: 328, h: 146 });
+  if (illustrationOnPage) {
+    // The illustration follows the prompt; it never paints the original mind map.
+    const top = followingY + 4, imageY = top + 22, height = Math.max(12, Math.min(140, 408 - imageY));
+    text("题目插图", left, top + 12, 12);
+    commands.push({ kind: "illustration", source: assignment.illustration, x: left, y: imageY, w: 330, h: height });
   }
   text(code, left, 808, 7, "#46554c");
   return { commands, code };

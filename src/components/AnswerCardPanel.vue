@@ -88,7 +88,7 @@ function zoom() { if (preview.value) uni.previewImage({urls: [preview.value]}); 
         <view class="paper-page-controls"><button class="text-button" :disabled="working || page <= 1" @click="page--">‹ 上一页</button><text>第 {{ page }} / {{ assignment.paperPacket.pages }} 页</text><button class="text-button" :disabled="working || page >= assignment.paperPacket.pages" @click="page++">下一页 ›</button></view>
       </view>
       <view class="paper-preview" @click="zoom"><image v-if="preview" :src="preview" mode="widthFix" class="paper-preview-image" /><view v-else class="small subtle">正在生成答题卡…</view></view>
-      <view class="paper-code-caption">顶部三个二维码对应同一学生及页码，可识别任意一个。请保留二维码和定位标记。</view>
+      <view class="paper-code-caption">三栏顶部各有一个同页二维码，可识别任意一个。请保留二维码和定位标记。</view>
       <view class="card paper-actions">
         <button class="primary full-width" :disabled="busy || working || !selected" @click="print(false)">打印 / 下载此生 PDF</button>
         <button v-if="teacher" class="text-button full-width spaced-small" :disabled="busy || working" @click="print(true)">打印全班 · {{ cards.length * assignment.paperPacket.pages }} 页</button>

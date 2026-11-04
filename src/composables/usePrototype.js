@@ -160,6 +160,7 @@ export function usePrototype() {
             return t ? studentSummary(e, t.classId, t.id) : null;
           })(state.value, role.value),
     ),
+    needsPasswordReset = computed(() => role.value === "teacher" && !!state.value.teacherAccount.signedIn && !!state.value.teacherAccount.mustChangePassword),
     needsBinding = computed(() =>
       isAdmin.value ? !adminIdentity.value : isTeacher.value ? !teacherIdentity.value : !boundStudent.value,
     ),
@@ -317,7 +318,7 @@ export function usePrototype() {
     identity = computed(() => {
       var e;
       return isAdmin.value
-        ? adminIdentity.value?.name || "管理员"
+        ? adminIdentity.value?.name || "老师"
         : isTeacher.value
         ? teacherIdentity.value?.name || "老师"
         : boundStudent.value
@@ -564,6 +565,7 @@ export function usePrototype() {
     navigate(origin.screen);
   }
   function go(e) {
+    if (needsPasswordReset.value) return;
     if (isAdmin.value) {
       if (["home", "adminClasses", "adminTeachers", "adminStudents", "profile"].includes(e) && screen.value !== e)
         guard(() => { adminDirty.value = false; navigate(e); });
@@ -847,7 +849,7 @@ export function usePrototype() {
     newClassIds,
     assignmentTemplates: computed(() => {
       state.value;
-      return isTeacher.value && teacherIdentity.value ? service.assignmentTemplates(role.value) : [];
+      return isTeacher.value && teacherIdentity.value && !needsPasswordReset.value ? service.assignmentTemplates(role.value) : [];
     }),
     saveAssignmentTemplate: async (input) => {
       await runAction(async () => { await service.saveAssignmentTemplate(input, role.value); notify("模板已保存到题库"); });
@@ -1272,6 +1274,15 @@ export function usePrototype() {
       return e.publishedBy || DEFAULT_TEACHER;
     },
     needsBinding,
+    needsPasswordReset,
+    resetTeacherPassword: async function (input) {
+      await runAction(async () => {
+        await service.changeTeacherPassword(input, "teacher");
+        refresh();
+        navigate("home", { reset: true });
+        notify("密码已修改，请妥善保管");
+      });
+    },
     loginForBinding: async function (credentials = {}) {
       await runAction(async () => {
         await service.loginAccount(role.value, credentials.username, credentials.password);
@@ -1283,7 +1294,7 @@ export function usePrototype() {
         assignmentId.value = scopedAssignments.value[0]?.id || "";
         submissionId.value = ""; photos.value = []; note.value = "";
         demoAccount.value = null;
-        navigate("home", { reset: true }); notify("登录成功");
+        navigate("home", { reset: true }); notify(needsPasswordReset.value ? "首次登录，请先修改密码" : "登录成功");
       });
     },
     applyTeacher: async function (input) {
@@ -1349,7 +1360,7 @@ export function usePrototype() {
           navigate("home");
           notify(
             isAdmin.value
-              ? "管理员身份与管理范围已绑定"
+              ? "身份信息已关联"
               : "teacher" === role.value
               ? "教师身份与任教范围已绑定"
               : "学习档案已绑定",

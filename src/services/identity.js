@@ -196,7 +196,7 @@ export function previewStudentBinding(state, code, role) {
     l = state.accounts[s];
   if (!l.signedIn) throw new Error("请先登录，再输入邀请码。");
   if (l.studentId)
-    throw new Error("当前身份已绑定，信息有误请联系学校管理员。");
+    throw new Error("当前身份已绑定，信息有误请联系老师。");
   const n = code.trim().toUpperCase();
   if (!n) throw new Error("请输入学校提供的邀请码。");
   const i = STUDENT_INVITATIONS.find((e) => e.code === n);
@@ -206,8 +206,8 @@ export function previewStudentBinding(state, code, role) {
   if ("active" !== i.status)
     throw new Error(
       "expired" === i.status
-        ? "邀请码已过期，请联系学校管理员重新获取。"
-        : "邀请码已停用，请联系学校管理员。",
+        ? "邀请码已过期，请联系老师重新获取。"
+        : "邀请码已停用，请联系老师。",
     );
   if (i.role !== s)
     throw new Error(
@@ -217,7 +217,7 @@ export function previewStudentBinding(state, code, role) {
     d = state.classes.find((e) => e.id === u?.classId),
     o = d && organizationForClass(state, d.id);
   if (!u || u.archived || !d || !o)
-    throw new Error("对应学习档案暂不可绑定，请联系学校管理员核对。");
+    throw new Error("对应学习档案暂不可绑定，请联系老师核对。");
   return {
     code: n,
     role: s,
@@ -228,6 +228,6 @@ export function previewStudentBinding(state, code, role) {
 }
 export function assertActiveRole(role) {
   if (role !== "teacher" && role !== "student" && role !== "admin")
-    throw new Error("请选择教师或学生身份，也可选择已获授权的管理员。");
+    throw new Error("请选择教师或学生身份。");
   return role;
 }

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="180" viewBox="0 0 360 180" role="img" aria-labelledby="title desc">
+  <title id="title">学生名单格式示例</title><desc id="desc">Excel表格A列姓名、B列学号；第2行贺新春，001；第3行秋虹，002。姓名必填，学号选填。</desc>
+  <rect width="360" height="180" rx="6" fill="#fff"/>
+  <path d="M0 0h360v30H0zM0 30h36v150H0z" fill="#f0f1f0"/>
+  <g fill="none" stroke="#cfd5cf"><path d="M36 0v180M198 0v180M359.5 0v180M0 30h360M0 60h360M0 90h360M0 120h360M0 150h360M0 179.5h360"/><rect x=".5" y=".5" width="359" height="179" rx="6"/></g>
+  <path d="m16 18 9-9v9Z" fill="#7d837e"/>
+  <g font-family="Noto Sans CJK SC,Microsoft YaHei,sans-serif" text-anchor="middle" dominant-baseline="middle" font-size="17" fill="#3f4943">
+    <text x="117" y="16">A</text><text x="279" y="16">B</text>
+    <text x="18" y="46">1</text><text x="18" y="76">2</text><text x="18" y="106">3</text><text x="18" y="136">4</text><text x="18" y="166">5</text>
+    <text x="117" y="46" fill="#d74236" font-weight="600">姓名</text><text x="279" y="46" fill="#d74236" font-weight="600">学号</text>
+    <text x="117" y="76">贺新春</text><text x="279" y="76">001</text><text x="117" y="106">秋虹</text><text x="279" y="106">002</text>
+    <text x="117" y="136">…</text><text x="279" y="136">…</text>
+  </g>
+</svg>

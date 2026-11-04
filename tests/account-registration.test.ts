@@ -37,8 +37,9 @@ test('平台通过申请后唯一发放账号，账户可登录并建班，不�
   const {credential, application: reviewed} = await service.reviewTeacherApplication(application.id, {decision:'approved'}, 'platform-demo');
   assert.equal(reviewed.status, 'approved');
   assert.equal(credential.role, 'teacher');
-  assert.match(credential.username, /^T/);
-  assert.ok(credential.password.length >= 12);
+  assert.equal(credential.username, input.phone);
+  assert.equal(credential.password, 'Aa123456');
+  assert.equal(credential.mustChangePassword, true);
   const after = service.read();
   await assert.rejects(service.reviewTeacherApplication(application.id, {decision:'approved'}, 'platform-demo'), /已完成审核/);
   assert.deepEqual(service.read(), after);
@@ -46,6 +47,8 @@ test('平台通过申请后唯一发放账号，账户可登录并建班，不�
   await fresh.loginAccount('teacher', credential.username.toLowerCase(), credential.password);
   assert.equal(fresh.read().teacherAccount.teacherId, reviewed.teacherId);
   const organization = fresh.read().teachers.find(t => t.id === reviewed.teacherId).organizationIds[0];
+  await assert.rejects(fresh.saveClass({organizationId:organization,name:'一（1）班'},'teacher'), /修改初始密码/);
+  await fresh.changeTeacherPassword({currentPassword:'Aa123456',newPassword:'Newpass2027',confirmPassword:'Newpass2027'},'teacher');
   assert.deepEqual(getTeacherClasses(fresh.read()), []);
   const schoolClass = await fresh.saveClass({organizationId:organization,name:'一（1）班'}, 'teacher');
   assert.equal(getTeacherClasses(fresh.read())[0].id, schoolClass.id);
@@ -112,4 +115,58 @@ test('教师重新领取本班账号只读且密码不变，越班和学生请�
   assert.throws(() => service.studentCredentials('class-2','student'), /教师身份/);
   service.prepareClassPractice();
   for (const student of service.read().students) assert.ok(service.read().loginCredentials.some(account => account.personId === student.id));
+});
+
+
+test('同手机号跨校不能重复申请或审批，手机号格式统一，退回可重新申请', async () => {
+  const {service} = setup();
+  const app = await service.submitTeacherApplication({...input,phone:'+86 138-1234-5678'});
+  assert.equal(app.phone,input.phone);
+  await assert.rejects(service.submitTeacherApplication({...input,school:'另一校'}),/已有申请/);
+  await service.reviewTeacherApplication(app.id,{decision:'rejected',reason:'重新核对'},'platform-demo');
+  const retry = await service.submitTeacherApplication(input);
+  await service.reviewTeacherApplication(retry.id,{decision:'approved'},'platform-demo');
+  await assert.rejects(service.submitTeacherApplication({...input,school:'另一校'}),/已有账号/);
+});
+
+test('改密校验及存储失败不改变账号，成功后旧密码失效且刷新不再提示', async () => {
+  const {service,storage,fail} = setup();
+  const app = await service.submitTeacherApplication(input);
+  const {credential} = await service.reviewTeacherApplication(app.id,{decision:'approved'},'platform-demo');
+  await service.loginAccount('teacher',credential.username,'Aa123456');
+  const before = service.read(), valid={currentPassword:'Aa123456',newPassword:'Chosen2027',confirmPassword:'Chosen2027'};
+  for(const invalid of [{currentPassword:'wrong'},{newPassword:'12345678',confirmPassword:'12345678'},{confirmPassword:'other'},{newPassword:'Aa123456',confirmPassword:'Aa123456'}]) {
+    await assert.rejects(service.changeTeacherPassword({...valid,...invalid},'teacher'));
+    assert.deepEqual(service.read(),before);
+  }
+  await assert.rejects(service.changeTeacherPassword(valid,'student'),/教师账号/);
+  fail(true);await assert.rejects(service.changeTeacherPassword(valid,'teacher'),/存储满/);
+  assert.deepEqual(service.read(),before);fail(false);
+  await service.changeTeacherPassword(valid,'teacher');
+  const reloaded = new MockService(storage,clock);
+  assert.equal(reloaded.read().teacherAccount.mustChangePassword,false);
+  await assert.rejects(reloaded.loginAccount('teacher',credential.username,'Aa123456'),/账号或密码/);
+  await reloaded.loginAccount('teacher',credential.username,'Chosen2027');
+  assert.ok(!reloaded.read().teacherAccount.mustChangePassword);
+});
+
+test('v0.26已颁发随机教师账号迁移为手机号，保留改过的密码、学生账号及全部学习记录', async () => {
+  const {service} = setup();
+  const app = await service.submitTeacherApplication(input);
+  const {credential} = await service.reviewTeacherApplication(app.id,{decision:'approved'},'platform-demo');
+  await service.loginAccount('teacher',credential.username,'Aa123456');
+  const old = service.read();old.accountRegistrationVersion=1;
+  const account=old.loginCredentials.find(item=>item.id===credential.id);account.username='ToldRandom';account.password='oldRandomPassword';delete account.mustChangePassword;
+  const migrated=setup(old).service.read(),updated=migrated.loginCredentials.find(item=>item.id===account.id);
+  assert.equal(updated.username,input.phone);assert.equal(updated.password,'Aa123456');
+  assert.equal(migrated.teacherAccount.mustChangePassword,true);
+  assert.deepEqual(migrated.submissions,old.submissions);
+  assert.deepEqual(migrated.loginCredentials.filter(item=>item.role==='student'),old.loginCredentials.filter(item=>item.role==='student'));
+  old.loginCredentials.find(item=>item.id===account.id).passwordChangedAt='2026-11-04T01:00:00Z';
+  assert.equal(setup(old).service.read().loginCredentials.find(item=>item.id===account.id).password,'oldRandomPassword');
+  old.loginCredentials.push({...account,id:'conflict-account',personId:'conflict-teacher'});
+  old.teachers.push({...old.teachers.find(item=>item.id===account.personId),id:'conflict-teacher'});
+  const conflict=setup(old).service.read();
+  assert.ok(conflict.loginCredentials.filter(item=>[account.id,'conflict-account'].includes(item.id)).every(item=>item.disabled));
+  assert.equal(conflict.teacherAccount.signedIn,false);
 });

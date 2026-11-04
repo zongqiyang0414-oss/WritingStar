@@ -66,6 +66,11 @@ async function exportAccounts(accounts) {
       <view class="small subtle spaced-small">选择班级，上传Word或Excel名单，核对后一次生成学生账号和初始密码。</view>
       <view class="field-label">导入班级</view>
       <GradeClassPicker v-model="classId" :classes="classes" :disabled="disabled" placeholder="请先新建班级" />
+      <view class="roster-format-example">
+        <view class="field-label">名单格式示例</view>
+        <image src="/static/help/student-roster-example.png" mode="widthFix" class="roster-format-image" aria-label="Excel名单示例：A列姓名、B列学号；贺新春001、秋虹002" />
+        <view class="tiny subtle spaced-small">第一行为表头。姓名必填，学号选填；要保留001这类学号，请将学号列设为文本格式。</view>
+      </view>
       <view class="roster-instructions small">
         <view>表头：姓名（必填）、学号（选填）</view>
         <view class="subtle">支持.xlsx、.xls及.docx普通表格，单份5 MB以内、每批最多500人；多个可见工作表会合并核对。</view>
@@ -114,6 +119,8 @@ async function exportAccounts(accounts) {
 </template>
 
 <style scoped>
+.roster-format-example { margin-top: 20px; }
+.roster-format-image { display: block; width: 100%; max-width: 360px; height: 180px; border-radius: 6px; }
 .roster-instructions { margin: 16px 0; line-height: 1.8; }
 .roster-file-name, .roster-preview-row { overflow-wrap: anywhere; }
 .roster-error, .roster-issue { color: #a13927; }

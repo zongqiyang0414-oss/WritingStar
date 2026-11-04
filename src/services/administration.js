@@ -54,6 +54,7 @@ export class AdministrationService {
       const teacher = this.state.teacherAccount?.signedIn
         ? this.state.teachers.find(item => item.id === this.state.teacherAccount.teacherId) : null;
       if (!teacher) throw new Error("请先登录教师账号。");
+      if (this.state.teacherAccount.mustChangePassword) throw new Error("请先修改初始密码。");
       return teacher;
     }
     if (role !== "admin") throw new Error("此操作需要教师身份（历史管理员账号兼容）。");

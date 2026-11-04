@@ -55,7 +55,7 @@ function switchValue(e) {
 <template>
   <view class="prototype-tools">
     <view class="prototype-tools-heading">
-      <text> 原型展示 · v0.26.0 </text>
+      <text> 原型展示 · v0.27.0 </text>
       <button
         class="text-button"
         :aria-expanded="expanded"
@@ -78,14 +78,14 @@ function switchValue(e) {
           <template v-for="item1 in roleCredentials" :key="item1.id">
               <button
                 class="prototype-invite"
-                :disabled="busy || !needsBinding"
+                :disabled="busy || !needsBinding || !!item1.passwordChangedAt || !!item1.disabled"
                 @click="emit('use-account', item1)"
               >
                 <text>
                   {{ item1.username }}
                 </text>
                 <text>
-                  密码：{{ item1.password }}
+                  {{ item1.passwordChangedAt ? '密码已修改' : '密码：' + item1.password }}
                 </text>
               </button>
           </template>
@@ -111,7 +111,7 @@ function switchValue(e) {
                 <view class="prototype-review-actions"><button class="secondary" :disabled="busy || !reasons[application.id]?.trim()" @click="reviewApplication(application, 'rejected')">退回补充</button><button class="primary" :disabled="busy" @click="reviewApplication(application, 'approved')">通过并颁发账号</button></view>
               </template>
               <view v-if="application.reviewReason || application.reason" class="small subtle spaced-small">审核备注：{{ application.reviewReason || application.reason }}</view>
-              <view v-if="applicationCredential(application)" class="prototype-issued-account small"><view class="strong">待平台发放的教师账号</view><view>账号：{{ applicationCredential(application).username }}</view><view>初始密码：{{ applicationCredential(application).password }}</view></view>
+              <view v-if="applicationCredential(application)" class="prototype-issued-account small"><view class="strong">待平台发放的教师账号</view><view>账号：{{ applicationCredential(application).username }}</view><view v-if="!applicationCredential(application).passwordChangedAt">初始密码：{{ applicationCredential(application).password }}</view><view v-else>已完成首次密码修改</view></view>
             </view>
             <view v-if="!applications.length" class="small subtle spaced">暂无教师申请，请在教师登录页提交申请。</view><view v-if="proofError" class="notice small">{{ proofError }}</view>
           </template>

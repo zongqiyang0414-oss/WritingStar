@@ -1,22 +1,31 @@
 import jsQR from "jsqr";
 import { downsampleScanImage, scanImageRegion } from "./scanPixels.js";
 import { decodePaperCode } from "../services/paperWorkflow.js";
-import { qrMatrix, cardQrRegions, CARD_WIDTH, CARD_HEIGHT } from "./answerCards.js";
+import { qrMatrix, cardQrRegions, legacyCardQrRegions, CARD_WIDTH, CARD_HEIGHT } from "./answerCards.js";
 import { projectiveMap } from "./scanGeometry.js";
 
 const decode = image => jsQR(image.data, image.width, image.height, { inversionAttempts: "attemptBoth" });
 
 export function readPaperScanMark(image) {
-  // Read each new top code separately so that a covered/damaged copy cannot
-  // prevent reading its two peers. Legacy central and portrait codes follow.
-  if (image.width > image.height && image.width >= 500) {
-    for (const page of [1, 2]) for (const box of cardQrRegions(page)) {
+  // Try small native-resolution regions before the full-page preview. Include
+  // all page rotations and both previous layouts; no resampling of the source.
+  if (image.width >= 500 && image.height >= 500) {
+    const turns = image.width > image.height ? [0, 2] : [1, 3];
+    const boxes = [...cardQrRegions(1), ...legacyCardQrRegions(1), ...legacyCardQrRegions(2)];
+    for (const turn of turns) for (const box of boxes) {
       const margin = 5;
-      const region = scanImageRegion(image, Math.floor(image.width * (box.x - margin) / CARD_WIDTH), Math.floor(image.height * (box.y - margin) / CARD_HEIGHT),
-        Math.ceil(image.width * (box.width + margin * 2) / CARD_WIDTH), Math.ceil(image.height * (box.height + margin * 2) / CARD_HEIGHT));
+      const u = (box.x - margin) / CARD_WIDTH, v = (box.y - margin) / CARD_HEIGHT;
+      const w = (box.width + margin * 2) / CARD_WIDTH, h = (box.height + margin * 2) / CARD_HEIGHT;
+      const regionBox = turn === 0 ? [u, v, w, h] : turn === 1 ? [1-v-h, u, h, w] : turn === 2 ? [1-u-w, 1-v-h, w, h] : [v, 1-u-w, h, w];
+      const region = scanImageRegion(image, Math.floor(image.width * regionBox[0]), Math.floor(image.height * regionBox[1]),
+        Math.ceil(image.width * regionBox[2]), Math.ceil(image.height * regionBox[3]));
       const found = decode(region);
-      if (found) return paperMark(found, region);
+      if (found) {
+        try { decodePaperCode(found.data); return paperMark(found, region); } catch { /* Try the other printed copies. */ }
+      }
     }
+  }
+  if (image.width > image.height && image.width >= 500) {
     for (const x of [.12, .75]) {
       const region = scanImageRegion(image, Math.floor(image.width * x), Math.floor(image.height * .20),
         Math.ceil(image.width * .16), Math.ceil(image.height * .20));

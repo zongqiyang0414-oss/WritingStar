@@ -402,3 +402,22 @@ test('学生分类返回保留，消息直达作业与教师反馈并更新已�
   page.switchRole('teacher'); assert.equal(page.learnerNotifications.value.length, 0);
   assert.equal(page.statusLabel({ status: 'pending' }), '待审核');
 });
+
+
+test('首次手机号账号登录先改密，刷新仍需改密，成功后进入工作台且旧密码失效', async () => {
+  const { page, service, show } = await setup();
+  const application = await service.submitTeacherApplication({name:'新教师',school:'新学校',phone:'13800138027'});
+  const approved = await service.reviewTeacherApplication(application.id,{decision:'approved'},'platform-demo');
+  await service.signOut('teacher'); show();
+  await page.loginForBinding({username:approved.credential.username,password:'Aa123456'});
+  assert.equal(page.needsPasswordReset.value,true);
+  page.go('adminClasses'); assert.equal(page.screen.value,'home');
+  show(); assert.equal(page.needsPasswordReset.value,true);
+  await page.resetTeacherPassword({currentPassword:'Aa123456',newPassword:'Newpass2027',confirmPassword:'mismatch'});
+  assert.equal(page.needsPasswordReset.value,true);
+  await page.resetTeacherPassword({currentPassword:'Aa123456',newPassword:'Newpass2027',confirmPassword:'Newpass2027'});
+  assert.equal(page.needsPasswordReset.value,false);
+  page.go('adminClasses'); assert.equal(page.screen.value,'adminClasses');
+  await assert.rejects(service.loginAccount('teacher',approved.credential.username,'Aa123456'),/账号或密码/);
+  await service.loginAccount('teacher',approved.credential.username,'Newpass2027');
+});

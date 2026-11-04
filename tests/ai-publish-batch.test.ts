@@ -110,7 +110,7 @@ test("批量发布校验任教权限，存储失败不留下部分反馈或修�
   await assert.rejects(service.publishAiBatch("assignment-1", "admin"), /教师/);
   await assert.rejects(service.publishAiBatch("missing", "teacher"), /任教班级/);
   await service.restartBinding("teacher");
-  await assert.rejects(service.publishAiBatch("assignment-1", "teacher"), /教师身份绑定/);
+  await assert.rejects(service.publishAiBatch("assignment-1", "teacher"), /登录教师账号/);
   await service.signIn("teacher"); await service.bindInvitation("LS2026", "teacher");
   await assert.rejects(service.publishAiBatch("assignment-1", "teacher"), /任教范围/);
 });
