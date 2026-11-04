@@ -33,11 +33,14 @@ const withCurrentSchoolName = state => {
   }
   return current;
 };
-// Roster snapshots are new metadata; compare the recovered legacy content
-// separately, while enrollment behavior is exercised in its own tests.
+// Roster snapshots and account issuance are new metadata. Compare all recovered
+// learning content strictly; account migration and teacher scopes have separate tests.
 function legacyContent(state) {
   const current = copy(state);
   for (const assignment of current.assignments) delete assignment.participantIds;
+  for (const field of ['accountRegistrationVersion', 'loginCredentials', 'teacherApplications']) delete current[field];
+  const mergedAdministrators = new Set((current.administrators || []).map(item => `teacher-${item.id}`));
+  current.teachers = current.teachers.filter(item => !mergedAdministrators.has(item.id));
   return current;
 }
 const clock = () => new Date('2026-10-15T10:00:00Z');

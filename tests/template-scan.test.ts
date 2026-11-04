@@ -6,11 +6,11 @@ import { analyzePaperCapture, LivePaperDetector } from '../src/platform/paperSca
 import { projectiveMap } from '../src/platform/scanGeometry.js';
 import { rotateImagePixels } from '../src/platform/imageOrientation.js';
 import { AutoScanGate } from '../src/platform/autoScan.js';
-import { qrMatrix } from '../src/platform/answerCards.js';
+import { qrMatrix, cardQrRegions } from '../src/platform/answerCards.js';
 import { encodePaperCode } from '../src/services/paperWorkflow.js';
 
 const pageQuad=[{x:.09,y:.10},{x:.91,y:.15},{x:.88,y:.91},{x:.08,y:.87}];
-function fixture(page=0, omitted: number[]=[], quad=pageQuad, withCode=false) {
+function fixture(page=0, omitted: number[]=[], quad=pageQuad, withCode: boolean | 'top'=false) {
   const width=640,height=480,data=new Uint8ClampedArray(width*height*4).fill(255);
   const map=projectiveMap(quad), {width:w,height:h}=PAPER_TEMPLATE_SIZE;
   const paint=(points: {x:number;y:number}[],value: number)=>{
@@ -31,10 +31,14 @@ function fixture(page=0, omitted: number[]=[], quad=pageQuad, withCode=false) {
     paint([map(m.x/w,m.y/h),map((m.x+m.width)/w,m.y/h),map((m.x+m.width)/w,(m.y+m.height)/h),map(m.x/w,(m.y+m.height)/h)],25);
   });
   if(withCode){
-    const matrix=qrMatrix(encodePaperCode({id:'marker-qr-fixture'},page+1,2)),unit=122/(matrix.length+8),left=page===0?168:924,top=190;
-    for(let y=0;y<matrix.length;y++)for(let x=0;x<matrix.length;x++)if(matrix[y][x]){
-      const a=left+(x+4)*unit,b=top+(y+4)*unit;
-      paint([map(a/w,b/h),map((a+unit)/w,b/h),map((a+unit)/w,(b+unit)/h),map(a/w,(b+unit)/h)],25);
+    const matrix=qrMatrix(encodePaperCode({id:'marker-qr-fixture'},page+1,2));
+    const boxes = withCode === 'top' ? cardQrRegions(page + 1) : [{x:page===0?168:924,y:190,width:122,height:122}];
+    for(const box of boxes) {
+      const unit=box.width/(matrix.length+8);
+      for(let y=0;y<matrix.length;y++)for(let x=0;x<matrix.length;x++)if(matrix[y][x]){
+        const a=box.x+(x+4)*unit,b=box.y+(y+4)*unit;
+        paint([map(a/w,b/h),map((a+unit)/w,b/h),map((a+unit)/w,(b+unit)/h),map(a/w,(b+unit)/h)],25);
+      }
     }
   }
   return {width,height,data};
@@ -53,9 +57,9 @@ test('方圆格正反面用完整九／六点布局定位，按已知内缩坐�
   }
 });
 
-test('学生二维码内部黑块不能挤掉反面仅有两点的定位行，四种方向均可匹配',async()=>{
-  for(const page of [0,1])for(const turns of [0,1,2,3]){
-    const found=detectTemplateDocument(await rotateImagePixels(fixture(page,[],pageQuad,true),turns));
+test('旧中央码和新顶部三码不能挤掉反面仅有两点的定位行，四种方向均可匹配',async()=>{
+  for(const layout of [true,'top'] as const)for(const page of [0,1])for(const turns of [0,1,2,3]){
+    const found=detectTemplateDocument(await rotateImagePixels(fixture(page,[],pageQuad,layout),turns));
     assert.equal(found?.templateId,PAPER_TEMPLATES[page].id);assert.equal(found?.quarterTurns,(4-turns)%4);
   }
 });

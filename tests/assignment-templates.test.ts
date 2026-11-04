@@ -96,3 +96,17 @@ test("个人题库按教师隔离，禁止修改他人或内置模板，失败�
   await assert.rejects(service.deleteAssignmentTemplate(own.id, "teacher"), /自己的作业模板/);
   assert.throws(() => service.assignmentTemplates("student"), /教师身份/);
 });
+
+test("题目插图随模板、跨班发布和刷新保存，移除插图后更新模板不残留旧图", async () => {
+  const { service, storage } = await setup();
+  const illustration = "data:image/png;base64,aW1hZ2U=";
+  const template = await service.saveAssignmentTemplate({ title: "看图写话", requirements: "观察画面。\n写出自己的发现。", illustration }, "teacher");
+  const assignments = await service.createAssignments({ ...template, dueAt: "", classIds: ["class-1", "class-2"] }, "teacher");
+  assert.ok(assignments.every(item => item.illustration === illustration));
+  const reloaded = new MockService(storage);
+  assert.equal(reloaded.assignmentTemplates("teacher").find(item => item.id === template.id)?.illustration, illustration);
+  assert.equal(reloaded.read().assignments.find(item => item.id === assignments[0].id)?.illustration, illustration);
+  const cleared = await reloaded.saveAssignmentTemplate({ ...template, illustration: "" }, "teacher");
+  assert.equal(cleared.illustration, undefined);
+  assert.equal(reloaded.read().assignments.find(item => item.id === assignments[0].id)?.illustration, illustration);
+});

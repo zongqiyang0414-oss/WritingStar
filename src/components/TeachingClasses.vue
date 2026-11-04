@@ -62,7 +62,7 @@ function updateQuery(e) {
     <template v-if="model.classes.length" />
     <template v-else>
       <view :key="0" class="empty-state card">
-        暂未分配任教班级，请联系学校管理员。
+        还没有班级，可在“班级管理”中新建。
       </view>
     </template>
   </template>
@@ -158,7 +158,7 @@ function updateQuery(e) {
           {{
             query.trim()
               ? "没有找到对应学生，试试其他关键词。"
-              : "本班暂时没有学生，请联系学校管理员核对名单。"
+              : "本班暂时没有学生，可在“学生管理与导入”中添加。"
           }}
         </view>
       </template>
@@ -170,6 +170,6 @@ function updateQuery(e) {
     </template>
   </template>
   <view class="small subtle statistics-note">
-    如需调整任教班级或学生名单，请联系学校管理员。
+    在“我的”中进入班级或学生管理，可建班、导入学生和导出登录账号。
   </view>
 </template>

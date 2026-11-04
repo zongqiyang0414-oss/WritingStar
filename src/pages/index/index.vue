@@ -69,6 +69,12 @@ const { bottomInset: bottomInset } = {
     failAnalysis: failAnalysis,
     newTitle: newTitle,
     newRequirements: newRequirements,
+    newIllustration,
+    teacherApplication,
+    demoAccount,
+    applyTeacher,
+    useDemoAccount,
+    reviewTeacherApplication,
     newPaperPages,
     paperCards,
     openPaperCards,
@@ -274,38 +280,6 @@ function toggleFeedbackDimension(id) {
           </view>
         </view>
       </template>
-      <template v-else-if="isAdmin">
-        <view key="admin-content" class="page-body admin-page-body">
-          <InvitationBinding
-            v-if="needsBinding"
-            :role="role"
-            :signed-in="accountSignedIn"
-            :candidate="bindingCandidate"
-            :busy="busy"
-            v-model:code="inviteCode"
-            @login="loginForBinding"
-            @preview="previewBinding"
-            @edit="editBindingCode"
-            @confirm="confirmBinding"
-            @help="bindingHelp"
-          />
-          <OrganizationSelector v-if="!needsBinding && screen === 'profile'" :organizations="organizationOptions" :model-value="currentOrganization?.id || ''" :allow-switch="true" :disabled="busy" @update:modelValue="switchOrganization" />
-          <AdminWorkspace
-            v-if="!needsBinding"
-            :key="currentOrganization?.id"
-            :state="state"
-            :organization="currentOrganization"
-            :administrator="adminIdentity"
-            :section="screen"
-            :busy="busy"
-            @navigate="go"
-            @action="adminAction"
-            @confirm="modal = $event"
-            @dirty="adminDirty = $event"
-          />
-          <button v-if="screen === 'profile'" class="secondary full-width spaced logout-button" :disabled="busy" @click="logout">退出登录</button>
-        </view>
-      </template>
       <template v-else>
         <template
           v-if="
@@ -347,19 +321,10 @@ function toggleFeedbackDimension(id) {
             </template>
             <view v-if="nativeNavigation && !isRoot && !needsBinding" class="native-nav-spacer" />
             <template v-if="needsBinding">
-              <InvitationBinding
-                :key="1"
-                :role="role"
-                :signed-in="accountSignedIn"
-                :candidate="bindingCandidate"
-                :busy="busy"
-                @login="loginForBinding"
-                @preview="previewBinding"
-                @edit="editBindingCode"
-                @confirm="confirmBinding"
-                @help="bindingHelp"
-                v-model:code="inviteCode"
-              />
+              <InvitationBinding :key="role" :role="role" :busy="busy" :application="teacherApplication" :demo-account="demoAccount" @login="loginForBinding" @apply="applyTeacher" />
+            </template>
+            <template v-else-if="isTeacher && ['adminClasses', 'adminStudents'].includes(screen)">
+              <AdminWorkspace :key="currentOrganization?.id" :state="state" :organization="currentOrganization" :administrator="teacherIdentity" :section="screen" :busy="busy" @navigate="go" @action="adminAction" @confirm="modal = $event" @dirty="adminDirty = $event" />
             </template>
             <template v-else-if="!isTeacher && screen === 'notifications'">
               <StudentNotifications :notifications="learnerNotifications" :busy="busy" @open="openStudentNotification" />
@@ -1360,6 +1325,7 @@ function toggleFeedbackDimension(id) {
                                         </view>
                                       </view>
                                       <template v-if="isTeacher">
+                                        <view class="card"><view class="section-title">班级与学生管理</view><view class="small subtle spaced-small">创建自己的班级，批量导入学生并发放登录账号。</view><view class="admin-summary-actions"><button class="secondary" :disabled="busy" @click="go('adminClasses')">班级管理</button><button class="secondary" :disabled="busy" @click="go('adminStudents')">学生管理与导入</button></view></view>
                                         <view
                                           :key="0"
                                           class="card profile-information"
@@ -1513,7 +1479,7 @@ function toggleFeedbackDimension(id) {
                                       "
                                     >
                                       <template v-if="'create' === screen">
-                                        <AssignmentComposer :key="14" v-model:title="newTitle" v-model:requirements="newRequirements" v-model:due="newDue" v-model:classIds="newClassIds" v-model:paperPages="newPaperPages" :classes="teachingClassOptions" :student-counts="Object.fromEntries(teachingClassOptions.map(item => [item.id, activeStudents(state, item.id).length]))" :templates="assignmentTemplates" :busy="busy" @publish="createAssignment" @save-template="saveAssignmentTemplate" @delete-template="deleteAssignmentTemplate" />
+                                        <AssignmentComposer :key="14" v-model:title="newTitle" v-model:requirements="newRequirements" v-model:illustration="newIllustration" v-model:due="newDue" v-model:classIds="newClassIds" v-model:paperPages="newPaperPages" :classes="teachingClassOptions" :student-counts="Object.fromEntries(teachingClassOptions.map(item => [item.id, activeStudents(state, item.id).length]))" :templates="assignmentTemplates" :busy="busy" @publish="createAssignment" @save-template="saveAssignmentTemplate" @delete-template="deleteAssignmentTemplate" />
                                       </template>
                                     </template>
                                     <template v-else>
@@ -1552,20 +1518,14 @@ function toggleFeedbackDimension(id) {
             <view class="empty-state card">
               <view class="strong"> 暂无任教班级 </view>
               <view class="small subtle">
-                请联系学校管理员分配学校与班级。
+                新建班级后，即可导入学生并布置作业。
+                <button class="primary full-width spaced" :disabled="busy" @click="go('adminClasses')">新建我的班级</button>
               </view>
             </view>
           </view>
         </template>
       </template>
-      <view v-if="isAdmin && !needsBinding" key="admin-navigation" class="bottom-nav admin-bottom-nav">
-        <button :class="{ active: screen === 'home' }" :disabled="busy" @click="go('home')"><text class="nav-glyph">⌂</text><text>管理台</text></button>
-        <button :class="{ active: screen === 'adminClasses' }" :disabled="busy" @click="go('adminClasses')"><text class="nav-glyph">▦</text><text>班级</text></button>
-        <button :class="{ active: screen === 'adminTeachers' }" :disabled="busy" @click="go('adminTeachers')"><text class="nav-glyph">♧</text><text>教师</text></button>
-        <button :class="{ active: screen === 'adminStudents' }" :disabled="busy" @click="go('adminStudents')"><text class="nav-glyph">♙</text><text>学生</text></button>
-        <button :class="{ active: screen === 'profile' }" :disabled="busy" @click="go('profile')"><text class="nav-glyph">○</text><text>我的</text></button>
-      </view>
-      <template v-else-if="needsBinding" />
+      <template v-if="needsBinding" />
       <template v-else>
         <view
           key="learning-navigation"
@@ -1622,6 +1582,10 @@ function toggleFeedbackDimension(id) {
         :role="role"
         :needs-binding="needsBinding"
         :signed-in="accountSignedIn"
+        :credentials="state.loginCredentials || []"
+        :applications="state.teacherApplications || []"
+        @use-account="useDemoAccount"
+        @review-application="reviewTeacherApplication"
         :busy="busy"
         @restartBinding="restartBinding"
         @invite="
@@ -1660,7 +1624,7 @@ function toggleFeedbackDimension(id) {
         <view>
           <view class="strong"> 切换学生身份 </view>
           <view class="small subtle">
-            教师和学生通过学校邀请码绑定，
+            教师申请审核开户，学生领取老师发放的账号，
             <br />
             查看任务、反馈与个人成长。
           </view>
@@ -1682,6 +1646,10 @@ function toggleFeedbackDimension(id) {
         :role="role"
         :needs-binding="needsBinding"
         :signed-in="accountSignedIn"
+        :credentials="state.loginCredentials || []"
+        :applications="state.teacherApplications || []"
+        @use-account="useDemoAccount"
+        @review-application="reviewTeacherApplication"
         :busy="busy"
         @restartBinding="restartBinding"
         @invite="

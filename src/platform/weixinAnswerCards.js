@@ -1,4 +1,4 @@
-import { CARD_WIDTH, CARD_HEIGHT, CARD_PAPER, drawAnswerCard, loadAnswerCardBackground } from "./answerCards.js";
+import { CARD_WIDTH, CARD_HEIGHT, CARD_PAPER, drawAnswerCard, loadAnswerCardBackground, loadAnswerCardIllustration } from "./answerCards.js";
 import { createImagePdf } from "./imagePdf.js";
 
 function call(target, name, options, scope) {
@@ -13,6 +13,7 @@ export async function exportWeixinAnswerCards(assignment, cards, { canvasId, sco
   const filePath = `${directory}/${filename(assignment.title)}-${cards.length === 1 ? filename(cards[0].studentName) : "全班"}答题卡.pdf`;
   const total = cards.length * assignment.paperPacket.pages;
   try {
+    const illustration = await loadAnswerCardIllustration(assignment.illustration);
     // This dedicated directory contains generated print files only. Never touch
     // submissions, saved photos, or the application's persistent storage.
     try { await call(fs, "access", { path: directory }); }
@@ -29,7 +30,7 @@ export async function exportWeixinAnswerCards(assignment, cards, { canvasId, sco
       const ctx = uni.createCanvasContext(canvasId, scope);
       const background = await loadAnswerCardBackground(page);
       if (cancelled()) throw new Error("已停止生成答题卡。");
-      drawAnswerCard(ctx, assignment, card, page, background);
+      drawAnswerCard(ctx, assignment, card, page, background, illustration);
       await new Promise(resolve => ctx.draw(false, resolve));
       const image = await call(uni, "canvasToTempFilePath", { canvasId, width: CARD_WIDTH, height: CARD_HEIGHT,
         destWidth: CARD_WIDTH * 2, destHeight: CARD_HEIGHT * 2, fileType: "jpg", quality: .9 }, scope);

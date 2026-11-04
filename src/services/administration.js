@@ -1,3 +1,4 @@
+import { issueStudentCredentials } from "./accountRegistration.js";
 /** Local prototype administration. Real authorization must come from the backend session. */
 export const ADMIN_INVITATIONS = [
   { code: "MA2026", role: "admin", administratorId: "admin-xinghe", label: "王管理员 · 甲秀小学", status: "active" },
@@ -49,7 +50,13 @@ const field = (value, label, limit) => {
 
 export class AdministrationService {
   administrator(role) {
-    if (role !== "admin") throw new Error("此操作需要管理员身份。");
+    if (role === "teacher") {
+      const teacher = this.state.teacherAccount?.signedIn
+        ? this.state.teachers.find(item => item.id === this.state.teacherAccount.teacherId) : null;
+      if (!teacher) throw new Error("请先登录教师账号。");
+      return teacher;
+    }
+    if (role !== "admin") throw new Error("此操作需要教师身份（历史管理员账号兼容）。");
     const administrator = getBoundAdministrator(this.state);
     if (!administrator) throw new Error("请先登录并完成管理员身份绑定。");
     return administrator;
@@ -66,6 +73,8 @@ export class AdministrationService {
     const schoolClass = this.state.classes.find((item) => item.id === classId);
     if (!schoolClass) throw new Error("班级不存在，请刷新后重试。");
     this.managedOrganization(schoolClass.organizationId, role);
+    if (role === "teacher" && !this.administrator(role).classIds.includes(classId))
+      throw new Error("该班级不在你的任教管理范围内。");
     return schoolClass;
   }
   recordAdministration(state, organizationId, description, role) {
@@ -86,7 +95,14 @@ export class AdministrationService {
     const next = this.read();
     const schoolClass = existing ? next.classes.find((item) => item.id === existing.id) : { id: identifier("class"), organizationId: organization.id, name };
     schoolClass.name = name;
-    if (!existing) next.classes.push(schoolClass);
+    if (!existing) {
+      next.classes.push(schoolClass);
+      if (role === "teacher") {
+        const teacher = next.teachers.find(item => item.id === this.administrator(role).id);
+        teacher.classIds.push(schoolClass.id);
+        next.teacherClassIds = [...teacher.classIds];
+      }
+    }
     else {
       for (const item of [...next.students, ...next.assignments]) if (item.classId === schoolClass.id) item.className = name;
     }
@@ -95,6 +111,7 @@ export class AdministrationService {
     return { ...schoolClass };
   }
   async createTeacher(input, role) {
+    if (role === "teacher") throw new Error("教师账号须由平台审核申请后颁发，不能自行创建其他教师。");
     const organization = this.managedOrganization(input.organizationId, role);
     const name = field(input.name, "教师姓名", 30);
     const subject = field(input.subject, "任教学科", 30);
@@ -120,6 +137,7 @@ export class AdministrationService {
     return { ...teacher, organizationIds: [...teacher.organizationIds], classIds: [...teacher.classIds] };
   }
   async setClassTeachers(input, role) {
+    if (role === "teacher") throw new Error("任教调配请联系平台审核人员。");
     const schoolClass = this.managedClass(input.classId, role);
     if (!Array.isArray(input.teacherIds) || new Set(input.teacherIds).size !== input.teacherIds.length)
       throw new Error("请重新选择任教老师。");
@@ -155,7 +173,10 @@ export class AdministrationService {
     const next = this.read();
     const student = existing ? next.students.find((item) => item.id === existing.id) : { id: identifier("student"), classId: schoolClass.id, className: schoolClass.name, archived: false };
     Object.assign(student, { name, initial: [...name][0], studentNumber });
-    if (!existing) next.students.push(student);
+    if (!existing) {
+      next.students.push(student);
+      issueStudentCredentials(next, [student.id]);
+    }
     this.recordAdministration(next, schoolClass.organizationId, `${existing ? "修改学生" : "新增学生"}：${name} · ${schoolClass.name}`, role);
     this.commit(next);
     return { ...student };

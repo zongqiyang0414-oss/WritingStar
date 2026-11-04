@@ -37,7 +37,7 @@ test('管理员升级只追加管理数据，保留旧绑定与全部作品；�
   assert.deepEqual(old, snapshot);
 });
 
-test('管理员须独立登录绑定；教师、学生、过期码和未绑定管理员不能获得管理权限', async () => {
+test('历史管理员绑定保留；学生、过期码和未绑定管理员不能获得管理权限', async () => {
   const { service } = setup();
   assert.throws(() => service.previewBinding('MA2026', 'admin'), /请先登录/);
   await service.signIn('admin');
@@ -47,7 +47,7 @@ test('管理员须独立登录绑定；教师、学生、过期码和未绑定�
   await assert.rejects(service.createTeacher({ organizationId: 'organization-1', name: '新老师', subject: '语文' }, 'admin'), /绑定/);
   await bind(service, 'teacher', 'JS2026'); await bind(service, 'student', 'XS2026');
   const before = service.read();
-  for (const role of ['teacher', 'student', 'parent']) {
+  for (const role of ['student', 'parent']) {
     await assert.rejects(service.saveClass({ organizationId: 'organization-1', name: '新班级' }, role), /管理员/);
     await assert.rejects(service.createTeacher({ organizationId: 'organization-1', name: '新老师', subject: '语文' }, role), /管理员/);
     await assert.rejects(service.transferStudents({ sourceClassId: 'class-1', targetClassId: 'class-2', studentIds: ['student-1'] }, role), /管理员/);

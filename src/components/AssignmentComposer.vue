@@ -1,9 +1,12 @@
 <script setup>
 import { computed, ref, watch } from "vue";
+import { pickPhotos } from "../platform/photos.js";
+import { displayPhoto } from "../services/presentation.js";
 
 const props = defineProps({
   title: { type: String, default: "" },
   requirements: { type: String, default: "" },
+  illustration: { type: String, default: "" },
   due: { type: String, default: "" },
   classIds: { type: Array, default: () => [] },
   classes: { type: Array, default: () => [] },
@@ -15,10 +18,11 @@ const props = defineProps({
 const emit = defineEmits([
   "update:title", "update:requirements", "update:due", "update:classIds",
   "publish", "save-template", "delete-template",
-  "update:paperPages",
+  "update:paperPages", "update:illustration",
 ]);
 const mode = ref("manual");
 const selectedTemplateId = ref("");
+const selectingIllustration = ref(false), illustrationError = ref("");
 function defaultDate() {
   const value = new Date(Date.now() + 7 * 86400000);
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
@@ -35,17 +39,29 @@ function useTemplate(item) {
   selectedTemplateId.value = item.id;
   emit("update:title", item.title);
   emit("update:requirements", item.requirements || "");
+  emit("update:illustration", item.illustration || "");
 }
 function saveTemplate(update = false) {
   emit("save-template", {
     ...(update && selectedTemplate.value ? { id: selectedTemplate.value.id } : {}),
     title: props.title,
     requirements: props.requirements,
+    illustration: props.illustration,
   });
 }
 function toggleClass(id) {
   const ids = props.classIds.includes(id) ? props.classIds.filter((value) => value !== id) : [...props.classIds, id];
   emit("update:classIds", ids);
+}
+async function chooseIllustration() {
+  if (props.busy || selectingIllustration.value) return;
+  illustrationError.value = "";
+  selectingIllustration.value = true;
+  try {
+    const pictures = await pickPhotos(5);
+    if (pictures[0]) emit("update:illustration", pictures[0].url);
+  } catch (failure) { illustrationError.value = failure.message || "插图选择失败，请重试。"; }
+  finally { selectingIllustration.value = false; }
 }
 </script>
 
@@ -68,9 +84,17 @@ function toggleClass(id) {
         </view>
       </view>
       <view class="field-label">作业标题</view>
-      <input class="form-input" :value="title" :disabled="busy" placeholder="必填" maxlength="50" aria-label="作业标题" @input="emit('update:title', $event.detail.value)" />
-      <view class="field-label">写作要求</view>
-      <textarea :value="requirements" :disabled="busy" placeholder="选填" maxlength="1500" auto-height :cursor-spacing="100" aria-label="写作要求" @input="emit('update:requirements', $event.detail.value)" />
+      <textarea class="composer-title-input" :value="title" :disabled="busy" placeholder="请输入清晰完整的题目（必填）" maxlength="50" auto-height :cursor-spacing="100" aria-label="作业标题" @input="emit('update:title', $event.detail.value)" />
+      <view class="field-label">题目要求</view>
+      <textarea class="composer-requirements-input" :value="requirements" :disabled="busy" placeholder="可分行填写内容要求、字数、书写规范等" maxlength="1500" auto-height :cursor-spacing="100" aria-label="题目要求" @input="emit('update:requirements', $event.detail.value)" />
+      <view class="field-label">题目插图（选填）</view>
+      <view v-if="illustration" class="composer-illustration-preview"><image :src="displayPhoto(illustration)" mode="aspectFit" class="composer-illustration-image" /></view>
+      <view class="composer-illustration-actions">
+        <button class="text-button" :disabled="busy || selectingIllustration" @click="chooseIllustration">{{ selectingIllustration ? '正在读取…' : illustration ? '更换插图' : '添加插图' }}</button>
+        <button v-if="illustration" class="text-button" :disabled="busy || selectingIllustration" @click="emit('update:illustration', '')">移除插图</button>
+      </view>
+      <view class="tiny subtle">标题、要求和插图分区排版。插图将放入正面题目栏下方的图示区域，等比显示。</view>
+      <view v-if="illustrationError" class="paper-error" role="alert">{{ illustrationError }}</view>
       <view class="composer-template-actions">
         <button v-if="selectedTemplate && !selectedTemplate.builtin" class="text-button" :disabled="busy || !title.trim()" @click="saveTemplate(true)">更新当前模板</button>
         <button class="text-button" :disabled="busy || !title.trim()" @click="saveTemplate(false)">{{ selectedTemplate ? '另存为新模板' : '保存到题库' }}</button>
@@ -93,13 +117,29 @@ function toggleClass(id) {
       <view v-if="!classes.length" class="small subtle">暂无可发布的任教班级。</view>
       <view class="small subtle composer-selection-summary">已选 {{ selectedClasses.length }} 个班级<text v-if="selectedStudentCount"> · {{ selectedStudentCount }} 位学生</text></view>
       <view class="field-label">作业用纸</view>
-      <view class="small subtle spaced-small">方圆格作文模板 · A3 横向 · 前后两页。发布后自动填入作业标题和学生信息，每页生成专属二维码，家长可通过学生端下载打印。</view>
+      <view class="small subtle spaced-small">方圆格作文模板 · A3 横向 · 前后两页。顶部放置三个同页专属二维码，题目栏展示标题、学生信息和要求。学生可下载打印。</view>
     </view>
     <button class="primary full-width spaced" :disabled="busy" @click="emit('publish')">{{ busy ? '发布中…' : '发布作业' }}</button>
   </view>
 </template>
 
 <style scoped>
+.composer-title-input,
+.composer-requirements-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  border: 1px solid #dce6df;
+  border-radius: 12px;
+  background: #fbfcfb;
+  color: #203b2f;
+  line-height: 1.7;
+}
+.composer-title-input { min-height: 78px; font-size: 20px; font-weight: 600; }
+.composer-requirements-input { min-height: 176px; font-size: 16px; }
+.composer-illustration-preview { height: 180px; border: 1px solid #e1e9e2; border-radius: 12px; background: #f6f8f6; }
+.composer-illustration-image { width: 100%; height: 100%; }
+.composer-illustration-actions { display: flex; gap: 20px; margin: 12px 0; }
 .composer-mode,
 .composer-deadline-mode {
   display: flex;

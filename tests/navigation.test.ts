@@ -203,15 +203,19 @@ test('多班级不限截止发布后进入首个班级作业详情，不产生�
   assert.equal(page.modal.value, null);
 });
 
-test('点击登录直接建立当前身份登录状态，绑定仍独立完成且没有确认弹窗', async () => {
+test('账号密码登录同时关联教师与任教范围，错误密码不能进入工作台', async () => {
   const { page, service, show } = await setup();
   await service.restartBinding('teacher');
   show();
   assert.equal(page.accountSignedIn.value, false);
-  await page.loginForBinding();
-  assert.equal(page.accountSignedIn.value, true);
-  assert.equal(service.read().teacherAccount.teacherId, null);
+  await page.loginForBinding({username:'teacher01',password:'wrong'});
+  assert.equal(page.accountSignedIn.value, false);
   assert.equal(page.needsBinding.value, true);
+  await page.loginForBinding({username:'teacher01',password:'Teacher2026'});
+  assert.equal(page.accountSignedIn.value, true);
+  assert.equal(service.read().teacherAccount.teacherId, 'teacher-chen');
+  assert.equal(page.needsBinding.value, false);
+  assert.equal(page.roles.map(role=>role.id).join(','), 'teacher,student');
   assert.equal(page.modal.value, null);
   assert.equal(page.error.value, '');
 });
@@ -336,7 +340,7 @@ test('全班结果返回保留搜索筛选，退出登录保留数据及绑定�
   assert.equal(service.read().teacherAccount.teacherId, before.teacherAccount.teacherId);
   assert.deepEqual(service.read().submissions, before.submissions);
   page.back(); assert.equal(page.screen.value, 'home');
-  await page.loginForBinding(); assert.equal(page.needsBinding.value, false);
+  await page.loginForBinding({username:'teacher01',password:'Teacher2026'}); assert.equal(page.needsBinding.value, false);
 });
 
 

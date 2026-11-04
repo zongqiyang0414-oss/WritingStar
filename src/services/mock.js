@@ -26,6 +26,8 @@ import { latestSubmission, assignmentStudents, studentHasAssignment } from "./sc
 import { prepareAssignmentParticipants, updateAssignmentParticipants } from "./assignmentParticipants.js";
 import { createPaperPacket, pageCount, paperId, resolvePaperCode, validatePaperBatch } from "./paperWorkflow.js";
 import { BUILTIN_ASSIGNMENT_TEMPLATES, assignmentContent } from "./assignmentTemplates.js";
+import { prepareAccountRegistration, submitTeacherApplication, reviewTeacherApplication, authenticateAccount, issueStudentCredentials } from "./accountRegistration.js";
+import { importStudentRoster, previewStudentImport } from "./studentImport.js";
 
 export const clone = (e) => JSON.parse(JSON.stringify(e));
 function freezeSnapshot(value) {
@@ -135,13 +137,16 @@ export class MockService extends AiReviewService {
         : createSeed(clock()),
     );
     this.state = prepareAdministration(this.state);
+    const accountState = prepareAccountRegistration(this.state);
+    const accountChanged = accountState !== this.state;
+    this.state = accountState;
     const prepared = prepareSubmissionPolicy(this.state);
     const policyChanged = prepared !== this.state;
     this.state = prepared;
     const rostered = prepareAssignmentParticipants(this.state);
     const rosterChanged = rostered !== this.state;
     this.state = rostered;
-    (s && 6 === s.schemaVersion && s.administrationVersion === 1 && !policyChanged && !rosterChanged) || storage.write(this.state);
+    (s && 6 === s.schemaVersion && s.administrationVersion === 1 && !policyChanged && !rosterChanged && !accountChanged) || storage.write(this.state);
   }
   read() {
     return clone(this.state);
@@ -150,6 +155,12 @@ export class MockService extends AiReviewService {
     return freezeSnapshot(this.state);
   }
   commit(state) {
+    // Every newly added student receives credentials in the same atomic save.
+    const missingAccounts = state.students.filter(student => !(state.loginCredentials || []).some(account => account.role === "student" && account.personId === student.id));
+    if (missingAccounts.length) {
+      state = { ...state, loginCredentials: [...(state.loginCredentials || [])] };
+      issueStudentCredentials(state, missingAccounts.map(student => student.id));
+    }
     state = updateAssignmentParticipants(this.state, state, this.clock());
     // Roster changes and their cards are saved atomically. Never rotate issued IDs.
     if (state.students !== this.state.students || state.classes !== this.state.classes) {
@@ -177,6 +188,37 @@ export class MockService extends AiReviewService {
       return { ...assignment, paperPacket: createPaperPacket(this.state, assignment, packet.pages, packet) };
     });
     if (changed) this.commit({ ...this.state, assignments });
+  }
+  async submitTeacherApplication(input) {
+    const result = submitTeacherApplication(this.state, input, this.clock());
+    this.commit(result.state);
+    return result.application;
+  }
+  async reviewTeacherApplication(id, input, actor) {
+    const result = reviewTeacherApplication(this.state, id, input, actor, this.clock());
+    this.commit(result.state);
+    return { application: result.application, ...(result.credential ? { credential: result.credential } : {}) };
+  }
+  async loginAccount(role, username, password) {
+    const result = authenticateAccount(this.state, role, username, password);
+    this.commit(result.state);
+    return result.person;
+  }
+  studentCredentials(classId, role) {
+    this.managedClass(classId, role);
+    const next = this.read();
+    const students = next.students.filter(student => student.classId === classId && !student.archived);
+    if (students.some(student => !next.loginCredentials.some(account => account.role === "student" && account.personId === student.id)))
+      throw new Error("学生账号尚未颁发，请联系平台核对。");
+    return issueStudentCredentials(next, students.map(student => student.id));
+  }
+  previewStudentImport(input, role) {
+    return previewStudentImport(this.state, input, role);
+  }
+  async importStudents(input, role) {
+    const result = importStudentRoster(this.state, input, role);
+    this.commit(result.state);
+    return result.credentials;
   }
   async signOut(role) {
     assertActiveRole(role);
@@ -608,7 +650,7 @@ export class MockService extends AiReviewService {
   reset() {
     const e = createSeed(this.clock());
     this.commit(
-      prepareAdministration(this.state.classPracticeVersion ? withClassPractice(e, this.clock()) : e),
+      prepareAccountRegistration(prepareAdministration(this.state.classPracticeVersion ? withClassPractice(e, this.clock()) : e)),
     );
   }
 }

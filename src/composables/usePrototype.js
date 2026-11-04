@@ -130,6 +130,9 @@ export function usePrototype() {
     failAnalysis = ref(false),
     newTitle = ref(""),
     newRequirements = ref(""),
+    newIllustration = ref(""),
+    teacherApplication = ref(null),
+    demoAccount = ref(null),
     newPaperPages = ref(2),
     dueDate = new Date(Date.now() + 6048e5),
     newDue = ref(
@@ -566,7 +569,10 @@ export function usePrototype() {
         guard(() => { adminDirty.value = false; navigate(e); });
       return;
     }
-    if (e.startsWith("admin")) return;
+    if (e.startsWith("admin")) {
+      if (isTeacher.value && teacherIdentity.value && ["adminClasses", "adminStudents"].includes(e)) guard(() => navigate(e));
+      return;
+    }
     if (e === "aiBatch" && !isTeacher.value) return;
     (isTeacher.value && "growth" === e) ||
       (!isTeacher.value && rosterScreens.includes(e)) ||
@@ -827,6 +833,9 @@ export function usePrototype() {
     failAnalysis,
     newTitle,
     newRequirements,
+    newIllustration,
+    teacherApplication,
+    demoAccount,
     newPaperPages,
     paperCards,
     openPaperCards: () => openPaper("paperCards"),
@@ -856,7 +865,6 @@ export function usePrototype() {
         id: "student",
         label: "学生",
       },
-      { id: "admin", label: "管理员" },
     ],
     startupError,
     selectedAssignment,
@@ -889,6 +897,7 @@ export function usePrototype() {
         createTeacher: service?.createTeacher,
         setClassTeachers: service?.setClassTeachers,
         saveStudent: service?.saveStudent,
+        importStudents: service?.importStudents,
         transferStudents: service?.transferStudents,
         setStudentArchived: service?.setStudentArchived,
       };
@@ -960,11 +969,12 @@ export function usePrototype() {
     },
     go,
     switchRole: function (e) {
-      if (e !== "teacher" && e !== "student" && e !== "admin") return;
+      if (e !== "teacher" && e !== "student") return;
       e !== role.value &&
         guard(() => {
           var a;
           role.value = e;
+          demoAccount.value = null;
           studentTaskFilter.value = "unsubmitted";
           adminDirty.value = false;
           clearBindingDraft();
@@ -1081,6 +1091,7 @@ export function usePrototype() {
         const assignments = await service.createAssignments({
           title: newTitle.value,
           requirements: newRequirements.value,
+          illustration: newIllustration.value,
           dueAt,
           classIds: newClassIds.value,
           paperPages: newPaperPages.value,
@@ -1095,6 +1106,7 @@ export function usePrototype() {
         navigate("assignment");
         newTitle.value = "";
         newRequirements.value = "";
+        newIllustration.value = "";
         notify(`作业已发布到 ${assignments.length} 个班级，专属答题卡已生成`);
       });
     },
@@ -1260,8 +1272,41 @@ export function usePrototype() {
       return e.publishedBy || DEFAULT_TEACHER;
     },
     needsBinding,
-    loginForBinding: async function () {
-      await runAction(async () => { await service.signIn(role.value); });
+    loginForBinding: async function (credentials = {}) {
+      await runAction(async () => {
+        await service.loginAccount(role.value, credentials.username, credentials.password);
+        refresh(); clearBindingDraft();
+        organizationId.value = organizationOptions.value[0]?.id || "";
+        selectedClassId.value = teachingClassOptions.value[0]?.id || "";
+        newClassId.value = selectedClassId.value;
+        rosterClassId.value = selectedClassId.value;
+        assignmentId.value = scopedAssignments.value[0]?.id || "";
+        submissionId.value = ""; photos.value = []; note.value = "";
+        demoAccount.value = null;
+        navigate("home", { reset: true }); notify("登录成功");
+      });
+    },
+    applyTeacher: async function (input) {
+      await runAction(async () => {
+        teacherApplication.value = await service.submitTeacherApplication(input);
+        notify("申请已提交，请等待审核");
+      });
+    },
+    useDemoAccount: function (credential) {
+      if (!["teacher", "student"].includes(credential?.role)) return;
+      guard(() => {
+        role.value = credential.role;
+        demoAccount.value = { ...credential };
+        navigate("home", { reset: true });
+      });
+    },
+    reviewTeacherApplication: async function ({ id, decision, reason }) {
+      await runAction(async () => {
+        await service.reviewTeacherApplication(id, { decision, reason }, "platform-demo");
+        refresh();
+        if (teacherApplication.value?.id === id) teacherApplication.value = state.value.teacherApplications.find(item => item.id === id);
+        notify(decision === "approved" ? "审核通过，账号已颁发" : "申请已退回");
+      });
     },
     previewBinding: function () {
       if (!busy.value && service) {
@@ -1315,7 +1360,7 @@ export function usePrototype() {
       busy.value ||
         guard(() => {
           modal.value = {
-            title: "重新体验当前身份的绑定？",
+            title: "重新体验当前身份的登录？",
             body: "只清除当前模拟身份的登录和关联信息。管理分配、学生档案、作业、照片、反馈和其他身份的绑定都会保留。",
             confirm: "重新体验",
             action: async () => {
@@ -1334,7 +1379,7 @@ export function usePrototype() {
         });
     },
     bindingHelp: function () {
-      notify("请联系学校管理员核对身份、学校和班级信息。");
+      notify(isTeacher.value ? "请联系平台核对申请及账号信息。" : "请联系老师领取账号或核对学生信息。");
     },
   };
 }

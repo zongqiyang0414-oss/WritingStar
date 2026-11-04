@@ -1,6 +1,6 @@
 <script setup>
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { drawAnswerCard, CARD_WIDTH, CARD_HEIGHT, loadAnswerCardBackground } from "../platform/answerCards.js";
+import { drawAnswerCard, CARD_WIDTH, CARD_HEIGHT, loadAnswerCardBackground, loadAnswerCardIllustration } from "../platform/answerCards.js";
 // #ifdef H5
 import { answerCardImage, printAnswerCards } from "../platform/answerCards.js";
 // #endif
@@ -15,7 +15,7 @@ const selected = computed(() => props.cards?.[studentIndex.value]);
 const instance = getCurrentInstance();
 let disposed = false, previewRequest = 0, previewQueue = Promise.resolve();
 onBeforeUnmount(() => { disposed = true; previewRequest++; });
-watch(() => [selected.value?.id, page.value, props.assignment.title, props.assignment.requirements, props.assignment.paperPacket?.pages], async () => {
+watch(() => [selected.value?.id, page.value, props.assignment.title, props.assignment.requirements, props.assignment.illustration, props.assignment.paperPacket?.pages], async () => {
   const request = ++previewRequest, card = selected.value, currentPage = page.value;
   preview.value = "";
   if (!selected.value) { preview.value = ""; return; }
@@ -27,11 +27,11 @@ watch(() => [selected.value?.id, page.value, props.assignment.title, props.assig
   // #endif
   // #ifndef H5
   previewQueue = previewQueue.catch(() => {}).then(async () => {
-    const background = await loadAnswerCardBackground(currentPage);
+    const [background, illustration] = await Promise.all([loadAnswerCardBackground(currentPage), loadAnswerCardIllustration(currentPage === 1 ? props.assignment.illustration : "")]);
     await nextTick();
     if (disposed || request !== previewRequest) return;
     const ctx = uni.createCanvasContext("answer-card-export", instance.proxy);
-    drawAnswerCard(ctx, props.assignment, card, currentPage, background);
+    drawAnswerCard(ctx, props.assignment, card, currentPage, background, illustration);
     await new Promise(resolve => ctx.draw(false, resolve));
     const result = await new Promise((resolve, reject) => uni.canvasToTempFilePath({ canvasId: "answer-card-export", width: CARD_WIDTH, height: CARD_HEIGHT,
       destWidth: CARD_WIDTH * 2, destHeight: CARD_HEIGHT * 2, fileType: "png", success: resolve, fail: reject }, instance.proxy));
@@ -88,7 +88,7 @@ function zoom() { if (preview.value) uni.previewImage({urls: [preview.value]}); 
         <view class="paper-page-controls"><button class="text-button" :disabled="working || page <= 1" @click="page--">‹ 上一页</button><text>第 {{ page }} / {{ assignment.paperPacket.pages }} 页</text><button class="text-button" :disabled="working || page >= assignment.paperPacket.pages" @click="page++">下一页 ›</button></view>
       </view>
       <view class="paper-preview" @click="zoom"><image v-if="preview" :src="preview" mode="widthFix" class="paper-preview-image" /><view v-else class="small subtle">正在生成答题卡…</view></view>
-      <view class="paper-code-caption">学生码与作业、学生及页码绑定。请勿裁切二维码和四角。</view>
+      <view class="paper-code-caption">顶部三个二维码对应同一学生及页码，可识别任意一个。请保留二维码和定位标记。</view>
       <view class="card paper-actions">
         <button class="primary full-width" :disabled="busy || working || !selected" @click="print(false)">打印 / 下载此生 PDF</button>
         <button v-if="teacher" class="text-button full-width spaced-small" :disabled="busy || working" @click="print(true)">打印全班 · {{ cards.length * assignment.paperPacket.pages }} 页</button>

@@ -23,6 +23,7 @@ export const BUILTIN_ASSIGNMENT_TEMPLATES = Object.freeze([
 export function assignmentContent(input = {}) {
   const title = typeof input.title === "string" ? input.title.trim() : "";
   const requirements = typeof input.requirements === "string" ? input.requirements.trim() : "";
+  const illustration = typeof input.illustration === "string" ? input.illustration.trim() : "";
   if (!title) throw new Error("请填写作业标题。");
-  return { title, requirements };
+  return { title, requirements, ...(illustration ? { illustration } : {}) };
 }

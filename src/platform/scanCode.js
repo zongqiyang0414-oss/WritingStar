@@ -1,15 +1,22 @@
 import jsQR from "jsqr";
 import { downsampleScanImage, scanImageRegion } from "./scanPixels.js";
 import { decodePaperCode } from "../services/paperWorkflow.js";
-import { qrMatrix } from "./answerCards.js";
+import { qrMatrix, cardQrRegions, CARD_WIDTH, CARD_HEIGHT } from "./answerCards.js";
 import { projectiveMap } from "./scanGeometry.js";
 
 const decode = image => jsQR(image.data, image.width, image.height, { inversionAttempts: "attemptBoth" });
 
 export function readPaperScanMark(image) {
-  // Approved landscape sheets put the QR below the front identity panel or
-  // in the back's right blank panel. Old portrait sheets remain readable.
+  // Read each new top code separately so that a covered/damaged copy cannot
+  // prevent reading its two peers. Legacy central and portrait codes follow.
   if (image.width > image.height && image.width >= 500) {
+    for (const page of [1, 2]) for (const box of cardQrRegions(page)) {
+      const margin = 5;
+      const region = scanImageRegion(image, Math.floor(image.width * (box.x - margin) / CARD_WIDTH), Math.floor(image.height * (box.y - margin) / CARD_HEIGHT),
+        Math.ceil(image.width * (box.width + margin * 2) / CARD_WIDTH), Math.ceil(image.height * (box.height + margin * 2) / CARD_HEIGHT));
+      const found = decode(region);
+      if (found) return paperMark(found, region);
+    }
     for (const x of [.12, .75]) {
       const region = scanImageRegion(image, Math.floor(image.width * x), Math.floor(image.height * .20),
         Math.ceil(image.width * .16), Math.ceil(image.height * .20));

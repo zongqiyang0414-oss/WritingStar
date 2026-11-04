@@ -98,7 +98,7 @@ export interface TeacherSummary {
 }
 export interface Teacher extends TeacherSummary {
   subject: string;
-  /** Optional contact information; not a verified login or binding credential. */
+  /** Contact phone supplied during application; not itself a login credential. */
   phone?: string;
   organizationIds: string[];
   classIds: string[];
@@ -138,6 +138,7 @@ export interface Assignment {
   /** Empty string means no deadline; historical ISO timestamps remain valid. */
   dueAt: string;
   requirements: string;
+  illustration?: string;
   createdAt: string;
   teacher?: TeacherSummary;
   /** Assignment roster: new classmates only join ongoing work. */
@@ -148,6 +149,7 @@ export interface AssignmentTemplate {
   id: string;
   title: string;
   requirements: string;
+  illustration?: string;
   builtin: boolean;
   ownerTeacherId?: string;
   createdAt?: string;
@@ -198,10 +200,35 @@ export interface AiReviewTask {
   reportedAt?: string | null;
   qualityFlags?: Array<"wrongImage" | "unreadable">;
 }
+/** Mock credentials only; production must use server-side password hashes. */
+export interface LoginCredential {
+  id: string;
+  role: "teacher" | "student";
+  personId: string;
+  username: string;
+  password: string;
+  source: "demo" | "issued" | "legacy";
+}
+export interface TeacherApplication {
+  id: string;
+  name: string;
+  school: string;
+  phone: string;
+  proof?: { name: string; url: string; type: string; size: number };
+  status: "pending" | "approved" | "rejected";
+  submittedAt: string;
+  reviewedAt?: string;
+  reason: string;
+  teacherId?: string;
+  credentialId?: string;
+}
 export interface PrototypeState {
   schemaVersion: 6;
   studentEntryVersion: 1;
   administrationVersion: 1;
+  accountRegistrationVersion?: 1;
+  teacherApplications?: TeacherApplication[];
+  loginCredentials?: LoginCredential[];
   adminAccount: AdministratorAccount;
   administrators: Administrator[];
   administrationEvents: AdministrationEvent[];
