@@ -1,5 +1,13 @@
 # 写字星前端协作约定
 
+## 2026-11-05 · v0.28.0 · 微信上传包体与质量修复
+
+- 基于main3425251，本轮0.28.0／manifest280，下一轮0.29.0；继续自动上传main和原私有Sites。保留手机号首次改密、三栏小码/思维导图/插图和扫描/批阅历史规则。
+- 微信用户报pdf-import4851KB超4096KB；原本只校验源目录体积不足。manifest需JS/WXML/WXSS压缩、requiredComponents，以及PDF/名单/扫描Worker预构建文件Babel排除；普通应用ES6编译保留，verify-weixin-styles检查策略不可删除。
+- PDF canvas移入pdf-import；底版在paper-assets按需加载，原PNG字节保持。仅微信Logo生成800px副本，源品牌/H5保留；主包源目录和SDK编译后均需<1.5MiB，分包项目上限仍2MiB、总20MiB，图片<200KiB。
+- PDF字体/映射以合法.br资源入包、readCompressedFile恢复字节，H5仍原文件；不能恢复未入微信白名单的pfb/bcmap直拷。完整许可证留在引擎导出和资源文件中。
+- 241测试、类型检查/双端构建、PDF像素一致/四页归档/取消回滚及SDK离线编译检查通过。SDK工具隔离安装，不要求真实上传密钥。发布前运行verify-weixin-upload并用其输出复验PDF；不能将SDK离线结果称为Windows IDE/真机通过。详见docs/微信上传包体修复-v028.md与交付状态。
+
 ## 2026-11-04 · v0.27.0 · 手机号账号、首次改密与三栏模板
 
 - 基于main 2a7e66d，本轮0.27.0／manifest270，下一轮0.28.0；继续自动上传main及原私有Sites，保留访问范围和历史。

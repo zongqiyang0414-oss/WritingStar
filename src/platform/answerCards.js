@@ -16,6 +16,13 @@ export function legacyCardQrRegions(page) {
   return [0, 132, 264].map(offset => ({ x: left + offset, y: 54, width: 68, height: 68 }));
 }
 const backgroundLoads = new Map();
+// #ifndef H5
+let nativePaperAssets;
+function ensureNativePaperAssets() {
+  nativePaperAssets ||= new Promise((resolve,reject)=>wx.loadSubpackage({name:'paper-assets',success:resolve,fail:()=>reject(new Error('答题卡模板加载失败，请检查网络后重试。'))})).catch(error=>{nativePaperAssets=undefined;throw error;});
+  return nativePaperAssets;
+}
+// #endif
 export function cardBackgroundPath(page) {
   return `/static/paper/fangyuan-${page === 1 ? 1 : 2}.png`;
 }
@@ -32,8 +39,8 @@ export function loadAnswerCardBackground(page) {
       }
       // #endif
       // #ifndef H5
-      if (typeof Image === "undefined") uni.getImageInfo({ src: path,
-        success: result => resolve(result.path), fail: () => reject(new Error("作业模板加载失败，请重试。")) });
+      if (typeof Image === "undefined") ensureNativePaperAssets().then(()=>uni.getImageInfo({ src: path.replace("/static/paper/", "/paper-assets/paper/"),
+        success: result => resolve(result.path), fail: () => reject(new Error("作业模板加载失败，请重试。")) })).catch(reject);
       // #endif
     }).catch(failure => { backgroundLoads.delete(path); throw failure; });
     backgroundLoads.set(path, loading);

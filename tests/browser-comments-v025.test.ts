@@ -5,7 +5,7 @@ import {reviewIssue,validateReview,emptyReview} from '../src/services/rubric.js'
 import {sampleReview} from '../src/services/seed.js';
 import {scanPageSwipe} from '../src/platform/scanImageViewport.js';
 import {pdfPageSize,validateScanFiles,scanFileKind} from '../src/platform/pdfImport.js';
-import {PdfMatrix,clonePdfMessage,PdfPath} from '../src/platform/pdfCanvas.js';
+import {PdfMatrix,clonePdfMessage,PdfPath} from '../src/pdf-import/pdfCanvas.js';
 test('未完成评价定位遵循服务端同一必填顺序，并指明分类、维度或寄语',()=>{
  const review=emptyReview();assert.deepEqual(reviewIssue(review),{message:'书写「直觉思维」请填写 0–10 的有效分数。',category:'handwriting',field:'score-intuitive',dimensionId:'intuitive'});
  Object.assign(review.handwriting.scores,sampleReview().handwriting.scores);assert.equal(reviewIssue(review)?.field,'summary');

@@ -2,8 +2,8 @@
   "name": "写字星交互原型",
   "appid": "",
   "description": "写字星教师、学生与学校管理前端原型",
-  "versionName": "0.27.0",
-  "versionCode": 270,
+  "versionName": "0.28.0",
+  "versionCode": 280,
   "transformPx": false,
   "h5": {
     "title": "写字星",
@@ -18,10 +18,24 @@
     "workers": "workers",
     "appid": "wxe3fefef9eaab17c3",
     "setting": {
-      "urlCheck": true
+      "urlCheck": true,
+      "es6": true,
+      "minified": true,
+      "minifyWXML": true,
+      "minifyWXSS": true,
+      "babelSetting": {
+        "ignore": [
+          "pdf-import/engine.js",
+          "roster-import/engine.js",
+          "workers/scan.js"
+        ],
+        "disablePlugins": [],
+        "outputPath": ""
+      }
     },
     "usingComponents": true,
-    "__usePrivacyCheck__": true
+    "__usePrivacyCheck__": true,
+    "lazyCodeLoading": "requiredComponents"
   },
   "uniStatistics": {
     "enable": false

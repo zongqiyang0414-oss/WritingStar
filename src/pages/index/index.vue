@@ -251,7 +251,7 @@ function toggleFeedbackDimension(id) {
       </view>
       <view class="intro-foot">
         <text class="tiny-dot" />
-        原型展示 · v0.27.0
+        原型展示 · v0.28.0
       </view>
     </view>
     <!-- #endif -->

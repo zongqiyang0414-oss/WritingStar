@@ -20,10 +20,57 @@
     }
   ],
   "subPackages": [
-    { "root": "roster-import", "name": "roster-import", "pages": [{ "path": "index", "style": { "navigationBarTitleText": "读取学生名单" } }] },
-    { "root": "pdf-import", "name": "pdf-import", "pages": [{ "path": "index", "style": { "navigationBarTitleText": "导入PDF作业" } }] },
-    { "root": "pdf-fonts", "name": "pdf-fonts", "pages": [{ "path": "index" }] },
-    { "root": "pdf-cmaps", "name": "pdf-cmaps", "pages": [{ "path": "index" }] }
+    {
+      "root": "roster-import",
+      "name": "roster-import",
+      "pages": [
+        {
+          "path": "index",
+          "style": {
+            "navigationBarTitleText": "读取学生名单"
+          }
+        }
+      ]
+    },
+    {
+      "root": "pdf-import",
+      "name": "pdf-import",
+      "pages": [
+        {
+          "path": "index",
+          "style": {
+            "navigationBarTitleText": "导入PDF作业"
+          }
+        }
+      ]
+    },
+    {
+      "root": "pdf-fonts",
+      "name": "pdf-fonts",
+      "pages": [
+        {
+          "path": "index"
+        }
+      ]
+    },
+    {
+      "root": "pdf-cmaps",
+      "name": "pdf-cmaps",
+      "pages": [
+        {
+          "path": "index"
+        }
+      ]
+    },
+    {
+      "root": "paper-assets",
+      "name": "paper-assets",
+      "pages": [
+        {
+          "path": "index"
+        }
+      ]
+    }
   ],
   "globalStyle": {
     "backgroundColor": "#f4f8f5",

@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {brotliDecompressSync} from 'node:zlib';
 import path from 'node:path';
 import vm from 'node:vm';
 import {createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
 import {createImagePdf} from '../src/platform/imagePdf.js';
-import {PdfMatrix,PdfPath,pdfCanvasContext,clonePdfMessage,installPdfCanvasGlobals} from '../src/platform/pdfCanvas.js';
+import {PdfMatrix,PdfPath,pdfCanvasContext,clonePdfMessage,installPdfCanvasGlobals} from '../src/pdf-import/pdfCanvas.js';
 import {pdfPageSize} from '../src/platform/pdfImport.js';
 const require=createRequire(import.meta.url),native=require('@napi-rs/canvas');
-const root=path.resolve('dist/build/mp-weixin'),context:any={
+const root=path.resolve(process.env.WRITINGSTAR_WEIXIN_ROOT || 'dist/build/mp-weixin'),context:any={
  console,performance,setTimeout,clearTimeout,setInterval,clearInterval,queueMicrotask,
  DOMMatrix:PdfMatrix,Path2D:PdfPath,ImageData:native.ImageData,structuredClone:value=>clonePdfMessage(value),
  ArrayBuffer,Uint8Array,Uint8ClampedArray,Int8Array,Int16Array,Uint16Array,Int32Array,Uint32Array,Float32Array,Float64Array,
@@ -27,7 +28,7 @@ class CanvasFactory{
  destroy(item){item.canvas.width=item.canvas.height=1;item.canvas=null;item.context=null;}
  getNoAlphaContext(canvas){return pdfCanvasContext(canvas);}
 }
-class BinaryDataFactory{constructor(options){Object.assign(this,options);}async fetch({kind,filename}){return new Uint8Array(fs.readFileSync(path.join(root,this[kind],filename)));}}
+class BinaryDataFactory{constructor(options){Object.assign(this,options);}async fetch({kind,filename}){return new Uint8Array(brotliDecompressSync(fs.readFileSync(path.join(root,this[kind],filename+'.br'))));}}
 class Filters{addFilter(){return 'none';}addHCMFilter(){return 'none';}addAlphaFilter(){return 'none';}addLuminosityFilter(){return 'none';}destroy(){}}
 const options={disableFontFace:true,useSystemFonts:false,isOffscreenCanvasSupported:false,isImageDecoderSupported:false,useWorkerFetch:false,useWasm:false,isEvalSupported:false,stopAtErrors:true,disableWorkerRendering:true,CanvasFactory,BinaryDataFactory,FilterFactory:Filters,cMapUrl:'pdf-cmaps/cmaps/',standardFontDataUrl:'pdf-fonts/fonts/'};
 async function render(data,name){

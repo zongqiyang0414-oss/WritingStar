@@ -1,0 +1,15 @@
+{
+  "sdkVersion": "2.1.31",
+  "offline": true,
+  "sizes": {
+    "main": 1394790,
+    "roster-import": 363124,
+    "pdf-import": 1876704,
+    "pdf-fonts": 484226,
+    "pdf-cmaps": 846185,
+    "paper-assets": 288834
+  },
+  "mainLimit": 1572864,
+  "packageLimit": 2097152,
+  "pdfResourcesRetained": true
+}

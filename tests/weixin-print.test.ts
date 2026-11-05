@@ -44,9 +44,10 @@ function device(failPage = 0) {
     unlink: o => {if (o.filePath.startsWith('/tmp/')) activeRasters--; files.delete(o.filePath); o.success({});},
   };
   globalThis.wx = {env: {USER_DATA_PATH: '/user'}, getFileSystemManager: () => fs,
+    loadSubpackage: o => {assert.equal(o.name,'paper-assets');o.success({});},
     shareFileMessage: o => {shared.push(o); o.success({});}} as any;
   globalThis.uni = {
-    getImageInfo: o => o.success({path: o.src}),
+    getImageInfo: o => {assert.match(o.src,/^\/paper-assets\/paper\/fangyuan-[12]\.png$/);o.success({path:o.src});},
     createCanvasContext: (_id, _scope) => new Proxy({}, {get: (_target, name) => (...args) => {
       if (name === 'fillText' && String(args[0]).startsWith('WS1|')) codes.push(args[0]);
       if (name === 'draw') {rendered++; args[1]();}

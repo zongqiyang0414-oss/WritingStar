@@ -1,7 +1,7 @@
 <script setup>
 import { getCurrentInstance, ref } from 'vue';
 import { onLoad, onReady, onUnload } from '@dcloudio/uni-app';
-import { installPdfCanvasGlobals, pdfCanvasContext } from '../platform/pdfCanvas.js';
+import { installPdfCanvasGlobals, pdfCanvasContext } from './pdfCanvas.js';
 import { pdfPageSize, PDF_DPI, MAX_PDF_BYTES, pdfImportError } from '../platform/pdfImport.js';
 import { createScanProcessor } from '../platform/scanProcessor.js';
 import { decodePaperCode, paperId } from '../services/paperWorkflow.js';
@@ -20,7 +20,9 @@ class NativeCanvasFactory {
 }
 class NativeBinaryFactory {
   constructor(options){Object.assign(this,options);}
-  fetch({kind,filename}){if(!/^[\w.-]+$/.test(filename)||!this[kind])throw new Error('PDF资源路径无效。');return read((this[kind]+filename).replace(/^\//,''));}
+  fetch({kind,filename}){if(!/^[\w.-]+$/.test(filename)||!this[kind])throw new Error('PDF资源路径无效。');const fs=uni.getFileSystemManager();
+    if(!fs.readCompressedFile)throw new Error('当前微信版本不支持PDF字体读取，请更新微信后重试。');
+    return new Promise((resolve,reject)=>fs.readCompressedFile({filePath:(this[kind]+filename+'.br').replace(/^\//,''),compressionAlgorithm:'br',success:result=>resolve(new Uint8Array(result.data)),fail:()=>reject(new Error('PDF字体文件读取失败，请重试。'))}));}
 }
 class NativeFilters {
   addFilter(){return 'none';} addHCMFilter(){return 'none';} addAlphaFilter(){return 'none';} addLuminosityFilter(){return 'none';} addKnockoutFilter(){return 'none';} destroy(){}

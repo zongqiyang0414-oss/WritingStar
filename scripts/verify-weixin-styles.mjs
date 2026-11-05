@@ -3,12 +3,17 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import postcss from "postcss";
+import { assertWeixinBuildPolicy } from "./weixin-build-policy.mjs";
 import selectorParser from "postcss-selector-parser";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const directory = path.resolve(projectRoot, process.argv[2] || "dist/build/mp-weixin");
 const manifest = JSON.parse(await readFile(path.join(projectRoot, "src/manifest.json"), "utf8"));
 const project = JSON.parse(await readFile(path.join(directory, "project.config.json"), "utf8"));
+assertWeixinBuildPolicy(project);
+const app = JSON.parse(await readFile(path.join(directory, "app.json"), "utf8"));
+if (app.lazyCodeLoading !== "requiredComponents") throw new Error("WeChat must inject components on demand.");
+try { await readFile(path.join(directory, "platform/pdfCanvas.js")); throw new Error("PDF canvas adapter leaked into the main package."); } catch (error) { if (error.code !== "ENOENT") throw error; }
 const appid = manifest["mp-weixin"]?.appid;
 if (!/^wx[\da-f]{16}$/.test(appid || "") || project.appid !== appid)
   throw new Error("WeChat AppID is missing or differs from src/manifest.json mp-weixin.appid.");
@@ -55,6 +60,6 @@ await writeFile(path.join(directory, "build-info.json"), JSON.stringify({
   appid,
   platform: "mp-weixin",
   generatedAt: new Date().toISOString(),
-  checks: ["manifest-appid", "wxss-selectors"],
+  checks: ["manifest-appid", "wxss-selectors", "upload-minification", "prebuilt-engine-babel-exclusions"],
 }, null, 2) + "\n");
 console.log(`WeChat AppID and selector check passed (${count} WXSS files). Build origin saved in build-info.json.`);

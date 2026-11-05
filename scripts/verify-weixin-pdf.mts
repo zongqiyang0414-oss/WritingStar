@@ -1,24 +1,28 @@
 // Exercise the actual compiled PDF page with real PDF.js and Canvas2D pixels.
 // Hardware APIs are simulated; no user documents or external requests are used.
 import fs from 'node:fs';
+import {brotliDecompressSync} from 'node:zlib';
 import path from 'node:path';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import * as vue from 'vue';
+import {writePdfScanFixture} from './pdf-verification-fixture.mts';
 import {ReadableStream} from 'web-streams-polyfill';
 import {processScanPixels} from '../src/platform/scanProcessing.js';
 import {decodePaperCode,paperId} from '../src/services/paperWorkflow.js';
-const require=createRequire(import.meta.url),{createCanvas,ImageData}=require('@napi-rs/canvas'),root=path.resolve('dist/build/mp-weixin');
+const require=createRequire(import.meta.url),{createCanvas,ImageData}=require('@napi-rs/canvas'),root=path.resolve(process.env.WRITINGSTAR_WEIXIN_ROOT || 'dist/build/mp-weixin');
+const pdfFixture='/tmp/writingstar-verify-native-pdf.pdf';
+await writePdfScanFixture(pdfFixture);
 async function check({remaining=60,cancelAt='',invalid=false}={}){
  let definition,render,serial=0;const hooks:any={},events:any={},messages:any=[],files=new Map(),removed=[],packages=[];
- const data=invalid?Buffer.from('invalid-pdf'):fs.readFileSync('/tmp/writingstar-v025-upload-fixture.pdf');files.set('/input.pdf',data);
+ const data=invalid?Buffer.from('invalid-pdf'):fs.readFileSync(pdfFixture);files.set('/input.pdf',data);
  const channel={on:(name,callback)=>events[name]=callback,emit:(name,value)=>messages.push({name,value})};
  const unload=()=>hooks.onUnload?.forEach(callback=>callback());
  const uni:any={
   navigateBack:unload,
   createSelectorQuery(){const query={in(){return query;},select(){return query;},fields(){return query;},exec(callback){callback([{node:createCanvas(1,1)}]);}};return query;},
-  getFileSystemManager(){return {readFile(options){try{const buffer=files.get(options.filePath)||fs.readFileSync(path.join(root,options.filePath));options.success({data:buffer.buffer.slice(buffer.byteOffset,buffer.byteOffset+buffer.byteLength)});}catch(error){options.fail(error);}},unlink(options){removed.push(options.filePath);files.delete(options.filePath);options.success?.();}};},
+  getFileSystemManager(){return {readCompressedFile(options){assert.equal(options.compressionAlgorithm,'br');try{const data=brotliDecompressSync(fs.readFileSync(path.join(root,options.filePath)));options.success({data:data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength)});}catch(error){options.fail(error);}},readFile(options){try{const buffer=files.get(options.filePath)||fs.readFileSync(path.join(root,options.filePath));options.success({data:buffer.buffer.slice(buffer.byteOffset,buffer.byteOffset+buffer.byteLength)});}catch(error){options.fail(error);}},unlink(options){removed.push(options.filePath);files.delete(options.filePath);options.success?.();}};},
   canvasToTempFilePath(options){assert.equal(options.fileType,'png');const name=`/temp/pdf-${++serial}.png`;files.set(name,options.canvas.toBuffer('image/png'));if(cancelAt==='export')unload();options.success({tempFilePath:name});},
   saveFile(options){const target=`/saved/pdf-${++serial}.png`;files.set(target,files.get(options.tempFilePath));files.delete(options.tempFilePath);if(cancelAt==='save')unload();options.success({savedFilePath:target});},
  };
@@ -28,6 +32,7 @@ async function check({remaining=60,cancelAt='',invalid=false}={}){
  const sandbox:any={console,setTimeout,clearTimeout,setInterval,clearInterval,queueMicrotask,performance,wx,uni,ImageData,Map,Set,WeakMap,WeakSet,ArrayBuffer,Uint8Array,Uint8ClampedArray,Int8Array,Int16Array,Uint16Array,Int32Array,Uint32Array,Float32Array,Float64Array};
  const context=vm.createContext(sandbox),cache=new Map();
  function load(file){
+  if(!fs.existsSync(file)&&fs.existsSync(file+'.js'))file+='.js';
   if(file===path.join(root,'common/vendor.js'))return vendor;
   if(file===path.join(root,'platform/scanProcessor.js'))return {createScanProcessor:()=>({process:processScanPixels,dispose(){}})};
   if(file===path.join(root,'services/paperWorkflow.js'))return {decodePaperCode,paperId};

@@ -55,7 +55,7 @@ function switchValue(e) {
 <template>
   <view class="prototype-tools">
     <view class="prototype-tools-heading">
-      <text> 原型展示 · v0.27.0 </text>
+      <text> 原型展示 · v0.28.0 </text>
       <button
         class="text-button"
         :aria-expanded="expanded"
